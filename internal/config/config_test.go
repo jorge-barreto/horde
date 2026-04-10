@@ -11,6 +11,7 @@ import (
 )
 
 func TestNormalizeRepoURL(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -29,6 +30,7 @@ func TestNormalizeRepoURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := NormalizeRepoURL(tc.in)
 			if err != nil {
 				t.Fatalf("NormalizeRepoURL(%q) error: %v", tc.in, err)
@@ -41,6 +43,7 @@ func TestNormalizeRepoURL(t *testing.T) {
 }
 
 func TestNormalizeRepoURL_Errors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		in      string
@@ -51,6 +54,7 @@ func TestNormalizeRepoURL_Errors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := NormalizeRepoURL(tc.in)
 			if err == nil {
 				t.Fatalf("NormalizeRepoURL(%q) expected error, got nil", tc.in)
@@ -63,6 +67,7 @@ func TestNormalizeRepoURL_Errors(t *testing.T) {
 }
 
 func TestNormalizeRepoURL_PreservesParseError(t *testing.T) {
+	t.Parallel()
 	// "http://host/%zz" contains a scheme so it enters the url.Parse branch.
 	// %zz is an invalid percent-encoding, causing url.Parse to return *url.Error.
 	_, err := NormalizeRepoURL("http://host/%zz")
@@ -79,6 +84,7 @@ func TestNormalizeRepoURL_PreservesParseError(t *testing.T) {
 }
 
 func TestRepoURL_Success(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command(args[0], args[1:]...)
@@ -90,16 +96,7 @@ func TestRepoURL_Success(t *testing.T) {
 	run("git", "init")
 	run("git", "remote", "add", "origin", "https://github.com/test/repo.git")
 
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-
-	got, err := RepoURL()
+	got, err := RepoURL(dir)
 	if err != nil {
 		t.Fatalf("RepoURL() error: %v", err)
 	}
@@ -110,18 +107,10 @@ func TestRepoURL_Success(t *testing.T) {
 }
 
 func TestRepoURL_NotGitRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-
-	_, err = RepoURL()
+	_, err := RepoURL(dir)
 	if err == nil {
 		t.Fatal("RepoURL() expected error, got nil")
 	}
@@ -131,6 +120,7 @@ func TestRepoURL_NotGitRepo(t *testing.T) {
 }
 
 func TestRepoURL_NoOriginRemote(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init")
 	cmd.Dir = dir
@@ -138,16 +128,7 @@ func TestRepoURL_NoOriginRemote(t *testing.T) {
 		t.Fatalf("git init failed: %v\n%s", err, out)
 	}
 
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-
-	_, err = RepoURL()
+	_, err := RepoURL(dir)
 	if err == nil {
 		t.Fatal("RepoURL() expected error, got nil")
 	}
@@ -157,6 +138,7 @@ func TestRepoURL_NoOriginRemote(t *testing.T) {
 }
 
 func TestRepoURL_PreservesExitError(t *testing.T) {
+	// Cannot use t.Parallel: t.Setenv modifies process-wide state
 	dir := t.TempDir()
 
 	// Create a fake git that outputs a non-standard message to stderr and exits 1.
@@ -170,7 +152,7 @@ func TestRepoURL_PreservesExitError(t *testing.T) {
 
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
-	_, err = RepoURL()
+	_, err = RepoURL(dir)
 	if err == nil {
 		t.Fatal("RepoURL() expected error, got nil")
 	}
@@ -188,6 +170,7 @@ func TestRepoURL_PreservesExitError(t *testing.T) {
 }
 
 func TestLaunchedBy_Configured(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command(args[0], args[1:]...)
@@ -199,22 +182,14 @@ func TestLaunchedBy_Configured(t *testing.T) {
 	run("git", "init")
 	run("git", "config", "user.name", "Test User")
 
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-
-	got := LaunchedBy()
+	got := LaunchedBy(dir)
 	if got != "Test User" {
 		t.Errorf("LaunchedBy() = %q, want %q", got, "Test User")
 	}
 }
 
 func TestLaunchedBy_Unconfigured(t *testing.T) {
+	// Cannot use t.Parallel: t.Setenv modifies process-wide state
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init")
 	cmd.Dir = dir
@@ -222,20 +197,11 @@ func TestLaunchedBy_Unconfigured(t *testing.T) {
 		t.Fatalf("git init failed: %v\n%s", err, out)
 	}
 
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
-
 	// Prevent global/system git config from leaking user.name into the test
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 
-	got := LaunchedBy()
+	got := LaunchedBy(dir)
 	if got != "unknown" {
 		t.Errorf("LaunchedBy() = %q, want %q", got, "unknown")
 	}

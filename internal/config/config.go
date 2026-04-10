@@ -51,10 +51,11 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 	return normalized, nil
 }
 
-// RepoURL runs "git remote get-url origin" in the current working directory
+// RepoURL runs "git remote get-url origin" in the given directory
 // and normalizes the result via NormalizeRepoURL.
-func RepoURL() (string, error) {
+func RepoURL(dir string) (string, error) {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -75,10 +76,11 @@ func RepoURL() (string, error) {
 }
 
 // LaunchedBy returns the current user's identity for run records.
-// For v0.1, this is the local git user name from "git config user.name".
-// Returns "unknown" if git user.name is not configured.
-func LaunchedBy() string {
+// For v0.1, this is the local git user name from "git config user.name"
+// resolved in the given directory. Returns "unknown" if git user.name is not configured.
+func LaunchedBy(dir string) string {
 	cmd := exec.Command("git", "config", "user.name")
+	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"

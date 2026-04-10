@@ -31,6 +31,7 @@ go vet ./...                   # lint
 - Errors are returned, not panicked. Wrap with context: `fmt.Errorf("loading config: %w", err)`.
 - Interfaces defined in their own files (`store.go`, `provider.go`). Implementations in separate files (`sqlite.go`, `docker.go`, `ecs.go`).
 - Tests next to implementation: `foo.go` → `foo_test.go`.
+- Never combine `t.Parallel()` with `t.Setenv`, `t.Chdir`, or `os.Setenv` — `testing.T.Setenv` panics on tests with parallel ancestors. If a test needs env mutation, it cannot be parallel.
 
 ## Architecture
 

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -56,6 +58,22 @@ func TestNormalizeRepoURL_Errors(t *testing.T) {
 				t.Errorf("NormalizeRepoURL(%q) error = %q, want it to contain %q", tc.in, err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestNormalizeRepoURL_PreservesParseError(t *testing.T) {
+	// "http://host/%zz" contains a scheme so it enters the url.Parse branch.
+	// %zz is an invalid percent-encoding, causing url.Parse to return *url.Error.
+	_, err := NormalizeRepoURL("http://host/%zz")
+	if err == nil {
+		t.Fatal("NormalizeRepoURL with invalid URL expected error, got nil")
+	}
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		t.Errorf("expected error chain to contain *url.Error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot normalize remote URL") {
+		t.Errorf("expected error message to contain wrapper context, got: %v", err)
 	}
 }
 

@@ -36,7 +36,7 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 		// URL with scheme: https://, http://, ssh://, git://
 		u, err := url.Parse(rawURL)
 		if err != nil {
-			return "", fmt.Errorf("cannot normalize remote URL: %s", rawURL)
+			return "", fmt.Errorf("cannot normalize remote URL %s: %w", rawURL, err)
 		}
 		// u.Host is "host" or "host:port"; u.Path is "/org/repo.git"
 		normalized = u.Host + u.Path

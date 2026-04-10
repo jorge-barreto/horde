@@ -393,6 +393,7 @@ Lean schema for local testing. Not shared, not the production path.
 | workflow | TEXT | orc workflow name (empty = default) |
 | provider | TEXT | docker |
 | instance_id | TEXT | Container ID |
+| metadata | TEXT | JSON-encoded map[string]string — provider-specific data (NULL if none) |
 | status | TEXT | pending, running, success, failed, killed |
 | exit_code | INTEGER | orc exit code (NULL while running) |
 | launched_by | TEXT | Local git user name (from `git config user.name`) |

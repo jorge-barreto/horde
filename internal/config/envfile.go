@@ -16,7 +16,7 @@ func ValidateEnvFile(dir string) (string, error) {
 	f, err := os.Open(envPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf(".env file not found: %s", envPath)
+			return "", fmt.Errorf(".env file not found: %w", err)
 		}
 		return "", fmt.Errorf("reading .env file: %w", err)
 	}

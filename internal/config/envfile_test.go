@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,5 +64,20 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 				t.Errorf("ValidateEnvFile() error = %q, want it to contain %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateEnvFile_PreservesNotExistError(t *testing.T) {
+	dir := t.TempDir()
+	// dir exists but contains no .env file
+	_, err := ValidateEnvFile(dir)
+	if err == nil {
+		t.Fatal("ValidateEnvFile() expected error, got nil")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected error chain to contain os.ErrNotExist, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), ".env file not found") {
+		t.Errorf("expected error message to contain wrapper context, got: %v", err)
 	}
 }

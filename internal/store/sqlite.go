@@ -1,10 +1,13 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -55,4 +58,128 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
+}
+
+func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
+	var metadataStr *string
+	if run.Metadata != nil {
+		b, err := json.Marshal(run.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshaling run metadata: %w", err)
+		}
+		str := string(b)
+		metadataStr = &str
+	}
+
+	var completedAt *string
+	if run.CompletedAt != nil {
+		completedAtStr := run.CompletedAt.Format(time.RFC3339)
+		completedAt = &completedAtStr
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO runs (
+			id, repo, ticket, branch, workflow, provider,
+			instance_id, metadata, status, exit_code, launched_by,
+			started_at, completed_at, timeout_at, total_cost_usd
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID,
+		run.Repo,
+		run.Ticket,
+		run.Branch,
+		run.Workflow,
+		run.Provider,
+		run.InstanceID,
+		metadataStr,
+		string(run.Status),
+		run.ExitCode,
+		run.LaunchedBy,
+		run.StartedAt.Format(time.RFC3339),
+		completedAt,
+		run.TimeoutAt.Format(time.RFC3339),
+		run.TotalCostUSD,
+	)
+	if err != nil {
+		return fmt.Errorf("inserting run: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, repo, ticket, branch, workflow, provider,
+			instance_id, metadata, status, exit_code, launched_by,
+			started_at, completed_at, timeout_at, total_cost_usd
+		FROM runs WHERE id = ?`, id)
+
+	var run Run
+	var metadataStr sql.NullString
+	var status string
+	var exitCode sql.NullInt64
+	var startedAt string
+	var completedAt sql.NullString
+	var timeoutAt string
+	var totalCostUSD sql.NullFloat64
+
+	err := row.Scan(
+		&run.ID,
+		&run.Repo,
+		&run.Ticket,
+		&run.Branch,
+		&run.Workflow,
+		&run.Provider,
+		&run.InstanceID,
+		&metadataStr,
+		&status,
+		&exitCode,
+		&run.LaunchedBy,
+		&startedAt,
+		&completedAt,
+		&timeoutAt,
+		&totalCostUSD,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("%w: %s", ErrRunNotFound, id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scanning run: %w", err)
+	}
+
+	run.Status = Status(status)
+
+	if exitCode.Valid {
+		v := int(exitCode.Int64)
+		run.ExitCode = &v
+	}
+
+	var parseErr error
+	run.StartedAt, parseErr = time.Parse(time.RFC3339, startedAt)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing started_at: %w", parseErr)
+	}
+
+	if completedAt.Valid {
+		t, parseErr := time.Parse(time.RFC3339, completedAt.String)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing completed_at: %w", parseErr)
+		}
+		run.CompletedAt = &t
+	}
+
+	run.TimeoutAt, parseErr = time.Parse(time.RFC3339, timeoutAt)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing timeout_at: %w", parseErr)
+	}
+
+	if totalCostUSD.Valid {
+		run.TotalCostUSD = &totalCostUSD.Float64
+	}
+
+	if metadataStr.Valid {
+		if err := json.Unmarshal([]byte(metadataStr.String), &run.Metadata); err != nil {
+			return nil, fmt.Errorf("unmarshaling run metadata: %w", err)
+		}
+	}
+
+	return &run, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,6 +114,19 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 			started_at, completed_at, timeout_at, total_cost_usd
 		FROM runs WHERE id = ?`, id)
 
+	run, err := s.scanRun(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrRunNotFound, id)
+		}
+		return nil, err
+	}
+	return run, nil
+}
+
+// scanRun scans a single row from the runs table into a *Run.
+// The row must contain all 15 columns in the standard SELECT order.
+func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	var run Run
 	var metadataStr sql.NullString
 	var status string
@@ -122,7 +136,7 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 	var timeoutAt string
 	var totalCostUSD sql.NullFloat64
 
-	err := row.Scan(
+	if err := scanner.Scan(
 		&run.ID,
 		&run.Repo,
 		&run.Ticket,
@@ -138,11 +152,7 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 		&completedAt,
 		&timeoutAt,
 		&totalCostUSD,
-	)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("%w: %s", ErrRunNotFound, id)
-	}
-	if err != nil {
+	); err != nil {
 		return nil, fmt.Errorf("scanning run: %w", err)
 	}
 
@@ -238,4 +248,63 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 		return fmt.Errorf("%w: %s", ErrRunNotFound, id)
 	}
 	return nil
+}
+
+func (s *SQLiteStore) ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error) {
+	query := `SELECT id, repo, ticket, branch, workflow, provider,
+		instance_id, metadata, status, exit_code, launched_by,
+		started_at, completed_at, timeout_at, total_cost_usd
+		FROM runs WHERE repo = ?`
+	args := []any{repo}
+
+	if activeOnly {
+		query += " AND status IN ('pending', 'running')"
+	}
+	query += " ORDER BY started_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing runs by repo: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]*Run, 0)
+	for rows.Next() {
+		run, err := s.scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("listing runs by repo: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing runs by repo: %w", err)
+	}
+	return runs, nil
+}
+
+func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, repo, ticket, branch, workflow, provider,
+			instance_id, metadata, status, exit_code, launched_by,
+			started_at, completed_at, timeout_at, total_cost_usd
+		FROM runs WHERE repo = ? AND ticket = ? AND status IN ('pending', 'running')
+		ORDER BY started_at DESC`,
+		repo, ticket)
+	if err != nil {
+		return nil, fmt.Errorf("finding active runs by ticket: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]*Run, 0)
+	for rows.Next() {
+		run, err := s.scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("finding active runs by ticket: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding active runs by ticket: %w", err)
+	}
+	return runs, nil
 }

@@ -1,0 +1,39 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# SQLite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# horde local data
+.horde/
+
+# beads (local work tracking)
+.beads/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CDK
+cdk/node_modules/
+cdk/lib/*.js
+cdk/lib/*.d.ts
+cdk/test/*.js
+cdk/test/*.d.ts
+cdk/cdk.out/

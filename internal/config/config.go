@@ -73,3 +73,19 @@ func RepoURL() (string, error) {
 	raw := strings.TrimSpace(string(out))
 	return NormalizeRepoURL(raw)
 }
+
+// LaunchedBy returns the current user's identity for run records.
+// For v0.1, this is the local git user name from "git config user.name".
+// Returns "unknown" if git user.name is not configured.
+func LaunchedBy() string {
+	cmd := exec.Command("git", "config", "user.name")
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" {
+		return "unknown"
+	}
+	return name
+}

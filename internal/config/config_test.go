@@ -136,3 +136,57 @@ func TestRepoURL_NoOriginRemote(t *testing.T) {
 		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "no origin remote")
 	}
 }
+
+func TestLaunchedBy_Configured(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.name", "Test User")
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	got := LaunchedBy()
+	if got != "Test User" {
+		t.Errorf("LaunchedBy() = %q, want %q", got, "Test User")
+	}
+}
+
+func TestLaunchedBy_Unconfigured(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	// Prevent global/system git config from leaking user.name into the test
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
+	got := LaunchedBy()
+	if got != "unknown" {
+		t.Errorf("LaunchedBy() = %q, want %q", got, "unknown")
+	}
+}

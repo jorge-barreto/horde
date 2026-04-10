@@ -85,7 +85,7 @@ func TestNewSQLiteStore_CorrectColumns(t *testing.T) {
 
 	want := []string{
 		"id", "repo", "ticket", "branch", "workflow", "provider",
-		"instance_id", "status", "exit_code", "launched_by",
+		"instance_id", "metadata", "status", "exit_code", "launched_by",
 		"started_at", "completed_at", "timeout_at", "total_cost_usd",
 	}
 

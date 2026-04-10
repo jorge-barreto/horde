@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var ErrRunNotFound = errors.New("run not found")
 
 type Status string
 

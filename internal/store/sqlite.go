@@ -35,6 +35,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		workflow       TEXT NOT NULL DEFAULT '',
 		provider       TEXT NOT NULL,
 		instance_id    TEXT NOT NULL DEFAULT '',
+		metadata       TEXT,
 		status         TEXT NOT NULL,
 		exit_code      INTEGER,
 		launched_by    TEXT NOT NULL,

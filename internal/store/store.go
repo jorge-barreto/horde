@@ -23,6 +23,7 @@ type Run struct {
 	Workflow     string
 	Provider     string
 	InstanceID   string
+	Metadata     map[string]string
 	Status       Status
 	ExitCode     *int
 	LaunchedBy   string

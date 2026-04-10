@@ -360,10 +360,21 @@ The `Store` interface has two implementations — SQLite for local testing, Dyna
 type Store interface {
     CreateRun(ctx context.Context, run *Run) error
     GetRun(ctx context.Context, id string) (*Run, error)
-    UpdateRun(ctx context.Context, id string, fields map[string]any) error
+    UpdateRun(ctx context.Context, id string, update *RunUpdate) error
     ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error)
     FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
     CountActive(ctx context.Context) (int, error) // v0.2 — cluster-wide concurrency check
+}
+```
+
+```go
+type RunUpdate struct {
+    Status       *Status
+    InstanceID   *string
+    Metadata     map[string]string // nil = don't update
+    ExitCode     *int
+    CompletedAt  *time.Time
+    TotalCostUSD *float64
 }
 ```
 

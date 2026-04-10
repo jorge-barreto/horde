@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestRunMetadata_JSONRoundTrip(t *testing.T) {
@@ -78,5 +79,79 @@ func TestRunMetadata_EmptyMapRoundTrip(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("unmarshaled {}: got length %d, want 0", len(got))
+	}
+}
+
+func TestRunUpdate_ZeroValue(t *testing.T) {
+	var u RunUpdate
+	if u.Status != nil {
+		t.Errorf("zero RunUpdate.Status: got %v, want nil", u.Status)
+	}
+	if u.InstanceID != nil {
+		t.Errorf("zero RunUpdate.InstanceID: got %v, want nil", u.InstanceID)
+	}
+	if u.Metadata != nil {
+		t.Errorf("zero RunUpdate.Metadata: got %v, want nil", u.Metadata)
+	}
+	if u.ExitCode != nil {
+		t.Errorf("zero RunUpdate.ExitCode: got %v, want nil", u.ExitCode)
+	}
+	if u.CompletedAt != nil {
+		t.Errorf("zero RunUpdate.CompletedAt: got %v, want nil", u.CompletedAt)
+	}
+	if u.TotalCostUSD != nil {
+		t.Errorf("zero RunUpdate.TotalCostUSD: got %v, want nil", u.TotalCostUSD)
+	}
+}
+
+func TestRunUpdate_PartialUpdate(t *testing.T) {
+	status := StatusRunning
+	instanceID := "container-abc123"
+	u := RunUpdate{
+		Status:     &status,
+		InstanceID: &instanceID,
+	}
+	if u.Status == nil || *u.Status != StatusRunning {
+		t.Errorf("Status: got %v, want %v", u.Status, StatusRunning)
+	}
+	if u.InstanceID == nil || *u.InstanceID != "container-abc123" {
+		t.Errorf("InstanceID: got %v, want %q", u.InstanceID, "container-abc123")
+	}
+	if u.ExitCode != nil {
+		t.Errorf("ExitCode should be nil for partial update, got %v", u.ExitCode)
+	}
+	if u.CompletedAt != nil {
+		t.Errorf("CompletedAt should be nil for partial update, got %v", u.CompletedAt)
+	}
+	if u.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD should be nil for partial update, got %v", u.TotalCostUSD)
+	}
+}
+
+func TestRunUpdate_CompletionUpdate(t *testing.T) {
+	status := StatusSuccess
+	exitCode := 0
+	now := time.Now()
+	cost := 0.42
+	u := RunUpdate{
+		Status:       &status,
+		ExitCode:     &exitCode,
+		CompletedAt:  &now,
+		TotalCostUSD: &cost,
+	}
+	if *u.Status != StatusSuccess {
+		t.Errorf("Status: got %v, want %v", *u.Status, StatusSuccess)
+	}
+	if *u.ExitCode != 0 {
+		t.Errorf("ExitCode: got %d, want 0", *u.ExitCode)
+	}
+	if !u.CompletedAt.Equal(now) {
+		t.Errorf("CompletedAt: got %v, want %v", *u.CompletedAt, now)
+	}
+	if *u.TotalCostUSD != 0.42 {
+		t.Errorf("TotalCostUSD: got %f, want 0.42", *u.TotalCostUSD)
+	}
+	if u.InstanceID != nil {
+		t.Errorf("InstanceID should be nil for completion update, got %v", u.InstanceID)
 	}
 }

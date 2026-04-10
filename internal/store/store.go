@@ -33,10 +33,21 @@ type Run struct {
 	TotalCostUSD *float64
 }
 
+// RunUpdate holds fields to update on an existing run.
+// Pointer fields: nil means "don't update", non-nil means "set to this value".
+type RunUpdate struct {
+	Status       *Status
+	InstanceID   *string
+	Metadata     map[string]string // nil = don't update; non-nil (even empty) = overwrite
+	ExitCode     *int
+	CompletedAt  *time.Time
+	TotalCostUSD *float64
+}
+
 type Store interface {
 	CreateRun(ctx context.Context, run *Run) error
 	GetRun(ctx context.Context, id string) (*Run, error)
-	UpdateRun(ctx context.Context, id string, fields map[string]any) error
+	UpdateRun(ctx context.Context, id string, update *RunUpdate) error
 	ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error)
 	FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
 	CountActive(ctx context.Context) (int, error)

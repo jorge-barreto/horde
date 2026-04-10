@@ -66,7 +66,7 @@ func RepoURL() (string, error) {
 			if strings.Contains(stderr, "No such remote") {
 				return "", fmt.Errorf("no origin remote configured")
 			}
-			return "", fmt.Errorf("resolving git remote: %s", stderr)
+			return "", fmt.Errorf("resolving git remote: %s: %w", stderr, exitErr)
 		}
 		return "", fmt.Errorf("running git: %w", err)
 	}

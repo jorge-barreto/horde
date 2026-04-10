@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -152,6 +153,37 @@ func TestRepoURL_NoOriginRemote(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no origin remote") {
 		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "no origin remote")
+	}
+}
+
+func TestRepoURL_PreservesExitError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a fake git that outputs a non-standard message to stderr and exits 1.
+	// This exercises the fallthrough path at config.go:69 (not "not a git repository"
+	// or "No such remote"), confirming *exec.ExitError is preserved in the chain.
+	fakeGit := filepath.Join(dir, "git")
+	err := os.WriteFile(fakeGit, []byte("#!/bin/sh\necho 'something unexpected' >&2\nexit 1\n"), 0o755)
+	if err != nil {
+		t.Fatalf("writing fake git: %v", err)
+	}
+
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err = RepoURL()
+	if err == nil {
+		t.Fatal("RepoURL() expected error, got nil")
+	}
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Errorf("expected error chain to contain *exec.ExitError, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "resolving git remote") {
+		t.Errorf("expected error message to contain wrapper context, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "something unexpected") {
+		t.Errorf("expected error message to contain stderr text, got: %v", err)
 	}
 }
 

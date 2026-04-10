@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"strings"
 )
 
@@ -47,4 +49,27 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 	}
 
 	return normalized, nil
+}
+
+// RepoURL runs "git remote get-url origin" in the current working directory
+// and normalizes the result via NormalizeRepoURL.
+func RepoURL() (string, error) {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if strings.Contains(stderr, "not a git repository") {
+				return "", fmt.Errorf("not a git repository")
+			}
+			if strings.Contains(stderr, "No such remote") {
+				return "", fmt.Errorf("no origin remote configured")
+			}
+			return "", fmt.Errorf("resolving git remote: %s", stderr)
+		}
+		return "", fmt.Errorf("running git: %w", err)
+	}
+	raw := strings.TrimSpace(string(out))
+	return NormalizeRepoURL(raw)
 }

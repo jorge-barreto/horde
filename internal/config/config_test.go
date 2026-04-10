@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -54,5 +56,83 @@ func TestNormalizeRepoURL_Errors(t *testing.T) {
 				t.Errorf("NormalizeRepoURL(%q) error = %q, want it to contain %q", tc.in, err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestRepoURL_Success(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "remote", "add", "origin", "https://github.com/test/repo.git")
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	got, err := RepoURL()
+	if err != nil {
+		t.Fatalf("RepoURL() error: %v", err)
+	}
+	want := "github.com/test/repo.git"
+	if got != want {
+		t.Errorf("RepoURL() = %q, want %q", got, want)
+	}
+}
+
+func TestRepoURL_NotGitRepo(t *testing.T) {
+	dir := t.TempDir()
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	_, err = RepoURL()
+	if err == nil {
+		t.Fatal("RepoURL() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "not a git repository")
+	}
+}
+
+func TestRepoURL_NoOriginRemote(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	_, err = RepoURL()
+	if err == nil {
+		t.Fatal("RepoURL() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no origin remote") {
+		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "no origin remote")
 	}
 }

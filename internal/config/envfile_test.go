@@ -43,10 +43,10 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 		content string
 		wantErr string
 	}{
-		{"missing file", false, "", ".env file not found"},
-		{"missing ANTHROPIC_API_KEY", true, "GIT_TOKEN=ghp_xxx\n", "missing required key: ANTHROPIC_API_KEY"},
-		{"missing GIT_TOKEN", true, "ANTHROPIC_API_KEY=sk-ant-xxx\n", "missing required key: GIT_TOKEN"},
-		{"empty file", true, "", "missing required key: ANTHROPIC_API_KEY"},
+		{"missing file", false, "", "opening .env file"},
+		{"missing ANTHROPIC_API_KEY", true, "GIT_TOKEN=ghp_xxx\n", "validating .env file: missing required key ANTHROPIC_API_KEY"},
+		{"missing GIT_TOKEN", true, "ANTHROPIC_API_KEY=sk-ant-xxx\n", "validating .env file: missing required key GIT_TOKEN"},
+		{"empty file", true, "", "validating .env file: missing required key ANTHROPIC_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestValidateEnvFile_PreservesNotExistError(t *testing.T) {
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("expected error chain to contain os.ErrNotExist, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), ".env file not found") {
+	if !strings.Contains(err.Error(), "opening .env file") {
 		t.Errorf("expected error message to contain wrapper context, got: %v", err)
 	}
 }

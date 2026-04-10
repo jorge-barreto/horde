@@ -16,7 +16,7 @@ func ValidateEnvFile(dir string) (string, error) {
 	f, err := os.Open(envPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf(".env file not found: %w", err)
+			return "", fmt.Errorf("opening .env file: %w", err)
 		}
 		return "", fmt.Errorf("reading .env file: %w", err)
 	}
@@ -42,7 +42,7 @@ func ValidateEnvFile(dir string) (string, error) {
 	required := []string{"ANTHROPIC_API_KEY", "GIT_TOKEN"}
 	for _, key := range required {
 		if !keys[key] {
-			return "", fmt.Errorf(".env file missing required key: %s", key)
+			return "", fmt.Errorf("validating .env file: missing required key %s", key)
 		}
 	}
 

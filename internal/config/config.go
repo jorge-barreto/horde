@@ -13,7 +13,7 @@ import (
 func NormalizeRepoURL(rawURL string) (string, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
-		return "", fmt.Errorf("empty remote URL")
+		return "", fmt.Errorf("normalizing remote URL: input is empty")
 	}
 
 	var normalized string
@@ -23,7 +23,7 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 		// e.g. git@github.com:org/repo.git
 		colon := strings.Index(rawURL, ":")
 		if colon < 0 {
-			return "", fmt.Errorf("cannot normalize remote URL: %s", rawURL)
+			return "", fmt.Errorf("normalizing remote URL %q: unrecognized format", rawURL)
 		}
 		host := rawURL[:colon]
 		path := rawURL[colon+1:]
@@ -36,7 +36,7 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 		// URL with scheme: https://, http://, ssh://, git://
 		u, err := url.Parse(rawURL)
 		if err != nil {
-			return "", fmt.Errorf("cannot normalize remote URL %s: %w", rawURL, err)
+			return "", fmt.Errorf("normalizing remote URL %q: %w", rawURL, err)
 		}
 		// u.Host is "host" or "host:port"; u.Path is "/org/repo.git"
 		normalized = u.Host + u.Path
@@ -45,7 +45,7 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 	}
 
 	if normalized == "" || !strings.Contains(normalized, "/") {
-		return "", fmt.Errorf("cannot normalize remote URL: %s", rawURL)
+		return "", fmt.Errorf("normalizing remote URL %q: unrecognized format", rawURL)
 	}
 
 	return normalized, nil
@@ -62,10 +62,10 @@ func RepoURL(dir string) (string, error) {
 		if errors.As(err, &exitErr) {
 			stderr := strings.TrimSpace(string(exitErr.Stderr))
 			if strings.Contains(stderr, "not a git repository") {
-				return "", fmt.Errorf("not a git repository")
+				return "", fmt.Errorf("resolving git remote: not a git repository")
 			}
 			if strings.Contains(stderr, "No such remote") {
-				return "", fmt.Errorf("no origin remote configured")
+				return "", fmt.Errorf("resolving git remote: no origin remote configured")
 			}
 			return "", fmt.Errorf("resolving git remote: %s: %w", stderr, exitErr)
 		}

@@ -49,8 +49,8 @@ func TestNormalizeRepoURL_Errors(t *testing.T) {
 		in      string
 		wantErr string
 	}{
-		{"empty string", "", "empty remote URL"},
-		{"whitespace only", "  ", "empty remote URL"},
+		{"empty string", "", "normalizing remote URL: input is empty"},
+		{"whitespace only", "  ", "normalizing remote URL: input is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestNormalizeRepoURL_PreservesParseError(t *testing.T) {
 	if !errors.As(err, &ue) {
 		t.Errorf("expected error chain to contain *url.Error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cannot normalize remote URL") {
+	if !strings.Contains(err.Error(), "normalizing remote URL") {
 		t.Errorf("expected error message to contain wrapper context, got: %v", err)
 	}
 }
@@ -114,8 +114,8 @@ func TestRepoURL_NotGitRepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("RepoURL() expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "not a git repository") {
-		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "not a git repository")
+	if !strings.Contains(err.Error(), "resolving git remote: not a git repository") {
+		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "resolving git remote: not a git repository")
 	}
 }
 
@@ -132,8 +132,8 @@ func TestRepoURL_NoOriginRemote(t *testing.T) {
 	if err == nil {
 		t.Fatal("RepoURL() expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "no origin remote") {
-		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "no origin remote")
+	if !strings.Contains(err.Error(), "resolving git remote: no origin remote") {
+		t.Errorf("RepoURL() error = %q, want it to contain %q", err.Error(), "resolving git remote: no origin remote")
 	}
 }
 
@@ -142,7 +142,7 @@ func TestRepoURL_PreservesExitError(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a fake git that outputs a non-standard message to stderr and exits 1.
-	// This exercises the fallthrough path at config.go:69 (not "not a git repository"
+	// This exercises the fallthrough path at config.go:70 (not "not a git repository"
 	// or "No such remote"), confirming *exec.ExitError is preserved in the chain.
 	fakeGit := filepath.Join(dir, "git")
 	err := os.WriteFile(fakeGit, []byte("#!/bin/sh\necho 'something unexpected' >&2\nexit 1\n"), 0o755)

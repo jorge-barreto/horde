@@ -597,3 +597,236 @@ func TestSQLiteStore_UpdateRun_NoFieldsSet(t *testing.T) {
 		t.Errorf("Status: got %q, want %q (should be unchanged)", got.Status, run.Status)
 	}
 }
+
+func TestSQLiteStore_ListByRepo_FiltersAndOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().Truncate(time.Second)
+
+	// run-1: target repo, earliest started_at
+	run1 := newTestRun()
+	run1.ID = "run-1"
+	run1.StartedAt = now.Add(-2 * time.Minute)
+	run1.TimeoutAt = now.Add(60 * time.Minute)
+
+	// run-2: target repo, latest started_at
+	run2 := newTestRun()
+	run2.ID = "run-2"
+	run2.StartedAt = now
+	run2.TimeoutAt = now.Add(60 * time.Minute)
+
+	// run-3: different repo
+	run3 := newTestRun()
+	run3.ID = "run-3"
+	run3.Repo = "github.com/other/project.git"
+	run3.StartedAt = now.Add(-1 * time.Minute)
+	run3.TimeoutAt = now.Add(60 * time.Minute)
+
+	for _, r := range []*Run{run1, run2, run3} {
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun(%s): %v", r.ID, err)
+		}
+	}
+
+	results, err := s.ListByRepo(ctx, "github.com/org/repo.git", false)
+	if err != nil {
+		t.Fatalf("ListByRepo: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+	// Descending order: run-2 (latest) first
+	if results[0].ID != "run-2" {
+		t.Errorf("results[0].ID = %q, want %q", results[0].ID, "run-2")
+	}
+	if results[1].ID != "run-1" {
+		t.Errorf("results[1].ID = %q, want %q", results[1].ID, "run-1")
+	}
+	// Other repo not included
+	for _, r := range results {
+		if r.Repo != "github.com/org/repo.git" {
+			t.Errorf("unexpected repo %q in results", r.Repo)
+		}
+	}
+}
+
+func TestSQLiteStore_ListByRepo_ActiveOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	repo := "github.com/org/repo.git"
+
+	run1 := newTestRun()
+	run1.ID = "run-pending"
+	run1.Status = StatusPending
+
+	run2 := newTestRun()
+	run2.ID = "run-running"
+	run2.Status = StatusRunning
+
+	run3 := newTestRun()
+	run3.ID = "run-success"
+	run3.Status = StatusSuccess
+
+	for _, r := range []*Run{run1, run2, run3} {
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun(%s): %v", r.ID, err)
+		}
+	}
+
+	active, err := s.ListByRepo(ctx, repo, true)
+	if err != nil {
+		t.Fatalf("ListByRepo(activeOnly=true): %v", err)
+	}
+	if len(active) != 2 {
+		t.Errorf("activeOnly=true: got %d results, want 2", len(active))
+	}
+	for _, r := range active {
+		if r.Status != StatusPending && r.Status != StatusRunning {
+			t.Errorf("activeOnly=true returned run with status %q", r.Status)
+		}
+	}
+
+	all, err := s.ListByRepo(ctx, repo, false)
+	if err != nil {
+		t.Fatalf("ListByRepo(activeOnly=false): %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("activeOnly=false: got %d results, want 3", len(all))
+	}
+}
+
+func TestSQLiteStore_ListByRepo_EmptyResult(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	results, err := s.ListByRepo(ctx, "github.com/org/repo.git", false)
+	if err != nil {
+		t.Fatalf("ListByRepo: %v", err)
+	}
+	if results == nil {
+		t.Error("ListByRepo returned nil, want non-nil empty slice")
+	}
+	if len(results) != 0 {
+		t.Errorf("len(results) = %d, want 0", len(results))
+	}
+}
+
+func TestSQLiteStore_FindActiveByTicket_Match(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	repo := "github.com/org/repo.git"
+	ticket := "PROJ-42"
+
+	// active with matching repo+ticket — the one we expect returned
+	run1 := newTestRun()
+	run1.ID = "run-active-match"
+	run1.Status = StatusPending
+
+	// completed with same repo+ticket — should NOT be returned
+	run2 := newTestRun()
+	run2.ID = "run-completed-match"
+	run2.Status = StatusSuccess
+
+	// active with same repo but different ticket — should NOT be returned
+	run3 := newTestRun()
+	run3.ID = "run-active-other-ticket"
+	run3.Ticket = "PROJ-99"
+	run3.Status = StatusRunning
+
+	for _, r := range []*Run{run1, run2, run3} {
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun(%s): %v", r.ID, err)
+		}
+	}
+
+	results, err := s.FindActiveByTicket(ctx, repo, ticket)
+	if err != nil {
+		t.Fatalf("FindActiveByTicket: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if results[0].ID != "run-active-match" {
+		t.Errorf("results[0].ID = %q, want %q", results[0].ID, "run-active-match")
+	}
+}
+
+func TestSQLiteStore_FindActiveByTicket_NoMatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	run.Status = StatusSuccess
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	results, err := s.FindActiveByTicket(ctx, run.Repo, run.Ticket)
+	if err != nil {
+		t.Fatalf("FindActiveByTicket: %v", err)
+	}
+	if results == nil {
+		t.Error("FindActiveByTicket returned nil, want non-nil empty slice")
+	}
+	if len(results) != 0 {
+		t.Errorf("len(results) = %d, want 0", len(results))
+	}
+}
+
+func TestSQLiteStore_FindActiveByTicket_RepoMismatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	// active run for a different repo, but same ticket "PROJ-42"
+	run := newTestRun()
+	run.Repo = "github.com/other/project.git"
+	run.Status = StatusRunning
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	results, err := s.FindActiveByTicket(ctx, "github.com/org/repo.git", "PROJ-42")
+	if err != nil {
+		t.Fatalf("FindActiveByTicket: %v", err)
+	}
+	if results == nil {
+		t.Error("FindActiveByTicket returned nil, want non-nil empty slice")
+	}
+	if len(results) != 0 {
+		t.Errorf("len(results) = %d, want 0 (repo must match)", len(results))
+	}
+}

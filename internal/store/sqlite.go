@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -182,4 +183,59 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 	}
 
 	return &run, nil
+}
+
+func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdate) error {
+	var setClauses []string
+	var args []any
+
+	if update.Status != nil {
+		setClauses = append(setClauses, "status = ?")
+		args = append(args, string(*update.Status))
+	}
+	if update.InstanceID != nil {
+		setClauses = append(setClauses, "instance_id = ?")
+		args = append(args, *update.InstanceID)
+	}
+	if update.Metadata != nil {
+		b, err := json.Marshal(update.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshaling run metadata: %w", err)
+		}
+		setClauses = append(setClauses, "metadata = ?")
+		args = append(args, string(b))
+	}
+	if update.ExitCode != nil {
+		setClauses = append(setClauses, "exit_code = ?")
+		args = append(args, *update.ExitCode)
+	}
+	if update.CompletedAt != nil {
+		setClauses = append(setClauses, "completed_at = ?")
+		args = append(args, update.CompletedAt.Format(time.RFC3339))
+	}
+	if update.TotalCostUSD != nil {
+		setClauses = append(setClauses, "total_cost_usd = ?")
+		args = append(args, *update.TotalCostUSD)
+	}
+
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	query := "UPDATE runs SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	args = append(args, id)
+
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("updating run: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("updating run: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("%w: %s", ErrRunNotFound, id)
+	}
+	return nil
 }

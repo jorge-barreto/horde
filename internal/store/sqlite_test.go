@@ -331,3 +331,269 @@ func TestSQLiteStore_CreateRun_DuplicateID(t *testing.T) {
 		t.Errorf("error %q does not contain %q", err.Error(), "inserting run")
 	}
 }
+
+func ptr[T any](v T) *T { return &v }
+
+func TestSQLiteStore_UpdateRun_SingleField(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{Status: ptr(StatusRunning)}); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+
+	if got.Status != StatusRunning {
+		t.Errorf("Status: got %q, want %q", got.Status, StatusRunning)
+	}
+	if got.InstanceID != run.InstanceID {
+		t.Errorf("InstanceID: got %q, want %q", got.InstanceID, run.InstanceID)
+	}
+	if got.ExitCode != nil {
+		t.Errorf("ExitCode: got %v, want nil", got.ExitCode)
+	}
+	if got.CompletedAt != nil {
+		t.Errorf("CompletedAt: got %v, want nil", got.CompletedAt)
+	}
+	if got.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD: got %v, want nil", got.TotalCostUSD)
+	}
+	if got.Metadata != nil {
+		t.Errorf("Metadata: got %v, want nil", got.Metadata)
+	}
+}
+
+func TestSQLiteStore_UpdateRun_MultipleFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	completedAt := run.StartedAt.Add(10 * time.Minute).Truncate(time.Second)
+	update := &RunUpdate{
+		Status:       ptr(StatusSuccess),
+		InstanceID:   ptr("new-container-id"),
+		ExitCode:     ptr(0),
+		CompletedAt:  &completedAt,
+		TotalCostUSD: ptr(2.50),
+		Metadata:     map[string]string{"key": "value"},
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, update); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+
+	if got.Status != StatusSuccess {
+		t.Errorf("Status: got %q, want %q", got.Status, StatusSuccess)
+	}
+	if got.InstanceID != "new-container-id" {
+		t.Errorf("InstanceID: got %q, want %q", got.InstanceID, "new-container-id")
+	}
+	if got.ExitCode == nil || *got.ExitCode != 0 {
+		t.Errorf("ExitCode: got %v, want 0", got.ExitCode)
+	}
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(completedAt) {
+		t.Errorf("CompletedAt: got %v, want %v", got.CompletedAt, completedAt)
+	}
+	if got.TotalCostUSD == nil || *got.TotalCostUSD != 2.50 {
+		t.Errorf("TotalCostUSD: got %v, want 2.50", got.TotalCostUSD)
+	}
+	if len(got.Metadata) != 1 || got.Metadata["key"] != "value" {
+		t.Errorf("Metadata: got %v, want map[key:value]", got.Metadata)
+	}
+}
+
+func TestSQLiteStore_UpdateRun_NotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	err = s.UpdateRun(ctx, "nonexistent-id", &RunUpdate{Status: ptr(StatusRunning)})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("errors.Is(err, ErrRunNotFound) = false, err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent-id") {
+		t.Errorf("error %q does not contain %q", err.Error(), "nonexistent-id")
+	}
+}
+
+func TestSQLiteStore_UpdateRun_FieldIsolation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	run.InstanceID = "original-container"
+	run.Metadata = map[string]string{"orig": "data"}
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{Status: ptr(StatusRunning)}); err != nil {
+		t.Fatalf("UpdateRun (status only): %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Status != StatusRunning {
+		t.Errorf("Status: got %q, want %q", got.Status, StatusRunning)
+	}
+	if got.InstanceID != "original-container" {
+		t.Errorf("InstanceID: got %q, want %q", got.InstanceID, "original-container")
+	}
+	if len(got.Metadata) != 1 || got.Metadata["orig"] != "data" {
+		t.Errorf("Metadata: got %v, want map[orig:data]", got.Metadata)
+	}
+	if got.ExitCode != nil {
+		t.Errorf("ExitCode: got %v, want nil", got.ExitCode)
+	}
+	if got.CompletedAt != nil {
+		t.Errorf("CompletedAt: got %v, want nil", got.CompletedAt)
+	}
+	if got.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD: got %v, want nil", got.TotalCostUSD)
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{ExitCode: ptr(1), TotalCostUSD: ptr(0.75)}); err != nil {
+		t.Fatalf("UpdateRun (exit+cost): %v", err)
+	}
+
+	got, err = s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Status != StatusRunning {
+		t.Errorf("Status: got %q, want %q (should not revert)", got.Status, StatusRunning)
+	}
+	if got.InstanceID != "original-container" {
+		t.Errorf("InstanceID: got %q, want %q", got.InstanceID, "original-container")
+	}
+	if len(got.Metadata) != 1 || got.Metadata["orig"] != "data" {
+		t.Errorf("Metadata: got %v, want map[orig:data]", got.Metadata)
+	}
+	if got.ExitCode == nil || *got.ExitCode != 1 {
+		t.Errorf("ExitCode: got %v, want 1", got.ExitCode)
+	}
+	if got.TotalCostUSD == nil || *got.TotalCostUSD != 0.75 {
+		t.Errorf("TotalCostUSD: got %v, want 0.75", got.TotalCostUSD)
+	}
+	if got.CompletedAt != nil {
+		t.Errorf("CompletedAt: got %v, want nil", got.CompletedAt)
+	}
+}
+
+func TestSQLiteStore_UpdateRun_MetadataUpdate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	run.Metadata = map[string]string{"a": "1"}
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{Metadata: map[string]string{"b": "2"}}); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if len(got.Metadata) != 1 || got.Metadata["b"] != "2" {
+		t.Errorf("Metadata after overwrite: got %v, want map[b:2]", got.Metadata)
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{Metadata: map[string]string{}}); err != nil {
+		t.Fatalf("UpdateRun (empty): %v", err)
+	}
+
+	got, err = s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Metadata == nil {
+		t.Error("Metadata: got nil, want non-nil empty map")
+	}
+	if len(got.Metadata) != 0 {
+		t.Errorf("Metadata length: got %d, want 0", len(got.Metadata))
+	}
+}
+
+func TestSQLiteStore_UpdateRun_NoFieldsSet(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{}); err != nil {
+		t.Fatalf("UpdateRun (no fields): %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Status != run.Status {
+		t.Errorf("Status: got %q, want %q (should be unchanged)", got.Status, run.Status)
+	}
+}

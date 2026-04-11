@@ -293,6 +293,9 @@ fi
 	if !strings.Contains(err.Error(), "inspecting container") {
 		t.Errorf("expected 'inspecting container' in error, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("expected stderr content 'connection refused' in error, got: %v", err)
+	}
 }
 
 func TestDockerProvider_Status_DockerNotFound(t *testing.T) {
@@ -382,6 +385,9 @@ fi
 	if !strings.Contains(err.Error(), "copying from container") {
 		t.Errorf("expected 'copying from container' in error, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "no such directory") {
+		t.Errorf("expected stderr content 'no such directory' in error, got: %v", err)
+	}
 }
 
 func TestDockerProvider_RemoveContainer_Success(t *testing.T) {
@@ -447,5 +453,8 @@ fi
 	}
 	if !strings.Contains(err.Error(), "removing container") {
 		t.Errorf("expected 'removing container' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "No such container") {
+		t.Errorf("expected stderr content 'No such container' in error, got: %v", err)
 	}
 }

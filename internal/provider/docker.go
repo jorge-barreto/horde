@@ -99,7 +99,7 @@ func (p *DockerProvider) CopyFromContainer(ctx context.Context, containerID, con
 		return fmt.Errorf("creating destination directory: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, "docker", "cp", containerID+":"+containerPath, hostPath)
-	if err := cmd.Run(); err != nil {
+	if _, err := cmd.Output(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return fmt.Errorf("copying from container: %s", strings.TrimSpace(string(exitErr.Stderr)))
@@ -111,7 +111,7 @@ func (p *DockerProvider) CopyFromContainer(ctx context.Context, containerID, con
 
 func (p *DockerProvider) RemoveContainer(ctx context.Context, containerID string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rm", containerID)
-	if err := cmd.Run(); err != nil {
+	if _, err := cmd.Output(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return fmt.Errorf("removing container: %s", strings.TrimSpace(string(exitErr.Stderr)))

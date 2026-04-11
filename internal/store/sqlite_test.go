@@ -121,6 +121,34 @@ func TestNewSQLiteStore_InvalidPath(t *testing.T) {
 	}
 }
 
+func TestNewSQLiteStore_PragmasSet(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "horde.db")
+
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore error: %v", err)
+	}
+	defer s.Close()
+
+	var journalMode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("querying journal_mode: %v", err)
+	}
+	if journalMode != "wal" {
+		t.Errorf("journal_mode: got %q, want %q", journalMode, "wal")
+	}
+
+	var busyTimeout int
+	if err := s.db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatalf("querying busy_timeout: %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Errorf("busy_timeout: got %d, want %d", busyTimeout, 5000)
+	}
+}
+
 func newTestRun() *Run {
 	now := time.Now().Truncate(time.Second) // RFC3339 has second precision
 	timeout := now.Add(60 * time.Minute)

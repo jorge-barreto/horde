@@ -692,3 +692,257 @@ fi
 		}
 	}
 }
+
+func TestDockerProvider_Kill_Success(t *testing.T) {
+	resultsDir := filepath.Join(t.TempDir(), "results")
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  exit 0
+elif [ "$1" = "cp" ]; then
+  exit 0
+elif [ "$1" = "rm" ]; then
+  exit 0
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDockerProvider_Kill_ContainerNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo "Error: No such container: abc123" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "killing container") {
+		t.Errorf("expected 'killing container' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "container not found") {
+		t.Errorf("expected 'container not found' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Kill_ContainerNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T11:30:00Z"}'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "killing container") {
+		t.Errorf("expected 'killing container' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "container is not running") {
+		t.Errorf("expected 'container is not running' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Kill_StopError(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  echo "Error response from daemon: cannot stop container" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "stopping container") {
+		t.Errorf("expected 'stopping container' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot stop container") {
+		t.Errorf("expected stderr content in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Kill_CopyFailure_OK(t *testing.T) {
+	resultsDir := filepath.Join(t.TempDir(), "results")
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  exit 0
+elif [ "$1" = "cp" ]; then
+  echo "no such directory" >&2
+  exit 1
+elif [ "$1" = "rm" ]; then
+  exit 0
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("expected no error when copy fails (best-effort), got: %v", err)
+	}
+}
+
+func TestDockerProvider_Kill_RemoveError(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  exit 0
+elif [ "$1" = "cp" ]; then
+  exit 0
+elif [ "$1" = "rm" ]; then
+  echo "Error: removal in progress" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "killing container") {
+		t.Errorf("expected 'killing container' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "removing container") {
+		t.Errorf("expected 'removing container' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Kill_VerifyStopArgs(t *testing.T) {
+	stopArgsFile := filepath.Join(t.TempDir(), "stop-args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  printf '%%s\n' "$@" > %s
+  exit 0
+elif [ "$1" = "cp" ]; then
+  exit 0
+elif [ "$1" = "rm" ]; then
+  exit 0
+fi
+`, stopArgsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "container-xyz", ResultsDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(stopArgsFile)
+	if err != nil {
+		t.Fatalf("reading stop args file: %v", err)
+	}
+	args := strings.TrimSpace(string(raw))
+	for _, want := range []string{"stop", "container-xyz"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("expected %q in stop args, got: %s", want, args)
+		}
+	}
+}
+
+func TestDockerProvider_Kill_CopyPaths(t *testing.T) {
+	cpArgsFile := filepath.Join(t.TempDir(), "cp-args.txt")
+	resultsDir := filepath.Join(t.TempDir(), "results")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  exit 0
+elif [ "$1" = "cp" ]; then
+  printf '%%s\n' "$@" >> %s
+  exit 0
+elif [ "$1" = "rm" ]; then
+  exit 0
+fi
+`, cpArgsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "cid", ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(cpArgsFile)
+	if err != nil {
+		t.Fatalf("reading cp args file: %v", err)
+	}
+	args := string(raw)
+
+	wantAuditSrc := "cid:/workspace/.orc/audit/."
+	wantArtifactsSrc := "cid:/workspace/.orc/artifacts/."
+	wantAuditDest := filepath.Join(resultsDir, "audit")
+	wantArtifactsDest := filepath.Join(resultsDir, "artifacts")
+
+	for _, want := range []string{wantAuditSrc, wantArtifactsSrc, wantAuditDest, wantArtifactsDest} {
+		if !strings.Contains(args, want) {
+			t.Errorf("expected %q in cp args, got: %s", want, args)
+		}
+	}
+}
+
+func TestDockerProvider_Kill_EmptyResultsDir(t *testing.T) {
+	cpArgsFile := filepath.Join(t.TempDir(), "cp-args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+elif [ "$1" = "stop" ]; then
+  exit 0
+elif [ "$1" = "cp" ]; then
+  printf '%%s\n' "$@" >> %s
+  exit 0
+elif [ "$1" = "rm" ]; then
+  exit 0
+fi
+`, cpArgsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: ""})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(cpArgsFile); err == nil {
+		t.Error("expected no docker cp calls when ResultsDir is empty, but cp-args.txt was created")
+	}
+}

@@ -572,3 +572,123 @@ func TestDockerProvider_Logs_DockerNotFound(t *testing.T) {
 		t.Errorf("expected 'reading container logs' in error, got: %v", err)
 	}
 }
+
+func TestDockerProvider_Logs_Follow_Success(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo 'abc123full'
+elif [ "$1" = "logs" ]; then
+  echo "follow line 1"
+  echo "follow line 2"
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	rc, err := NewDockerProvider().Logs(context.Background(), "abc123", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("reading logs: %v", err)
+	}
+	if !strings.Contains(string(got), "follow line 1") {
+		t.Errorf("expected 'follow line 1' in output, got: %q", string(got))
+	}
+	if !strings.Contains(string(got), "follow line 2") {
+		t.Errorf("expected 'follow line 2' in output, got: %q", string(got))
+	}
+}
+
+func TestDockerProvider_Logs_Follow_ContainerNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo "Error: No such container: abc123" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Logs(context.Background(), "abc123", true)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "container not found") {
+		t.Errorf("expected 'container not found' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "abc123") {
+		t.Errorf("expected 'abc123' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Logs_Follow_Close(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo 'abc123full'
+elif [ "$1" = "logs" ]; then
+  while true; do
+    echo "streaming line"
+    sleep 0.1
+  done
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rc, err := NewDockerProvider().Logs(ctx, "abc123", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	buf := make([]byte, 5)
+	_, err = rc.Read(buf)
+	if err != nil {
+		t.Fatalf("reading from log stream: %v", err)
+	}
+
+	if err := rc.Close(); err != nil {
+		t.Errorf("Close() returned error: %v", err)
+	}
+}
+
+func TestDockerProvider_Logs_Follow_VerifyArgs(t *testing.T) {
+	inspectArgsFile := filepath.Join(t.TempDir(), "inspect-args.txt")
+	logsArgsFile := filepath.Join(t.TempDir(), "logs-args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "inspect" ]; then
+  printf '%%s\n' "$@" > %s
+  echo 'abc123full'
+elif [ "$1" = "logs" ]; then
+  printf '%%s\n' "$@" > %s
+fi
+`, inspectArgsFile, logsArgsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	rc, err := NewDockerProvider().Logs(context.Background(), "container-id", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Read all output to wait for the logs script to finish writing the args file.
+	io.ReadAll(rc) //nolint
+	rc.Close()
+
+	raw, err := os.ReadFile(logsArgsFile)
+	if err != nil {
+		t.Fatalf("reading logs args file: %v", err)
+	}
+	args := strings.TrimSpace(string(raw))
+	for _, want := range []string{"logs", "--follow", "container-id"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("expected %q in logs args, got: %s", want, args)
+		}
+	}
+}

@@ -30,6 +30,20 @@ func NewDockerProvider() *DockerProvider {
 
 var _ Provider = (*DockerProvider)(nil)
 
+// logReadCloser wraps a pipe reader and its associated docker logs process.
+// Closing kills the process and closes the pipe.
+type logReadCloser struct {
+	io.ReadCloser
+	cmd *exec.Cmd
+}
+
+func (l *logReadCloser) Close() error {
+	if l.cmd.Process != nil {
+		l.cmd.Process.Kill()
+	}
+	return l.ReadCloser.Close()
+}
+
 func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error) {
 	args := []string{
 		"run", "-d",
@@ -147,7 +161,38 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 		return io.NopCloser(bytes.NewReader(out)), nil
 	}
 
-	return nil, fmt.Errorf("docker provider: Logs follow not implemented")
+	// Follow mode: verify container exists before streaming
+	checkCmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.ID}}", instanceID)
+	if _, err := checkCmd.Output(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if strings.Contains(string(exitErr.Stderr), "No such") {
+				return nil, fmt.Errorf("container not found: %s", instanceID)
+			}
+			return nil, fmt.Errorf("reading container logs: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("reading container logs: %w", err)
+	}
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating log pipe: %w", err)
+	}
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		pr.Close()
+		pw.Close()
+		return nil, fmt.Errorf("reading container logs: %w", err)
+	}
+
+	go func() {
+		cmd.Wait()
+		pw.Close()
+	}()
+
+	return &logReadCloser{ReadCloser: pr, cmd: cmd}, nil
 }
 
 func (p *DockerProvider) Kill(ctx context.Context, instanceID string) error {

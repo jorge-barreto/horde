@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -195,8 +196,41 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 	return &logReadCloser{ReadCloser: pr, cmd: cmd}, nil
 }
 
-func (p *DockerProvider) Kill(ctx context.Context, instanceID string) error {
-	return fmt.Errorf("docker provider: Kill not implemented")
+func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
+	// Check container exists and is running
+	status, err := p.Status(ctx, opts.InstanceID)
+	if err != nil {
+		return fmt.Errorf("killing container: %w", err)
+	}
+	if status.State == "unknown" {
+		return fmt.Errorf("killing container: container not found: %s", opts.InstanceID)
+	}
+	if status.State != "running" {
+		return fmt.Errorf("killing container: container is not running: %s", opts.InstanceID)
+	}
+
+	// Stop container
+	cmd := exec.CommandContext(ctx, "docker", "stop", opts.InstanceID)
+	if _, err := cmd.Output(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return fmt.Errorf("stopping container: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return fmt.Errorf("stopping container: %w", err)
+	}
+
+	// Best-effort copy of audit and artifacts — errors are intentionally ignored
+	if opts.ResultsDir != "" {
+		p.CopyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/audit/.", filepath.Join(opts.ResultsDir, "audit"))
+		p.CopyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(opts.ResultsDir, "artifacts"))
+	}
+
+	// Remove container
+	if err := p.RemoveContainer(ctx, opts.InstanceID); err != nil {
+		return fmt.Errorf("killing container: %w", err)
+	}
+
+	return nil
 }
 
 func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {

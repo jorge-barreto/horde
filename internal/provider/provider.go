@@ -11,7 +11,7 @@ type Provider interface {
 	Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error)
 	Status(ctx context.Context, instanceID string) (*InstanceStatus, error)
 	Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
-	Kill(ctx context.Context, instanceID string) error
+	Kill(ctx context.Context, opts KillOpts) error
 	ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
 }
 
@@ -45,4 +45,10 @@ type ReadFileOpts struct {
 	Path       string            // logical path relative to project root
 	RunID      string            // run ID (used by ECS provider to resolve S3 prefix)
 	Metadata   map[string]string // provider-specific metadata from LaunchResult
+}
+
+// KillOpts contains parameters for killing a running instance.
+type KillOpts struct {
+	InstanceID string // container ID or ECS task ARN
+	ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
 }

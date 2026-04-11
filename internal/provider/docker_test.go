@@ -312,3 +312,140 @@ func TestDockerProvider_InterfaceCompliance(t *testing.T) {
 		t.Error("NewDockerProvider() returned nil")
 	}
 }
+
+func TestDockerProvider_CopyFromContainer_Success(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "cp" ]; then
+  exit 0
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	destDir := filepath.Join(t.TempDir(), "dest")
+	p := NewDockerProvider()
+	err := p.CopyFromContainer(context.Background(), "abc123", "/workspace/.orc/audit/.", destDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(destDir); err != nil {
+		t.Errorf("expected destDir to exist: %v", err)
+	}
+}
+
+func TestDockerProvider_CopyFromContainer_VerifyArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "cp" ]; then
+  printf '%%s\n' "$@" > %s
+  exit 0
+fi
+`, argsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	hostPath := filepath.Join(t.TempDir(), "dest")
+	p := NewDockerProvider()
+	err := p.CopyFromContainer(context.Background(), "cid", "/workspace/.orc/audit/.", hostPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	args := strings.TrimSpace(string(raw))
+	for _, want := range []string{"cp", "cid:/workspace/.orc/audit/.", hostPath} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q; got: %s", want, args)
+		}
+	}
+}
+
+func TestDockerProvider_CopyFromContainer_Failure(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "cp" ]; then
+  echo "no such directory" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.CopyFromContainer(context.Background(), "abc123", "/workspace/.orc/audit/.", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "copying from container") {
+		t.Errorf("expected 'copying from container' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_RemoveContainer_Success(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "rm" ]; then
+  exit 0
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.RemoveContainer(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDockerProvider_RemoveContainer_VerifyArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "rm" ]; then
+  printf '%%s\n' "$@" > %s
+  exit 0
+fi
+`, argsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.RemoveContainer(context.Background(), "container-xyz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	args := strings.TrimSpace(string(raw))
+	for _, want := range []string{"rm", "container-xyz"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q; got: %s", want, args)
+		}
+	}
+}
+
+func TestDockerProvider_RemoveContainer_Failure(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "rm" ]; then
+  echo "No such container" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	err := p.RemoveContainer(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "removing container") {
+		t.Errorf("expected 'removing container' in error, got: %v", err)
+	}
+}

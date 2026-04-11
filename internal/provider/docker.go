@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -91,6 +92,33 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 		StartedAt:  startedAt,
 		FinishedAt: &finishedAt,
 	}, nil
+}
+
+func (p *DockerProvider) CopyFromContainer(ctx context.Context, containerID, containerPath, hostPath string) error {
+	if err := os.MkdirAll(hostPath, 0o755); err != nil {
+		return fmt.Errorf("creating destination directory: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "docker", "cp", containerID+":"+containerPath, hostPath)
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return fmt.Errorf("copying from container: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return fmt.Errorf("copying from container: %w", err)
+	}
+	return nil
+}
+
+func (p *DockerProvider) RemoveContainer(ctx context.Context, containerID string) error {
+	cmd := exec.CommandContext(ctx, "docker", "rm", containerID)
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return fmt.Errorf("removing container: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return fmt.Errorf("removing container: %w", err)
+	}
+	return nil
 }
 
 func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error) {

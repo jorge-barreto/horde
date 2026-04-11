@@ -626,6 +626,28 @@ func TestSQLiteStore_UpdateRun_NoFieldsSet(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_UpdateRun_NoFieldsSet_NonexistentID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	err = s.UpdateRun(ctx, "nonexistent", &RunUpdate{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("errors.Is(err, ErrRunNotFound) = false, err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error %q does not contain %q", err.Error(), "nonexistent")
+	}
+}
+
 func TestSQLiteStore_ListByRepo_FiltersAndOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

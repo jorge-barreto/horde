@@ -240,6 +240,14 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 	}
 
 	if len(setClauses) == 0 {
+		var exists bool
+		err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM runs WHERE id = ?)", id).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("checking run existence: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("%w: %s", ErrRunNotFound, id)
+		}
 		return nil
 	}
 

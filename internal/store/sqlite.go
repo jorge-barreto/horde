@@ -18,6 +18,8 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+var _ Store = (*SQLiteStore)(nil)
+
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("creating store directory: %w", err)
@@ -307,4 +309,14 @@ func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticke
 		return nil, fmt.Errorf("finding active runs by ticket: %w", err)
 	}
 	return runs, nil
+}
+
+func (s *SQLiteStore) CountActive(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM runs WHERE status IN ('pending', 'running')").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting active runs: %w", err)
+	}
+	return count, nil
 }

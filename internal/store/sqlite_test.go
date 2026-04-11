@@ -830,3 +830,103 @@ func TestSQLiteStore_FindActiveByTicket_RepoMismatch(t *testing.T) {
 		t.Errorf("len(results) = %d, want 0 (repo must match)", len(results))
 	}
 }
+
+func TestSQLiteStore_CountActive_Empty(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	count, err := s.CountActive(ctx)
+	if err != nil {
+		t.Fatalf("CountActive: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("CountActive = %d, want 0", count)
+	}
+}
+
+func TestSQLiteStore_CountActive_MixedStatuses(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().Truncate(time.Second)
+
+	statuses := []struct {
+		id     string
+		status Status
+	}{
+		{"run-pending", StatusPending},
+		{"run-running", StatusRunning},
+		{"run-success", StatusSuccess},
+		{"run-failed", StatusFailed},
+		{"run-killed", StatusKilled},
+	}
+
+	for _, tc := range statuses {
+		run := newTestRun()
+		run.ID = tc.id
+		run.Status = tc.status
+		run.StartedAt = now
+		run.TimeoutAt = now.Add(60 * time.Minute)
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun(%s): %v", tc.id, err)
+		}
+	}
+
+	count, err := s.CountActive(ctx)
+	if err != nil {
+		t.Fatalf("CountActive: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("CountActive = %d, want 2 (pending + running)", count)
+	}
+}
+
+func TestSQLiteStore_CountActive_CrossRepo(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().Truncate(time.Second)
+
+	run1 := newTestRun()
+	run1.ID = "run-repo-a"
+	run1.Repo = "github.com/org/repo-a.git"
+	run1.Status = StatusPending
+	run1.StartedAt = now
+	run1.TimeoutAt = now.Add(60 * time.Minute)
+
+	run2 := newTestRun()
+	run2.ID = "run-repo-b"
+	run2.Repo = "github.com/org/repo-b.git"
+	run2.Status = StatusRunning
+	run2.StartedAt = now
+	run2.TimeoutAt = now.Add(60 * time.Minute)
+
+	for _, r := range []*Run{run1, run2} {
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun(%s): %v", r.ID, err)
+		}
+	}
+
+	count, err := s.CountActive(ctx)
+	if err != nil {
+		t.Fatalf("CountActive: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("CountActive = %d, want 2 (one from each repo)", count)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFakeDocker(t *testing.T, dir, script string) {
@@ -158,6 +159,149 @@ func TestDockerProvider_Launch_EmptyOutput(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "empty container ID") {
 		t.Errorf("expected 'empty container ID' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Status_Running(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	status, err := p.Status(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.State != "running" {
+		t.Errorf("State = %q, want %q", status.State, "running")
+	}
+	if status.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil", status.ExitCode)
+	}
+	if status.FinishedAt != nil {
+		t.Errorf("FinishedAt = %v, want nil", status.FinishedAt)
+	}
+	wantStarted, _ := time.Parse(time.RFC3339Nano, "2024-06-15T10:30:00Z")
+	if !status.StartedAt.Equal(wantStarted) {
+		t.Errorf("StartedAt = %v, want %v", status.StartedAt, wantStarted)
+	}
+}
+
+func TestDockerProvider_Status_Stopped(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":false,"ExitCode":1,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T11:30:00Z"}'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	status, err := p.Status(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.State != "stopped" {
+		t.Errorf("State = %q, want %q", status.State, "stopped")
+	}
+	if status.ExitCode == nil {
+		t.Fatal("ExitCode = nil, want non-nil")
+	}
+	if *status.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1", *status.ExitCode)
+	}
+	wantStarted, _ := time.Parse(time.RFC3339Nano, "2024-06-15T10:30:00Z")
+	if !status.StartedAt.Equal(wantStarted) {
+		t.Errorf("StartedAt = %v, want %v", status.StartedAt, wantStarted)
+	}
+	if status.FinishedAt == nil {
+		t.Fatal("FinishedAt = nil, want non-nil")
+	}
+	wantFinished, _ := time.Parse(time.RFC3339Nano, "2024-06-15T11:30:00Z")
+	if !status.FinishedAt.Equal(wantFinished) {
+		t.Errorf("FinishedAt = %v, want %v", status.FinishedAt, wantFinished)
+	}
+}
+
+func TestDockerProvider_Status_StoppedExitZero(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T11:30:00Z"}'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	status, err := p.Status(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.State != "stopped" {
+		t.Errorf("State = %q, want %q", status.State, "stopped")
+	}
+	if status.ExitCode == nil {
+		t.Fatal("ExitCode = nil, want non-nil")
+	}
+	if *status.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", *status.ExitCode)
+	}
+}
+
+func TestDockerProvider_Status_Nonexistent(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo "Error: No such container: abc123" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	status, err := p.Status(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.State != "unknown" {
+		t.Errorf("State = %q, want %q", status.State, "unknown")
+	}
+	if status.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil", status.ExitCode)
+	}
+}
+
+func TestDockerProvider_Status_DockerError(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo "Error response from daemon: connection refused" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	p := NewDockerProvider()
+	_, err := p.Status(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "inspecting container") {
+		t.Errorf("expected 'inspecting container' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Status_DockerNotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // empty dir — no docker binary
+
+	p := NewDockerProvider()
+	_, err := p.Status(context.Background(), "abc123")
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("expected exec.ErrNotFound, got: %v", err)
 	}
 }
 

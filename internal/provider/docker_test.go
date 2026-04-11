@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -456,5 +457,118 @@ fi
 	}
 	if !strings.Contains(err.Error(), "No such container") {
 		t.Errorf("expected stderr content 'No such container' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Logs_NoFollow_Success(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "logs" ]; then
+  echo "log line 1"
+  echo "log line 2"
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	rc, err := NewDockerProvider().Logs(context.Background(), "abc123", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("reading logs: %v", err)
+	}
+	if string(got) != "log line 1\nlog line 2\n" {
+		t.Errorf("content = %q, want %q", string(got), "log line 1\nlog line 2\n")
+	}
+}
+
+func TestDockerProvider_Logs_NoFollow_ContainerNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "logs" ]; then
+  echo "Error: No such container: abc123" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Logs(context.Background(), "abc123", false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "container not found") {
+		t.Errorf("expected 'container not found' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "abc123") {
+		t.Errorf("expected 'abc123' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Logs_NoFollow_DockerError(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "logs" ]; then
+  echo "Error response from daemon: connection refused" >&2
+  exit 1
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Logs(context.Background(), "abc123", false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading container logs") {
+		t.Errorf("expected 'reading container logs' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("expected 'connection refused' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Logs_NoFollow_VerifyArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf(`
+if [ "$1" = "logs" ]; then
+  printf '%%s\n' "$@" > %s
+fi
+`, argsFile)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, _ = NewDockerProvider().Logs(context.Background(), "container-id", false)
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	args := strings.TrimSpace(string(raw))
+	if !strings.Contains(args, "logs") {
+		t.Errorf("expected 'logs' subcommand in args, got: %s", args)
+	}
+	if !strings.Contains(args, "container-id") {
+		t.Errorf("expected 'container-id' in args, got: %s", args)
+	}
+	if strings.Contains(args, "--follow") {
+		t.Errorf("expected no --follow flag in args, got: %s", args)
+	}
+}
+
+func TestDockerProvider_Logs_DockerNotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // empty dir — no docker binary
+
+	_, err := NewDockerProvider().Logs(context.Background(), "abc123", false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("expected exec.ErrNotFound in chain, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "reading container logs") {
+		t.Errorf("expected 'reading container logs' in error, got: %v", err)
 	}
 }

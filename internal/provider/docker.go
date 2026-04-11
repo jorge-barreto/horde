@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -122,7 +123,31 @@ func (p *DockerProvider) RemoveContainer(ctx context.Context, containerID string
 }
 
 func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("docker provider: Logs not implemented")
+	args := []string{"logs"}
+	if follow {
+		args = append(args, "--follow")
+	}
+	args = append(args, instanceID)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+
+	if !follow {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			outStr := strings.TrimSpace(string(out))
+			if strings.Contains(outStr, "No such") {
+				return nil, fmt.Errorf("container not found: %s", instanceID)
+			}
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				return nil, fmt.Errorf("reading container logs: %s", outStr)
+			}
+			return nil, fmt.Errorf("reading container logs: %w", err)
+		}
+		return io.NopCloser(bytes.NewReader(out)), nil
+	}
+
+	return nil, fmt.Errorf("docker provider: Logs follow not implemented")
 }
 
 func (p *DockerProvider) Kill(ctx context.Context, instanceID string) error {

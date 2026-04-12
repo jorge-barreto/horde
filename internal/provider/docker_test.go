@@ -1053,3 +1053,36 @@ func TestDockerProvider_ReadFile_ArtifactsPath(t *testing.T) {
 		t.Errorf("expected %q, got %q", "hello", string(data))
 	}
 }
+
+func TestDockerProvider_ReadFile_RunIDTraversal(t *testing.T) {
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "../../etc", Path: ".orc/passwd"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid run ID") {
+		t.Errorf("expected error to contain %q, got: %v", "invalid run ID", err)
+	}
+}
+
+func TestDockerProvider_ReadFile_ReadError(t *testing.T) {
+	tmpdir := t.TempDir()
+	// Create target path as a directory — os.ReadFile on a dir returns EISDIR, not IsNotExist
+	dir := filepath.Join(tmpdir, ".horde", "results", "run-001", "audit")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("creating dir: %v", err)
+	}
+	t.Setenv("HOME", tmpdir)
+
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ".orc/audit"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "not found in results for run") {
+		t.Errorf("expected a read error, not a not-found error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "reading file:") {
+		t.Errorf("expected error to contain %q, got: %v", "reading file:", err)
+	}
+}

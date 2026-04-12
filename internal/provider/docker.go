@@ -237,6 +237,9 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	if opts.RunID == "" {
 		return nil, fmt.Errorf("reading file: run ID is required")
 	}
+	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
+		return nil, fmt.Errorf("reading file: invalid run ID")
+	}
 	if opts.Path == "" {
 		return nil, fmt.Errorf("reading file: path is required")
 	}

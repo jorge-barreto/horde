@@ -1065,6 +1065,17 @@ func TestDockerProvider_ReadFile_RunIDTraversal(t *testing.T) {
 	}
 }
 
+func TestDockerProvider_ReadFile_BareOrcPrefix(t *testing.T) {
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ".orc/"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "path must include a filename") {
+		t.Errorf("expected error to contain %q, got: %v", "path must include a filename", err)
+	}
+}
+
 func TestDockerProvider_ReadFile_ReadError(t *testing.T) {
 	tmpdir := t.TempDir()
 	// Create target path as a directory — os.ReadFile on a dir returns EISDIR, not IsNotExist

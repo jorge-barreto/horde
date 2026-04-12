@@ -249,6 +249,9 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 		return nil, fmt.Errorf("reading file: path must start with %q", orcPrefix)
 	}
 	relPath := strings.TrimPrefix(opts.Path, orcPrefix)
+	if relPath == "" {
+		return nil, fmt.Errorf("reading file: path must include a filename after %q", orcPrefix)
+	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

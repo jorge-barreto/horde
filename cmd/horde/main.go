@@ -186,7 +186,7 @@ func statusCmd() *cli.Command {
 			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
 			st, err := store.NewSQLiteStore(dbPath)
 			if err != nil {
-				return err
+				return fmt.Errorf("opening store: %w", err)
 			}
 			defer st.Close()
 			run, err := st.GetRun(ctx, runID)
@@ -194,7 +194,7 @@ func statusCmd() *cli.Command {
 				if errors.Is(err, store.ErrRunNotFound) {
 					return fmt.Errorf("run not found: %s", runID)
 				}
-				return err
+				return fmt.Errorf("reading run: %w", err)
 			}
 			prov := provider.NewDockerProvider()
 			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
@@ -333,7 +333,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			TotalCostUSD: cost,
 		}
 		if err := st.UpdateRun(ctx, run.ID, update); err != nil {
-			return err
+			return fmt.Errorf("updating run after completion: %w", err)
 		}
 		// Best-effort remove — error ignored
 		prov.RemoveContainer(ctx, run.InstanceID)
@@ -353,7 +353,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			failedStatus := store.StatusFailed
 			now := time.Now()
 			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); err != nil {
-				return err
+				return fmt.Errorf("updating run after timeout: %w", err)
 			}
 			run.Status = store.StatusFailed
 			run.CompletedAt = &now
@@ -363,7 +363,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 		failedStatus := store.StatusFailed
 		now := time.Now()
 		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); err != nil {
-			return err
+			return fmt.Errorf("updating run after unknown container: %w", err)
 		}
 		run.Status = store.StatusFailed
 		run.CompletedAt = &now
@@ -388,6 +388,9 @@ func printRunStatus(run *store.Run) {
 
 	fmt.Printf("Run:         %s\n", run.ID)
 	fmt.Printf("Ticket:      %s\n", run.Ticket)
+	if run.Workflow != "" {
+		fmt.Printf("Workflow:    %s\n", run.Workflow)
+	}
 	fmt.Printf("Branch:      %s\n", branch)
 	fmt.Printf("Status:      %s\n", run.Status)
 	if run.ExitCode != nil {

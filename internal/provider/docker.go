@@ -234,5 +234,38 @@ func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
 }
 
 func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
-	return nil, fmt.Errorf("docker provider: ReadFile not implemented")
+	if opts.RunID == "" {
+		return nil, fmt.Errorf("reading file: run ID is required")
+	}
+	if opts.Path == "" {
+		return nil, fmt.Errorf("reading file: path is required")
+	}
+
+	const orcPrefix = ".orc/"
+	if !strings.HasPrefix(opts.Path, orcPrefix) {
+		return nil, fmt.Errorf("reading file: path must start with %q", orcPrefix)
+	}
+	relPath := strings.TrimPrefix(opts.Path, orcPrefix)
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("reading file: %w", err)
+	}
+	resultsDir := filepath.Join(homeDir, ".horde", "results", opts.RunID)
+	fullPath := filepath.Join(resultsDir, relPath)
+
+	cleanResults := filepath.Clean(resultsDir) + string(filepath.Separator)
+	cleanFull := filepath.Clean(fullPath)
+	if !strings.HasPrefix(cleanFull, cleanResults) {
+		return nil, fmt.Errorf("reading file: path escapes results directory")
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("reading file: %s not found in results for run %s", opts.Path, opts.RunID)
+		}
+		return nil, fmt.Errorf("reading file: %w", err)
+	}
+	return data, nil
 }

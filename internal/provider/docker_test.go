@@ -946,3 +946,110 @@ fi
 		t.Error("expected no docker cp calls when ResultsDir is empty, but cp-args.txt was created")
 	}
 }
+
+func TestDockerProvider_ReadFile_Success(t *testing.T) {
+	tmpdir := t.TempDir()
+	dir := filepath.Join(tmpdir, ".horde", "results", "run-001", "audit", "PROJ-123")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("creating dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run-result.json"), []byte(`{"ok":true}`), 0644); err != nil {
+		t.Fatalf("writing file: %v", err)
+	}
+	t.Setenv("HOME", tmpdir)
+
+	p := NewDockerProvider()
+	data, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ".orc/audit/PROJ-123/run-result.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != `{"ok":true}` {
+		t.Errorf("expected %q, got %q", `{"ok":true}`, string(data))
+	}
+}
+
+func TestDockerProvider_ReadFile_FileNotFound(t *testing.T) {
+	tmpdir := t.TempDir()
+	dir := filepath.Join(tmpdir, ".horde", "results", "run-001")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("creating dir: %v", err)
+	}
+	t.Setenv("HOME", tmpdir)
+
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ".orc/audit/missing.json"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found in results for run") {
+		t.Errorf("expected error to contain %q, got: %v", "not found in results for run", err)
+	}
+}
+
+func TestDockerProvider_ReadFile_PathTraversal(t *testing.T) {
+	tmpdir := t.TempDir()
+	t.Setenv("HOME", tmpdir)
+
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ".orc/audit/../../etc/passwd"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "path escapes results directory") {
+		t.Errorf("expected error to contain %q, got: %v", "path escapes results directory", err)
+	}
+}
+
+func TestDockerProvider_ReadFile_EmptyRunID(t *testing.T) {
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "", Path: ".orc/audit/foo.json"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "run ID is required") {
+		t.Errorf("expected error to contain %q, got: %v", "run ID is required", err)
+	}
+}
+
+func TestDockerProvider_ReadFile_EmptyPath(t *testing.T) {
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ""})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("expected error to contain %q, got: %v", "path is required", err)
+	}
+}
+
+func TestDockerProvider_ReadFile_InvalidPrefix(t *testing.T) {
+	p := NewDockerProvider()
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: "some/other/file.txt"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "path must start with") {
+		t.Errorf("expected error to contain %q, got: %v", "path must start with", err)
+	}
+}
+
+func TestDockerProvider_ReadFile_ArtifactsPath(t *testing.T) {
+	tmpdir := t.TempDir()
+	dir := filepath.Join(tmpdir, ".horde", "results", "run-002", "artifacts")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("creating dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "output.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("writing file: %v", err)
+	}
+	t.Setenv("HOME", tmpdir)
+
+	p := NewDockerProvider()
+	data, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-002", Path: ".orc/artifacts/output.txt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("expected %q, got %q", "hello", string(data))
+	}
+}

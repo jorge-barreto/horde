@@ -493,7 +493,7 @@ type Provider interface {
     Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error)
     Status(ctx context.Context, instanceID string) (*InstanceStatus, error)
     Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
-    Kill(ctx context.Context, instanceID string) error
+    Kill(ctx context.Context, opts KillOpts) error
     ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
 }
 
@@ -518,6 +518,11 @@ type InstanceStatus struct {
     FinishedAt *time.Time // nil while running
 }
 
+type KillOpts struct {
+    InstanceID string // container ID or ECS task ARN
+    ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
+}
+
 type ReadFileOpts struct {
     InstanceID string            // container ID or ECS task ARN
     Path       string            // logical path relative to project root (e.g., ".orc/audit/<ticket>/run-result.json")
@@ -525,6 +530,8 @@ type ReadFileOpts struct {
     Metadata   map[string]string // provider-specific metadata from LaunchResult (ECS: artifacts_bucket, etc.)
 }
 ```
+
+`KillOpts.ResultsDir` is used by the docker provider to copy `.orc/audit/` and `.orc/artifacts/` from the container before removal. The ECS provider ignores it — ECS artifacts are uploaded to S3 by the entrypoint before the task stops.
 
 `ReadFile` is used by `horde results` to read `run-result.json`. The caller checks the run's status in the store first — if the run is still in progress, it reports that without calling `ReadFile`. The caller passes a logical path relative to the project root (e.g., `.orc/audit/<ticket>/run-result.json`) along with the run ID and provider metadata. Each provider resolves the path internally:
 - **docker**: reads from the local results store (`~/.horde/results/<run-id>/`) where `.orc/audit/` and `.orc/artifacts/` were copied at completion

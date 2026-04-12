@@ -286,7 +286,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 
 	instanceStatus, err := prov.Status(ctx, run.InstanceID)
 	if err != nil {
-		return err
+		return fmt.Errorf("checking instance status: %w", err)
 	}
 
 	switch instanceStatus.State {
@@ -320,7 +320,12 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			completedAt = &now
 		}
 
-		newStatus := mapExitCode(*instanceStatus.ExitCode)
+		var newStatus store.Status
+		if instanceStatus.ExitCode != nil {
+			newStatus = mapExitCode(*instanceStatus.ExitCode)
+		} else {
+			newStatus = store.StatusFailed
+		}
 		update := &store.RunUpdate{
 			Status:       &newStatus,
 			ExitCode:     instanceStatus.ExitCode,

@@ -77,10 +77,14 @@ func TestLaunch_Success(t *testing.T) {
 	ctx := context.Background()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 
-	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -143,10 +147,14 @@ func TestLaunch_WithFlags(t *testing.T) {
 	ctx := context.Background()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 
-	err := newApp().Run(ctx, []string{"horde", "launch", "--branch", "feature-x", "--workflow", "review", "--timeout", "30m", "TICKET-2"})
+	err = newApp().Run(ctx, []string{"horde", "launch", "--branch", "feature-x", "--workflow", "review", "--timeout", "30m", "TICKET-2"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -367,8 +375,12 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 
 	err = newApp().Run(ctx, []string{"horde", "launch", "--force", "TICKET-1"})
 
@@ -501,8 +513,12 @@ func TestStatus_CompletedRun(t *testing.T) {
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
@@ -564,8 +580,12 @@ esac
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
@@ -653,8 +673,12 @@ esac
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
@@ -734,8 +758,12 @@ esac
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
@@ -803,8 +831,12 @@ esac
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
@@ -868,8 +900,12 @@ esac
 	st.Close()
 
 	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
 	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
 	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout

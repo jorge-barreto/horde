@@ -933,3 +933,102 @@ esac
 		t.Errorf("store status = %q, want %q", r.Status, store.StatusFailed)
 	}
 }
+
+func TestMapExitCode(t *testing.T) {
+	tests := []struct {
+		code int
+		want store.Status
+	}{
+		{0, store.StatusSuccess},
+		{5, store.StatusKilled},
+		{1, store.StatusFailed},
+		{2, store.StatusFailed},
+		{137, store.StatusFailed},
+	}
+	for _, tt := range tests {
+		got := mapExitCode(tt.code)
+		if got != tt.want {
+			t.Errorf("mapExitCode(%d) = %q, want %q", tt.code, got, tt.want)
+		}
+	}
+}
+
+func TestStatus_LazyCompletion_WithWorkflow(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
+  cp)
+    case "$2" in
+      *audit*) mkdir -p "$3/review/TICKET-1" && printf '{"total_cost_usd": 7.50}' > "$3/review/TICKET-1/run-result.json" ;;
+    esac
+    ;;
+  rm) exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	runID := "testrunid009"
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Workflow:   "review",
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  now.Add(-15 * time.Minute),
+		TimeoutAt:  now.Add(45 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+
+	w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "success") {
+		t.Errorf("output missing 'success': %s", outStr)
+	}
+	if !strings.Contains(outStr, "$7.50") {
+		t.Errorf("output missing '$7.50': %s", outStr)
+	}
+	if !strings.Contains(outStr, "Workflow") {
+		t.Errorf("output missing 'Workflow': %s", outStr)
+	}
+
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st2.Close()
+	run, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if run.TotalCostUSD == nil || *run.TotalCostUSD != 7.50 {
+		t.Errorf("store TotalCostUSD = %v, want 7.50", run.TotalCostUSD)
+	}
+}

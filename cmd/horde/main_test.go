@@ -811,6 +811,92 @@ esac
 	}
 }
 
+func TestStatus_LazyCompletion_ZeroFinishedAt(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	runID := "testrunid-m0e"
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-m0e",
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  now.Add(-15 * time.Minute),
+		TimeoutAt:  now.Add(45 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	before := time.Now()
+	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	after := time.Now()
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "success") {
+		t.Errorf("output missing 'success': %s", outStr)
+	}
+	if !strings.Contains(outStr, "Exit code") {
+		t.Errorf("output missing 'Exit code': %s", outStr)
+	}
+	if !strings.Contains(outStr, "0") {
+		t.Errorf("output missing exit code '0': %s", outStr)
+	}
+
+	// Verify store was updated with a non-zero CompletedAt from time.Now() fallback
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusSuccess {
+		t.Errorf("store status = %q, want %q", r.Status, store.StatusSuccess)
+	}
+	if r.ExitCode == nil || *r.ExitCode != 0 {
+		t.Errorf("store exit code = %v, want 0", r.ExitCode)
+	}
+	if r.CompletedAt == nil {
+		t.Errorf("store completed_at is nil")
+	} else if r.CompletedAt.IsZero() {
+		t.Errorf("store completed_at is the zero time — fallback was not used")
+	} else if r.CompletedAt.Before(before.Truncate(time.Second)) || r.CompletedAt.After(after) {
+		t.Errorf("store completed_at %v not in [%v, %v] — expected time.Now() fallback", r.CompletedAt, before, after)
+	}
+}
+
 func TestStatus_LazyCompletion_WithCost(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

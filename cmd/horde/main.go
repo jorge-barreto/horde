@@ -528,9 +528,9 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			}
 		}
 
-		// Determine CompletedAt
+		// Determine CompletedAt — guard against Docker returning a zero time
 		var completedAt *time.Time
-		if instanceStatus.FinishedAt != nil {
+		if instanceStatus.FinishedAt != nil && !instanceStatus.FinishedAt.IsZero() {
 			completedAt = instanceStatus.FinishedAt
 		} else {
 			now := time.Now()

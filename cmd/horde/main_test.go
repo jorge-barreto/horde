@@ -1024,8 +1024,8 @@ esac
 		t.Fatalf("unexpected error: %v", runErr)
 	}
 	outStr := string(out)
-	if !strings.Contains(outStr, "failed") {
-		t.Errorf("output missing 'failed': %s", outStr)
+	if !strings.Contains(outStr, "killed") {
+		t.Errorf("output missing 'killed': %s", outStr)
 	}
 
 	// Verify store was updated
@@ -1038,8 +1038,8 @@ esac
 	if err != nil {
 		t.Fatalf("getting run: %v", err)
 	}
-	if r.Status != store.StatusFailed {
-		t.Errorf("store status = %q, want %q", r.Status, store.StatusFailed)
+	if r.Status != store.StatusKilled {
+		t.Errorf("store status = %q, want %q", r.Status, store.StatusKilled)
 	}
 	if r.CompletedAt == nil {
 		t.Errorf("store completed_at is nil")
@@ -2211,8 +2211,8 @@ esac
 	if err != nil {
 		t.Fatalf("getting run: %v", err)
 	}
-	if r.Status != store.StatusFailed {
-		t.Errorf("status: got %q, want %q", r.Status, store.StatusFailed)
+	if r.Status != store.StatusKilled {
+		t.Errorf("status: got %q, want %q", r.Status, store.StatusKilled)
 	}
 	if r.CompletedAt == nil {
 		t.Error("CompletedAt should be non-nil after successful kill")

@@ -568,12 +568,12 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 				fmt.Fprintf(os.Stderr, "warning: killing timed-out container: %v\n", err)
 				return nil
 			}
-			failedStatus := store.StatusFailed
+			killedStatus := store.StatusKilled
 			now := time.Now()
-			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); err != nil {
+			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{Status: &killedStatus, CompletedAt: &now}); err != nil {
 				return fmt.Errorf("updating run after timeout: %w", err)
 			}
-			run.Status = store.StatusFailed
+			run.Status = store.StatusKilled
 			run.CompletedAt = &now
 		}
 

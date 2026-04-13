@@ -336,6 +336,55 @@ func TestSQLiteStore_CreateGetRun_EmptyMetadata(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_CreateGetRun_UTCNormalization(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	est := time.FixedZone("EST", -5*3600)
+	run := newTestRun()
+	// Override timestamps with EST-zoned values (truncated to second for RFC3339 precision)
+	run.StartedAt = time.Now().In(est).Truncate(time.Second)
+	run.TimeoutAt = run.StartedAt.Add(60 * time.Minute)
+	completedAt := run.StartedAt.Add(5 * time.Minute)
+	run.CompletedAt = &completedAt
+
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+
+	if !got.StartedAt.Equal(run.StartedAt) {
+		t.Errorf("StartedAt: got %v, want %v (same instant)", got.StartedAt, run.StartedAt)
+	}
+	if got.StartedAt.Location() != time.UTC {
+		t.Errorf("StartedAt location: got %v, want UTC", got.StartedAt.Location())
+	}
+
+	if !got.TimeoutAt.Equal(run.TimeoutAt) {
+		t.Errorf("TimeoutAt: got %v, want %v (same instant)", got.TimeoutAt, run.TimeoutAt)
+	}
+	if got.TimeoutAt.Location() != time.UTC {
+		t.Errorf("TimeoutAt location: got %v, want UTC", got.TimeoutAt.Location())
+	}
+
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(*run.CompletedAt) {
+		t.Errorf("CompletedAt: got %v, want %v (same instant)", got.CompletedAt, run.CompletedAt)
+	}
+	if got.CompletedAt != nil && got.CompletedAt.Location() != time.UTC {
+		t.Errorf("CompletedAt location: got %v, want UTC", got.CompletedAt.Location())
+	}
+}
+
 func TestSQLiteStore_CreateRun_DuplicateID(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -595,6 +644,40 @@ func TestSQLiteStore_UpdateRun_MetadataUpdate(t *testing.T) {
 	}
 	if len(got.Metadata) != 0 {
 		t.Errorf("Metadata length: got %d, want 0", len(got.Metadata))
+	}
+}
+
+func TestSQLiteStore_UpdateRun_UTCNormalization(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	run := newTestRun()
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	est := time.FixedZone("EST", -5*3600)
+	completedAt := run.StartedAt.Add(10 * time.Minute).In(est).Truncate(time.Second)
+	if err := s.UpdateRun(ctx, run.ID, &RunUpdate{CompletedAt: &completedAt}); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(completedAt) {
+		t.Errorf("CompletedAt: got %v, want %v (same instant)", got.CompletedAt, completedAt)
+	}
+	if got.CompletedAt != nil && got.CompletedAt.Location() != time.UTC {
+		t.Errorf("CompletedAt location: got %v, want UTC", got.CompletedAt.Location())
 	}
 }
 

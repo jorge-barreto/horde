@@ -86,7 +86,7 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 
 	var completedAt *string
 	if run.CompletedAt != nil {
-		completedAtStr := run.CompletedAt.Format(time.RFC3339)
+		completedAtStr := run.CompletedAt.UTC().Format(time.RFC3339)
 		completedAt = &completedAtStr
 	}
 
@@ -107,9 +107,9 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		string(run.Status),
 		run.ExitCode,
 		run.LaunchedBy,
-		run.StartedAt.Format(time.RFC3339),
+		run.StartedAt.UTC().Format(time.RFC3339),
 		completedAt,
-		run.TimeoutAt.Format(time.RFC3339),
+		run.TimeoutAt.UTC().Format(time.RFC3339),
 		run.TotalCostUSD,
 	)
 	if err != nil {
@@ -232,7 +232,7 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 	}
 	if update.CompletedAt != nil {
 		setClauses = append(setClauses, "completed_at = ?")
-		args = append(args, update.CompletedAt.Format(time.RFC3339))
+		args = append(args, update.CompletedAt.UTC().Format(time.RFC3339))
 	}
 	if update.TotalCostUSD != nil {
 		setClauses = append(setClauses, "total_cost_usd = ?")

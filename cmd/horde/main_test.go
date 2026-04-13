@@ -456,6 +456,9 @@ exit 1
 	if runs[0].Status != store.StatusFailed {
 		t.Errorf("Status = %q, want %q", runs[0].Status, store.StatusFailed)
 	}
+	if runs[0].CompletedAt == nil {
+		t.Error("CompletedAt should be non-nil after launch failure")
+	}
 }
 
 func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
@@ -504,6 +507,9 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 	}
 	if runs[0].Status != store.StatusFailed {
 		t.Errorf("Status = %q, want %q", runs[0].Status, store.StatusFailed)
+	}
+	if runs[0].CompletedAt == nil {
+		t.Error("CompletedAt should be non-nil after launch failure")
 	}
 }
 

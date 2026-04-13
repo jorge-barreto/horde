@@ -323,7 +323,58 @@ func resultsCmd() *cli.Command {
 		Usage:     "Show results of a run",
 		ArgsUsage: "<run-id>",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return fmt.Errorf("not implemented")
+			runID := cmd.Args().First()
+			if runID == "" {
+				return fmt.Errorf("missing required argument: <run-id>")
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+			run, err := st.GetRun(ctx, runID)
+			if err != nil {
+				if errors.Is(err, store.ErrRunNotFound) {
+					return fmt.Errorf("run not found: %s", runID)
+				}
+				return fmt.Errorf("reading run: %w", err)
+			}
+			prov := provider.NewDockerProvider()
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
+			}
+			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
+				fmt.Printf("Run %s is still in progress (status: %s)\n", run.ID, run.Status)
+				return nil
+			}
+			var resultPath string
+			if run.Workflow != "" {
+				resultPath = filepath.Join(".orc", "audit", run.Workflow, run.Ticket, "run-result.json")
+			} else {
+				resultPath = filepath.Join(".orc", "audit", run.Ticket, "run-result.json")
+			}
+			data, err := prov.ReadFile(ctx, provider.ReadFileOpts{
+				RunID:      run.ID,
+				Path:       resultPath,
+				InstanceID: run.InstanceID,
+				Metadata:   run.Metadata,
+			})
+			if err != nil {
+				printPartialResults(run)
+				return nil
+			}
+			var result fullRunResult
+			if err := json.Unmarshal(data, &result); err != nil {
+				printPartialResults(run)
+				return nil
+			}
+			printFullResults(run, &result)
+			return nil
 		},
 	}
 }
@@ -574,4 +625,42 @@ func printRunStatus(run *store.Run) {
 		fmt.Printf("Cost:        $%.2f\n", *run.TotalCostUSD)
 	}
 	fmt.Printf("Launched by: %s\n", run.LaunchedBy)
+}
+
+func printFullResults(run *store.Run, result *fullRunResult) {
+	fmt.Printf("Run:            %s\n", run.ID)
+	fmt.Printf("Ticket:         %s\n", run.Ticket)
+	if run.Workflow != "" {
+		fmt.Printf("Workflow:       %s\n", run.Workflow)
+	}
+	fmt.Printf("Status:         %s\n", result.Status)
+	fmt.Printf("Total Cost:     $%.2f\n", result.TotalCostUSD)
+	fmt.Printf("Total Duration: %s\n", result.TotalDuration)
+
+	if len(result.Phases) > 0 {
+		fmt.Println()
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "PHASE\tSTATUS\tCOST\tDURATION")
+		for _, p := range result.Phases {
+			fmt.Fprintf(w, "%s\t%s\t$%.2f\t%s\n", p.Name, p.Status, p.CostUSD, p.Duration)
+		}
+		w.Flush()
+	}
+}
+
+func printPartialResults(run *store.Run) {
+	fmt.Printf("Run:    %s\n", run.ID)
+	fmt.Printf("Ticket: %s\n", run.Ticket)
+	if run.Workflow != "" {
+		fmt.Printf("Workflow: %s\n", run.Workflow)
+	}
+	fmt.Printf("Status: %s\n", run.Status)
+	if run.ExitCode != nil {
+		fmt.Printf("Exit Code: %d\n", *run.ExitCode)
+	}
+	if run.TotalCostUSD != nil {
+		fmt.Printf("Cost:   $%.2f\n", *run.TotalCostUSD)
+	}
+	fmt.Println()
+	fmt.Println("Detailed results unavailable (run-result.json not found).")
 }

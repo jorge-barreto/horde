@@ -152,7 +152,9 @@ func launchCmd() *cli.Command {
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
-				st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus})
+				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus}); updateErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to mark run as failed: %v\n", updateErr)
+				}
 				return err
 			}
 

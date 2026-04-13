@@ -458,6 +458,55 @@ exit 1
 	}
 }
 
+func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\necho \"Error: Cannot connect to the Docker daemon\" >&2\nexit 1\n"), 0o755)
+
+	origStderr := os.Stderr
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating stderr pipe: %v", err)
+	}
+	os.Stderr = stderrW
+	defer func() { os.Stderr = origStderr }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+
+	stderrW.Close()
+	os.Stderr = origStderr
+	stderrOut, _ := io.ReadAll(stderrR)
+
+	if runErr == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "launching docker container") {
+		t.Errorf("error %q does not contain %q", runErr.Error(), "launching docker container")
+	}
+	if strings.Contains(string(stderrOut), "warning: failed to mark run as failed") {
+		t.Error("unexpected warning on stderr — UpdateRun should have succeeded")
+	}
+
+	// Verify run is marked failed (UpdateRun worked)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st.Close()
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	if err != nil {
+		t.Fatalf("listing runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if runs[0].Status != store.StatusFailed {
+		t.Errorf("Status = %q, want %q", runs[0].Status, store.StatusFailed)
+	}
+}
+
 // --- Status tests ---
 
 type statusEnv struct {

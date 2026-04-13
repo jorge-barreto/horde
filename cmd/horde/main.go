@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
@@ -219,7 +220,45 @@ func logsCmd() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return fmt.Errorf("not implemented")
+			runID := cmd.Args().First()
+			if runID == "" {
+				return fmt.Errorf("missing required argument: <run-id>")
+			}
+			follow := cmd.Bool("follow")
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+			run, err := st.GetRun(ctx, runID)
+			if err != nil {
+				if errors.Is(err, store.ErrRunNotFound) {
+					return fmt.Errorf("run not found: %s", runID)
+				}
+				return fmt.Errorf("reading run: %w", err)
+			}
+			if run.Status == store.StatusSuccess || run.Status == store.StatusFailed || run.Status == store.StatusKilled {
+				return fmt.Errorf("logs unavailable: run %s is %s (container removed)", runID, run.Status)
+			}
+			if run.InstanceID == "" {
+				return fmt.Errorf("logs unavailable: run %s has no container yet", runID)
+			}
+			prov := provider.NewDockerProvider()
+			reader, err := prov.Logs(ctx, run.InstanceID, follow)
+			if err != nil {
+				return fmt.Errorf("reading logs: %w", err)
+			}
+			defer reader.Close()
+			_, err = io.Copy(os.Stdout, reader)
+			if err != nil {
+				return fmt.Errorf("streaming logs: %w", err)
+			}
+			return nil
 		},
 	}
 }

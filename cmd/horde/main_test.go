@@ -1787,6 +1787,61 @@ esac
 	}
 }
 
+func TestHandleLazyCheck_TimeoutKillSuccess(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  stop) exit 0 ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "lazycheck002"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-2",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now().Add(-2 * time.Minute),
+		TimeoutAt:  time.Now().Add(-1 * time.Minute), // already timed out
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store for verification: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusFailed {
+		t.Errorf("status: got %q, want %q", r.Status, store.StatusFailed)
+	}
+	if r.CompletedAt == nil {
+		t.Error("CompletedAt should be non-nil after successful kill")
+	}
+}
+
 func TestKill_RunningRun(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

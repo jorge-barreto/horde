@@ -70,7 +70,10 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) Close() error {
-	return s.db.Close()
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("closing store database: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {

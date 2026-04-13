@@ -228,7 +228,7 @@ if ! git clone "https://${REPO_URL}" /workspace; then
     echo "ERROR: git clone failed" >&2
     exit 3  # configuration/setup error
 fi
-cd /workspace
+cd /workspace || { echo "ERROR: cd /workspace failed" >&2; exit 3; }
 if [ -n "${BRANCH:-}" ]; then
     if ! git checkout "$BRANCH"; then
         echo "ERROR: git checkout failed for branch ${BRANCH}" >&2

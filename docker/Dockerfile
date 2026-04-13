@@ -15,6 +15,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awsc
 COPY --from=orc-builder /orc /usr/local/bin/orc
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.claude/bin:${PATH}"
 
 COPY --from=bd-builder /bd /usr/local/bin/bd
 

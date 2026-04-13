@@ -253,6 +253,42 @@ fi
 	}
 }
 
+func TestDockerProvider_Status_BadStartedAt(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":true,"ExitCode":0,"StartedAt":"not-a-timestamp","FinishedAt":"0001-01-01T00:00:00Z"}'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Status(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parsing container start time") {
+		t.Errorf("expected 'parsing container start time' in error, got: %v", err)
+	}
+}
+
+func TestDockerProvider_Status_BadFinishedAt(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{"Running":false,"ExitCode":1,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"not-a-timestamp"}'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Status(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parsing container finish time") {
+		t.Errorf("expected 'parsing container finish time' in error, got: %v", err)
+	}
+}
+
 func TestDockerProvider_Status_Nonexistent(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `

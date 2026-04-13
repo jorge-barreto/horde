@@ -97,13 +97,19 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 		return nil, fmt.Errorf("parsing container state: %w", err)
 	}
 
-	startedAt, _ := time.Parse(time.RFC3339Nano, state.StartedAt)
+	startedAt, err := time.Parse(time.RFC3339Nano, state.StartedAt)
+	if err != nil {
+		return nil, fmt.Errorf("parsing container start time: %w", err)
+	}
 
 	if state.Running {
 		return &InstanceStatus{State: "running", StartedAt: startedAt}, nil
 	}
 
-	finishedAt, _ := time.Parse(time.RFC3339Nano, state.FinishedAt)
+	finishedAt, err := time.Parse(time.RFC3339Nano, state.FinishedAt)
+	if err != nil {
+		return nil, fmt.Errorf("parsing container finish time: %w", err)
+	}
 	return &InstanceStatus{
 		State:      "stopped",
 		ExitCode:   &state.ExitCode,

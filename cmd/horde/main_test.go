@@ -888,7 +888,7 @@ esac
 }
 
 func TestStatus_Timeout(t *testing.T) {
-	// Kill() calls Status() internally (docker.go:201), so inspect is called twice — script is intentionally stateless
+	// handleLazyCheck calls Status() (inspect) then Kill() (stop+cp+rm) — script is intentionally stateless
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
@@ -2136,7 +2136,6 @@ esac
 func TestKill_RunningRun(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
-  inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
   stop) exit 0 ;;
   cp) exit 0 ;;
   rm) exit 0 ;;

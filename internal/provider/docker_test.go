@@ -697,9 +697,7 @@ func TestDockerProvider_Kill_Success(t *testing.T) {
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   exit 0
 elif [ "$1" = "cp" ]; then
   exit 0
@@ -719,7 +717,7 @@ fi
 func TestDockerProvider_Kill_ContainerNotFound(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
-if [ "$1" = "inspect" ]; then
+if [ "$1" = "stop" ]; then
   echo "Error: No such container: abc123" >&2
   exit 1
 fi
@@ -739,34 +737,31 @@ fi
 	}
 }
 
-func TestDockerProvider_Kill_ContainerNotRunning(t *testing.T) {
+func TestDockerProvider_Kill_AlreadyStopped(t *testing.T) {
+	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T11:30:00Z"}'
+if [ "$1" = "stop" ]; then
+  exit 0
+elif [ "$1" = "cp" ]; then
+  exit 0
+elif [ "$1" = "rm" ]; then
+  exit 0
 fi
 `)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "killing container") {
-		t.Errorf("expected 'killing container' in error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "container is not running") {
-		t.Errorf("expected 'container is not running' in error, got: %v", err)
+	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("expected no error for already-stopped container, got: %v", err)
 	}
 }
 
 func TestDockerProvider_Kill_StopError(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   echo "Error response from daemon: cannot stop container" >&2
   exit 1
 fi
@@ -790,9 +785,7 @@ func TestDockerProvider_Kill_CopyFailure_OK(t *testing.T) {
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   exit 0
 elif [ "$1" = "cp" ]; then
   echo "no such directory" >&2
@@ -813,9 +806,7 @@ fi
 func TestDockerProvider_Kill_RemoveError(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   exit 0
 elif [ "$1" = "cp" ]; then
   exit 0
@@ -843,9 +834,7 @@ func TestDockerProvider_Kill_VerifyStopArgs(t *testing.T) {
 	stopArgsFile := filepath.Join(t.TempDir(), "stop-args.txt")
 	dir := t.TempDir()
 	script := fmt.Sprintf(`
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   printf '%%s\n' "$@" > %s
   exit 0
 elif [ "$1" = "cp" ]; then
@@ -880,9 +869,7 @@ func TestDockerProvider_Kill_CopyPaths(t *testing.T) {
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	script := fmt.Sprintf(`
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   exit 0
 elif [ "$1" = "cp" ]; then
   printf '%%s\n' "$@" >> %s
@@ -922,9 +909,7 @@ func TestDockerProvider_Kill_EmptyResultsDir(t *testing.T) {
 	cpArgsFile := filepath.Join(t.TempDir(), "cp-args.txt")
 	dir := t.TempDir()
 	script := fmt.Sprintf(`
-if [ "$1" = "inspect" ]; then
-  echo '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}'
-elif [ "$1" = "stop" ]; then
+if [ "$1" = "stop" ]; then
   exit 0
 elif [ "$1" = "cp" ]; then
   printf '%%s\n' "$@" >> %s

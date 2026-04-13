@@ -197,24 +197,18 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 }
 
 func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
-	// Check container exists and is running
-	status, err := p.Status(ctx, opts.InstanceID)
-	if err != nil {
-		return fmt.Errorf("killing container: %w", err)
-	}
-	if status.State == "unknown" {
-		return fmt.Errorf("killing container: container not found: %s", opts.InstanceID)
-	}
-	if status.State != "running" {
-		return fmt.Errorf("killing container: container is not running: %s", opts.InstanceID)
-	}
-
-	// Stop container
+	// Stop container directly — no pre-check to avoid TOCTOU race.
+	// docker stop succeeds on already-stopped containers and fails with
+	// "No such container" for nonexistent ones.
 	cmd := exec.CommandContext(ctx, "docker", "stop", opts.InstanceID)
 	if _, err := cmd.Output(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("stopping container: %s", strings.TrimSpace(string(exitErr.Stderr)))
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if strings.Contains(stderr, "No such") {
+				return fmt.Errorf("killing container: container not found: %s", opts.InstanceID)
+			}
+			return fmt.Errorf("stopping container: %s", stderr)
 		}
 		return fmt.Errorf("stopping container: %w", err)
 	}

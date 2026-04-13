@@ -435,6 +435,16 @@ func listCmd() *cli.Command {
 				}
 			}
 
+			if !all {
+				filtered := runs[:0]
+				for _, run := range runs {
+					if run.Status == store.StatusPending || run.Status == store.StatusRunning {
+						filtered = append(filtered, run)
+					}
+				}
+				runs = filtered
+			}
+
 			if len(runs) == 0 {
 				if all {
 					fmt.Println("No runs found for this repo.")

@@ -1357,8 +1357,8 @@ esac
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
-	if !strings.Contains(string(out), "success") {
-		t.Errorf("output missing 'success': %s", string(out))
+	if !strings.Contains(string(out), "No active runs for this repo.") {
+		t.Errorf("output missing 'No active runs for this repo.': %s", string(out))
 	}
 
 	st2, err := store.NewSQLiteStore(dbPath)
@@ -1378,6 +1378,133 @@ esac
 	}
 	if r.CompletedAt == nil {
 		t.Errorf("store completed_at is nil")
+	}
+}
+
+func TestList_LazyCompletion_MixedStates(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect)
+    case "$4" in
+      container1) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
+      container2) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+    esac ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing docker script: %v", err)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	for _, r := range []*store.Run{
+		{ID: "lazyrun00001", Ticket: "TICKET-1", Status: store.StatusRunning, InstanceID: "container1", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute)},
+		{ID: "lazyrun00002", Ticket: "TICKET-2", Status: store.StatusRunning, InstanceID: "container2", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute)},
+	} {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "lazyrun00002") {
+		t.Errorf("output missing active run lazyrun00002: %s", outStr)
+	}
+	if strings.Contains(outStr, "lazyrun00001") {
+		t.Errorf("output should not contain completed run lazyrun00001: %s", outStr)
+	}
+	if !strings.Contains(outStr, "RUN ID") {
+		t.Errorf("output missing table header 'RUN ID': %s", outStr)
+	}
+}
+
+func TestList_LazyCompletion_AllFlag(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing docker script: %v", err)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         "lazyrun00003",
+		Ticket:     "TICKET-3",
+		Status:     store.StatusRunning,
+		InstanceID: "container3",
+		Repo:       "github.com/test/repo.git",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  now.Add(-15 * time.Minute),
+		TimeoutAt:  now.Add(45 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "lazyrun00003") {
+		t.Errorf("output missing run lazyrun00003: %s", outStr)
+	}
+	if !strings.Contains(outStr, "success") {
+		t.Errorf("output missing 'success' status for lazily-completed run: %s", outStr)
 	}
 }
 

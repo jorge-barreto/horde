@@ -1508,6 +1508,79 @@ esac
 	}
 }
 
+func TestList_LazyCheck_ErrorContinues(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect)
+    case "$4" in
+      badcontainer) echo "Error: connection refused" >&2; exit 1 ;;
+      goodcontainer) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+    esac ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing docker script: %v", err)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	for _, r := range []*store.Run{
+		{ID: "errrun00001", Ticket: "TICKET-1", Status: store.StatusRunning, InstanceID: "badcontainer", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute)},
+		{ID: "errrun00002", Ticket: "TICKET-2", Status: store.StatusRunning, InstanceID: "goodcontainer", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute)},
+	} {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	// Capture stdout
+	origStdout := os.Stdout
+	prOut, pwOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating stdout pipe: %v", err)
+	}
+	os.Stdout = pwOut
+	defer func() { os.Stdout = origStdout }()
+
+	// Capture stderr
+	origStderr := os.Stderr
+	prErr, pwErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating stderr pipe: %v", err)
+	}
+	os.Stderr = pwErr
+	defer func() { os.Stderr = origStderr }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list"})
+
+	pwOut.Close()
+	os.Stdout = origStdout
+	pwErr.Close()
+	os.Stderr = origStderr
+	stdout, _ := io.ReadAll(prOut)
+	stderr, _ := io.ReadAll(prErr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if !strings.Contains(string(stderr), "warning: checking run errrun00001") {
+		t.Errorf("stderr missing warning for errrun00001: %s", string(stderr))
+	}
+	if !strings.Contains(string(stdout), "errrun00002") {
+		t.Errorf("stdout missing healthy run errrun00002: %s", string(stdout))
+	}
+}
+
 func TestList_TableFormat(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()

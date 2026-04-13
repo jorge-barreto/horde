@@ -431,7 +431,8 @@ func listCmd() *cli.Command {
 			prov := provider.NewDockerProvider()
 			for _, run := range runs {
 				if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-					return err
+					fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
+					continue
 				}
 			}
 

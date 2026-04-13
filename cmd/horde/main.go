@@ -269,7 +269,50 @@ func killCmd() *cli.Command {
 		Usage:     "Kill a running run",
 		ArgsUsage: "<run-id>",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return fmt.Errorf("not implemented")
+			runID := cmd.Args().First()
+			if runID == "" {
+				return fmt.Errorf("missing required argument: <run-id>")
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+			run, err := st.GetRun(ctx, runID)
+			if err != nil {
+				if errors.Is(err, store.ErrRunNotFound) {
+					return fmt.Errorf("run not found: %s", runID)
+				}
+				return fmt.Errorf("reading run: %w", err)
+			}
+			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
+				return fmt.Errorf("run %s is already %s", runID, run.Status)
+			}
+			if run.InstanceID != "" {
+				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+				prov := provider.NewDockerProvider()
+				if err := prov.Kill(ctx, provider.KillOpts{
+					InstanceID: run.InstanceID,
+					ResultsDir: resultsDir,
+				}); err != nil {
+					return fmt.Errorf("killing run: %w", err)
+				}
+			}
+			killedStatus := store.StatusKilled
+			now := time.Now()
+			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+				Status:      &killedStatus,
+				CompletedAt: &now,
+			}); err != nil {
+				return fmt.Errorf("updating run: %w", err)
+			}
+			fmt.Printf("Killed run %s\n", runID)
+			return nil
 		},
 	}
 }

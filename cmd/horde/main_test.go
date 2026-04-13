@@ -1714,6 +1714,79 @@ func TestKill_AlreadyCompleted(t *testing.T) {
 	}
 }
 
+func TestHandleLazyCheck_TimeoutKillFailure(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  stop) echo "stop failed" >&2; exit 1 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "lazycheck001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now().Add(-2 * time.Minute),
+		TimeoutAt:  time.Now().Add(-1 * time.Minute), // already timed out
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	// Capture stderr to check for warning message
+	origStderr := os.Stderr
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating stderr pipe: %v", err)
+	}
+	os.Stderr = stderrW
+	defer func() { os.Stderr = origStderr }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+
+	stderrW.Close()
+	os.Stderr = origStderr
+	stderrOut, _ := io.ReadAll(stderrR)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+
+	// Verify warning was logged
+	if !strings.Contains(string(stderrOut), "warning: killing timed-out container") {
+		t.Errorf("stderr missing warning: %s", string(stderrOut))
+	}
+
+	// Verify run status is still running (not failed)
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store for verification: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusRunning {
+		t.Errorf("status: got %q, want %q", r.Status, store.StatusRunning)
+	}
+	if r.CompletedAt != nil {
+		t.Errorf("CompletedAt should be nil, got %v", r.CompletedAt)
+	}
+}
+
 func TestKill_RunningRun(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

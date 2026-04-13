@@ -545,6 +545,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 			if err := prov.Kill(ctx, provider.KillOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: killing timed-out container: %v\n", err)
+				return nil
 			}
 			failedStatus := store.StatusFailed
 			now := time.Now()

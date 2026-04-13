@@ -1445,7 +1445,7 @@ func TestLogs_Success(t *testing.T) {
 }
 
 func TestLogs_Follow_Success(t *testing.T) {
-	script := "#!/bin/sh\ncase \"$1\" in\n  inspect) echo abc123 ;;\n  logs) printf 'follow line 1\\nfollow line 2\\n' ;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$1\" in\n  inspect) echo abc123 ;;\n  logs) case \"$@\" in *--follow*) printf 'follow line 1\\nfollow line 2\\n' ;; *) echo \"ERROR: --follow not passed\" >&2; exit 1 ;; esac ;;\nesac\n"
 	env := setupStatusEnv(t, script)
 	ctx := context.Background()
 

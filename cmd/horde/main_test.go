@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -1638,5 +1639,201 @@ func TestLogs_ContainerGone(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reading logs") {
 		t.Errorf("error %q does not contain 'reading logs'", err.Error())
+	}
+}
+
+// --- Kill tests ---
+
+func TestKill_MissingRunID(t *testing.T) {
+	setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "kill"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing required argument: <run-id>") {
+		t.Errorf("error %q does not contain 'missing required argument: <run-id>'", err.Error())
+	}
+}
+
+func TestKill_RunNotFound(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	err = newApp().Run(ctx, []string{"horde", "kill", "nonexistent123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "run not found: nonexistent123") {
+		t.Errorf("error %q does not contain 'run not found: nonexistent123'", err.Error())
+	}
+}
+
+func TestKill_AlreadyCompleted(t *testing.T) {
+	for i, status := range []store.Status{store.StatusSuccess, store.StatusFailed, store.StatusKilled} {
+		t.Run(string(status), func(t *testing.T) {
+			env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+			ctx := context.Background()
+
+			runID := fmt.Sprintf("killrun%04d", i+1)
+			st, err := store.NewSQLiteStore(env.dbPath)
+			if err != nil {
+				t.Fatalf("opening store: %v", err)
+			}
+			err = st.CreateRun(ctx, &store.Run{
+				ID:         runID,
+				Repo:       "github.com/test/repo.git",
+				Ticket:     "TICKET-1",
+				Provider:   "docker",
+				LaunchedBy: "testuser",
+				StartedAt:  time.Now(),
+				TimeoutAt:  time.Now().Add(60 * time.Minute),
+				Status:     status,
+			})
+			if err != nil {
+				t.Fatalf("creating run: %v", err)
+			}
+			st.Close()
+
+			err = newApp().Run(ctx, []string{"horde", "kill", runID})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			expected := fmt.Sprintf("run %s is already %s", runID, status)
+			if !strings.Contains(err.Error(), expected) {
+				t.Errorf("error %q does not contain %q", err.Error(), expected)
+			}
+		})
+	}
+}
+
+func TestKill_RunningRun(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  stop) exit 0 ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "killrun0010"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "kill", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if !strings.Contains(string(out), "Killed run") {
+		t.Errorf("output missing 'Killed run': %s", string(out))
+	}
+
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store for verification: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusKilled {
+		t.Errorf("status: got %q, want %q", r.Status, store.StatusKilled)
+	}
+	if r.CompletedAt == nil {
+		t.Error("CompletedAt should be non-nil after kill")
+	}
+}
+
+func TestKill_PendingRun(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	runID := "killrun0020"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusPending,
+		InstanceID: "",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "kill", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if !strings.Contains(string(out), "Killed run") {
+		t.Errorf("output missing 'Killed run': %s", string(out))
+	}
+
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store for verification: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusKilled {
+		t.Errorf("status: got %q, want %q", r.Status, store.StatusKilled)
+	}
+	if r.CompletedAt == nil {
+		t.Error("CompletedAt should be non-nil after kill")
 	}
 }

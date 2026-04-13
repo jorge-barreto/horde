@@ -1529,39 +1529,43 @@ func TestLogs_RunNotFound(t *testing.T) {
 }
 
 func TestLogs_CompletedRun(t *testing.T) {
-	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
-	ctx := context.Background()
+	for _, status := range []store.Status{store.StatusSuccess, store.StatusFailed, store.StatusKilled} {
+		t.Run(string(status), func(t *testing.T) {
+			env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+			ctx := context.Background()
 
-	runID := "logsrun00005"
-	st, err := store.NewSQLiteStore(env.dbPath)
-	if err != nil {
-		t.Fatalf("opening store: %v", err)
-	}
-	err = st.CreateRun(ctx, &store.Run{
-		ID:         runID,
-		Repo:       "github.com/test/repo.git",
-		Ticket:     "TICKET-1",
-		Provider:   "docker",
-		LaunchedBy: "testuser",
-		StartedAt:  time.Now(),
-		TimeoutAt:  time.Now().Add(60 * time.Minute),
-		Status:     store.StatusSuccess,
-		InstanceID: "abc123",
-	})
-	if err != nil {
-		t.Fatalf("creating run: %v", err)
-	}
-	st.Close()
+			runID := "logsrun-" + string(status)
+			st, err := store.NewSQLiteStore(env.dbPath)
+			if err != nil {
+				t.Fatalf("opening store: %v", err)
+			}
+			err = st.CreateRun(ctx, &store.Run{
+				ID:         runID,
+				Repo:       "github.com/test/repo.git",
+				Ticket:     "TICKET-1",
+				Provider:   "docker",
+				LaunchedBy: "testuser",
+				StartedAt:  time.Now(),
+				TimeoutAt:  time.Now().Add(60 * time.Minute),
+				Status:     status,
+				InstanceID: "abc123",
+			})
+			if err != nil {
+				t.Fatalf("creating run: %v", err)
+			}
+			st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "logs", runID})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "logs unavailable") {
-		t.Errorf("error %q does not contain 'logs unavailable'", err.Error())
-	}
-	if !strings.Contains(err.Error(), "container removed") {
-		t.Errorf("error %q does not contain 'container removed'", err.Error())
+			err = newApp().Run(ctx, []string{"horde", "logs", runID})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "logs unavailable") {
+				t.Errorf("error %q does not contain 'logs unavailable'", err.Error())
+			}
+			if !strings.Contains(err.Error(), "container removed") {
+				t.Errorf("error %q does not contain 'container removed'", err.Error())
+			}
+		})
 	}
 }
 

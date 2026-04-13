@@ -207,6 +207,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awsc
 COPY --from=orc-builder /orc /usr/local/bin/orc
 # Install claude CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.claude/bin:${PATH}"
 # Install bd
 COPY --from=bd-builder /bd /usr/local/bin/bd
 COPY entrypoint.sh /entrypoint.sh

@@ -35,12 +35,14 @@ var _ Provider = (*DockerProvider)(nil)
 // Closing kills the process and closes the pipe.
 type logReadCloser struct {
 	io.ReadCloser
-	cmd *exec.Cmd
+	cmd  *exec.Cmd
+	done <-chan struct{} // closed by background goroutine after cmd.Wait() returns
 }
 
 func (l *logReadCloser) Close() error {
 	if l.cmd.Process != nil {
 		l.cmd.Process.Kill()
+		<-l.done // wait for background goroutine to reap the child process
 	}
 	return l.ReadCloser.Close()
 }
@@ -188,12 +190,14 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 		return nil, fmt.Errorf("reading container logs: %w", err)
 	}
 
+	done := make(chan struct{})
 	go func() {
 		cmd.Wait()
 		pw.Close()
+		close(done)
 	}()
 
-	return &logReadCloser{ReadCloser: pr, cmd: cmd}, nil
+	return &logReadCloser{ReadCloser: pr, cmd: cmd, done: done}, nil
 }
 
 func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {

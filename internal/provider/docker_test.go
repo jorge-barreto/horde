@@ -658,6 +658,44 @@ fi
 	}
 }
 
+func TestDockerProvider_Logs_Follow_Close_ReapsProcess(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo 'abc123full'
+elif [ "$1" = "logs" ]; then
+  while true; do
+    echo "streaming line"
+    sleep 0.1
+  done
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rc, err := NewDockerProvider().Logs(ctx, "abc123", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	buf := make([]byte, 5)
+	_, err = rc.Read(buf)
+	if err != nil {
+		t.Fatalf("reading from log stream: %v", err)
+	}
+
+	if err := rc.Close(); err != nil {
+		t.Fatalf("Close() returned error: %v", err)
+	}
+
+	lrc := rc.(*logReadCloser)
+	if lrc.cmd.ProcessState == nil {
+		t.Error("expected ProcessState to be non-nil after Close() (process not reaped)")
+	}
+}
+
 func TestDockerProvider_Logs_Follow_VerifyArgs(t *testing.T) {
 	inspectArgsFile := filepath.Join(t.TempDir(), "inspect-args.txt")
 	logsArgsFile := filepath.Join(t.TempDir(), "logs-args.txt")

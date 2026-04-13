@@ -1394,3 +1394,245 @@ func TestList_OtherRepoFiltered(t *testing.T) {
 		t.Errorf("output should not contain other-repo run listrun00008: %s", outStr)
 	}
 }
+
+func TestLogs_Success(t *testing.T) {
+	script := "#!/bin/sh\ncase \"$1\" in\n  logs) printf 'line 1\\nline 2\\nline 3\\n' ;;\nesac\n"
+	env := setupStatusEnv(t, script)
+	ctx := context.Background()
+
+	runID := "logsrun00001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "logs", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	for _, want := range []string{"line 1", "line 2", "line 3"} {
+		if !strings.Contains(outStr, want) {
+			t.Errorf("output missing %q: %s", want, outStr)
+		}
+	}
+}
+
+func TestLogs_Follow_Success(t *testing.T) {
+	script := "#!/bin/sh\ncase \"$1\" in\n  inspect) echo abc123 ;;\n  logs) printf 'follow line 1\\nfollow line 2\\n' ;;\nesac\n"
+	env := setupStatusEnv(t, script)
+	ctx := context.Background()
+
+	runID := "logsrun00002"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "logs", "--follow", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	for _, want := range []string{"follow line 1", "follow line 2"} {
+		if !strings.Contains(outStr, want) {
+			t.Errorf("output missing %q: %s", want, outStr)
+		}
+	}
+}
+
+func TestLogs_MissingRunID(t *testing.T) {
+	setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "logs"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing required argument") {
+		t.Errorf("error %q does not contain 'missing required argument'", err.Error())
+	}
+}
+
+func TestLogs_RunNotFound(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	if err := os.MkdirAll(filepath.Dir(env.dbPath), 0o755); err != nil {
+		t.Fatalf("creating db dir: %v", err)
+	}
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	err = newApp().Run(ctx, []string{"horde", "logs", "nonexistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "run not found") {
+		t.Errorf("error %q does not contain 'run not found'", err.Error())
+	}
+}
+
+func TestLogs_CompletedRun(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	runID := "logsrun00005"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusSuccess,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	err = newApp().Run(ctx, []string{"horde", "logs", runID})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "logs unavailable") {
+		t.Errorf("error %q does not contain 'logs unavailable'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "container removed") {
+		t.Errorf("error %q does not contain 'container removed'", err.Error())
+	}
+}
+
+func TestLogs_PendingNoContainer(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	runID := "logsrun00006"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusPending,
+		InstanceID: "",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	err = newApp().Run(ctx, []string{"horde", "logs", runID})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "logs unavailable") {
+		t.Errorf("error %q does not contain 'logs unavailable'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no container yet") {
+		t.Errorf("error %q does not contain 'no container yet'", err.Error())
+	}
+}
+
+func TestLogs_ContainerGone(t *testing.T) {
+	script := "#!/bin/sh\ncase \"$1\" in\n  logs) echo \"Error: No such container: abc123\" >&2; exit 1 ;;\nesac\n"
+	env := setupStatusEnv(t, script)
+	ctx := context.Background()
+
+	runID := "logsrun00007"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	err = newApp().Run(ctx, []string{"horde", "logs", runID})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading logs") {
+		t.Errorf("error %q does not contain 'reading logs'", err.Error())
+	}
+}

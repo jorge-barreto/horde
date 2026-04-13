@@ -507,6 +507,42 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 	}
 }
 
+func TestProvider_UnsupportedValue(t *testing.T) {
+	_ = setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "aws-ecs", "launch", "TICKET-1"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `unsupported provider "aws-ecs"`) {
+		t.Errorf("error %q does not contain expected message", err.Error())
+	}
+}
+
+func TestProvider_ExplicitDocker(t *testing.T) {
+	_ = setupLaunchEnv(t)
+	ctx := context.Background()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	pr.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- Status tests ---
 
 type statusEnv struct {

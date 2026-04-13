@@ -36,6 +36,13 @@ func newApp() *cli.Command {
 				Usage: "Override provider selection (docker or aws-ecs)",
 			},
 		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			p := cmd.String("provider")
+			if p != "docker" {
+				return ctx, fmt.Errorf("unsupported provider %q: only \"docker\" is supported in v0.1", p)
+			}
+			return ctx, nil
+		},
 		Commands: []*cli.Command{
 			launchCmd(),
 			statusCmd(),

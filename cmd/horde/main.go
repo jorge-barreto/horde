@@ -481,7 +481,7 @@ type fullRunResult struct {
 	Status        string        `json:"status"`
 	Ticket        string        `json:"ticket"`
 	Workflow      string        `json:"workflow"`
-	TotalCostUSD  float64       `json:"total_cost_usd"`
+	TotalCostUSD  *float64      `json:"total_cost_usd"`
 	TotalDuration string        `json:"total_duration"`
 	Phases        []phaseResult `json:"phases"`
 }
@@ -656,7 +656,9 @@ func printFullResults(run *store.Run, result *fullRunResult) {
 		fmt.Printf("Workflow:       %s\n", run.Workflow)
 	}
 	fmt.Printf("Status:         %s\n", result.Status)
-	fmt.Printf("Total Cost:     $%.2f\n", result.TotalCostUSD)
+	if result.TotalCostUSD != nil {
+		fmt.Printf("Total Cost:     $%.2f\n", *result.TotalCostUSD)
+	}
 	fmt.Printf("Total Duration: %s\n", result.TotalDuration)
 
 	if len(result.Phases) > 0 {

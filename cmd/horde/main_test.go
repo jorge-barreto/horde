@@ -2374,6 +2374,54 @@ func TestResults_CompletedWithResults(t *testing.T) {
 	}
 }
 
+func TestResults_CompletedNoCost(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	runID := "resultsrun_nocost"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
+		Status: store.StatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+	resultDir := filepath.Join(env.tmpHome, ".horde", "results", runID, "audit", "TICKET-1")
+	if err := os.MkdirAll(resultDir, 0o755); err != nil {
+		t.Fatalf("creating result dir: %v", err)
+	}
+	resultJSON := `{"exit_code":0,"status":"completed","ticket":"TICKET-1","workflow":"","total_duration":"5m 0s","phases":[]}`
+	if err := os.WriteFile(filepath.Join(resultDir, "run-result.json"), []byte(resultJSON), 0o644); err != nil {
+		t.Fatalf("writing run-result.json: %v", err)
+	}
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if strings.Contains(outStr, "Total Cost:") {
+		t.Errorf("output should not contain Total Cost when absent from JSON, got: %s", outStr)
+	}
+	for _, want := range []string{runID, "TICKET-1", "completed", "5m 0s"} {
+		if !strings.Contains(outStr, want) {
+			t.Errorf("output missing %q: %s", want, outStr)
+		}
+	}
+}
+
 func TestResults_CompletedWithWorkflow(t *testing.T) {
 	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
 	ctx := context.Background()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"text/tabwriter"
 	"time"
 
 	"github.com/jorge-barreto/horde/internal/config"
@@ -248,15 +249,60 @@ func resultsCmd() *cli.Command {
 func listCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "list",
-		Usage: "List runs",
+		Usage: "List runs for the current repo",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "all",
-				Usage: "List all runs",
+				Usage: "Include completed, failed, and killed runs",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return fmt.Errorf("not implemented")
+			all := cmd.Bool("all")
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+
+			repo, err := config.RepoURL(cwd)
+			if err != nil {
+				return err
+			}
+
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+
+			runs, err := st.ListByRepo(ctx, repo, !all)
+			if err != nil {
+				return fmt.Errorf("listing runs: %w", err)
+			}
+
+			prov := provider.NewDockerProvider()
+			for _, run := range runs {
+				if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+					return err
+				}
+			}
+
+			if len(runs) == 0 {
+				if all {
+					fmt.Println("No runs found for this repo.")
+				} else {
+					fmt.Println("No active runs for this repo.")
+				}
+				return nil
+			}
+
+			printRunTable(runs)
+			return nil
 		},
 	}
 }
@@ -370,6 +416,34 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 	}
 
 	return nil
+}
+
+func printRunTable(runs []*store.Run) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "RUN ID\tTICKET\tBRANCH\tSTATUS\tDURATION\tCOST")
+	for _, run := range runs {
+		branch := run.Branch
+		if branch == "" {
+			branch = "(default)"
+		}
+
+		var duration time.Duration
+		if run.CompletedAt != nil {
+			duration = run.CompletedAt.Sub(run.StartedAt)
+		} else {
+			duration = time.Since(run.StartedAt)
+		}
+		duration = duration.Truncate(time.Second)
+
+		cost := "-"
+		if run.TotalCostUSD != nil {
+			cost = fmt.Sprintf("$%.2f", *run.TotalCostUSD)
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			run.ID, run.Ticket, branch, run.Status, duration, cost)
+	}
+	w.Flush()
 }
 
 func printRunStatus(run *store.Run) {

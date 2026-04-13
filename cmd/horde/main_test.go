@@ -1032,3 +1032,365 @@ esac
 		t.Errorf("store TotalCostUSD = %v, want 7.50", run.TotalCostUSD)
 	}
 }
+
+// --- List tests ---
+
+func TestList_ActiveOnly(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-10 * time.Minute)
+
+	runs := []*store.Run{
+		{ID: "listrun00001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
+		{ID: "listrun00003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
+	}
+	for _, r := range runs {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "listrun00001") {
+		t.Errorf("output missing listrun00001: %s", outStr)
+	}
+	if !strings.Contains(outStr, "listrun00002") {
+		t.Errorf("output missing listrun00002: %s", outStr)
+	}
+	if !strings.Contains(outStr, "RUN ID") {
+		t.Errorf("output missing header 'RUN ID': %s", outStr)
+	}
+	if strings.Contains(outStr, "listrun00003") {
+		t.Errorf("output should not contain completed run listrun00003: %s", outStr)
+	}
+}
+
+func TestList_All(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-10 * time.Minute)
+
+	runs := []*store.Run{
+		{ID: "listrun00001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
+		{ID: "listrun00003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
+	}
+	for _, r := range runs {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "listrun00001") {
+		t.Errorf("output missing listrun00001: %s", outStr)
+	}
+	if !strings.Contains(outStr, "listrun00002") {
+		t.Errorf("output missing listrun00002: %s", outStr)
+	}
+	if !strings.Contains(outStr, "listrun00003") {
+		t.Errorf("output missing listrun00003: %s", outStr)
+	}
+}
+
+func TestList_EmptyResult(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if !strings.Contains(string(out), "No active runs for this repo.") {
+		t.Errorf("output missing 'No active runs for this repo.': %s", string(out))
+	}
+}
+
+func TestList_EmptyResult_All(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if !strings.Contains(string(out), "No runs found for this repo.") {
+		t.Errorf("output missing 'No runs found for this repo.': %s", string(out))
+	}
+}
+
+func TestList_LazyCompletion(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	// Overwrite fake docker with one that handles inspect/cp/rm
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing docker script: %v", err)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         "listrun00005",
+		Ticket:     "TICKET-5",
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+		Repo:       "github.com/test/repo.git",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  now.Add(-15 * time.Minute),
+		TimeoutAt:  now.Add(45 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if !strings.Contains(string(out), "success") {
+		t.Errorf("output missing 'success': %s", string(out))
+	}
+
+	st2, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, "listrun00005")
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusSuccess {
+		t.Errorf("store status = %q, want %q", r.Status, store.StatusSuccess)
+	}
+	if r.ExitCode == nil || *r.ExitCode != 0 {
+		t.Errorf("store exit code = %v, want 0", r.ExitCode)
+	}
+	if r.CompletedAt == nil {
+		t.Errorf("store completed_at is nil")
+	}
+}
+
+func TestList_TableFormat(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now
+	cost := 4.52
+	err = st.CreateRun(ctx, &store.Run{
+		ID:           "listrun00006",
+		Ticket:       "PROJ-42",
+		Branch:       "feature-x",
+		Status:       store.StatusSuccess,
+		Repo:         "github.com/test/repo.git",
+		Provider:     "docker",
+		LaunchedBy:   "testuser",
+		StartedAt:    now.Add(-10 * time.Minute),
+		CompletedAt:  &completedAt,
+		TimeoutAt:    now.Add(50 * time.Minute),
+		TotalCostUSD: &cost,
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "PROJ-42") {
+		t.Errorf("output missing 'PROJ-42': %s", outStr)
+	}
+	if !strings.Contains(outStr, "feature-x") {
+		t.Errorf("output missing 'feature-x': %s", outStr)
+	}
+	if !strings.Contains(outStr, "$4.52") {
+		t.Errorf("output missing '$4.52': %s", outStr)
+	}
+}
+
+func TestList_OtherRepoFiltered(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	runs := []*store.Run{
+		{ID: "listrun00007", Repo: "github.com/test/repo.git", Ticket: "T-LOCAL", Status: store.StatusRunning, Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00008", Repo: "github.com/other/repo.git", Ticket: "T-OTHER", Status: store.StatusRunning, Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+	}
+	for _, r := range runs {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "list"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "listrun00007") {
+		t.Errorf("output missing listrun00007: %s", outStr)
+	}
+	if strings.Contains(outStr, "listrun00008") {
+		t.Errorf("output should not contain other-repo run listrun00008: %s", outStr)
+	}
+}

@@ -404,6 +404,23 @@ type runResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 }
 
+type fullRunResult struct {
+	ExitCode      int           `json:"exit_code"`
+	Status        string        `json:"status"`
+	Ticket        string        `json:"ticket"`
+	Workflow      string        `json:"workflow"`
+	TotalCostUSD  float64       `json:"total_cost_usd"`
+	TotalDuration string        `json:"total_duration"`
+	Phases        []phaseResult `json:"phases"`
+}
+
+type phaseResult struct {
+	Name     string  `json:"name"`
+	CostUSD  float64 `json:"cost_usd"`
+	Duration string  `json:"duration"`
+	Status   string  `json:"status"`
+}
+
 func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st store.Store, run *store.Run, homeDir string) error {
 	if run.Status != store.StatusPending && run.Status != store.StatusRunning {
 		return nil

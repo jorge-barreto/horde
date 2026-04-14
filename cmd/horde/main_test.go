@@ -2217,6 +2217,12 @@ esac
 	if r.CompletedAt == nil {
 		t.Error("CompletedAt should be non-nil after successful kill")
 	}
+	if r.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD: got %v, want nil (no run-result.json)", *r.TotalCostUSD)
+	}
+	if r.ExitCode != nil {
+		t.Errorf("ExitCode: got %v, want nil (no run-result.json)", *r.ExitCode)
+	}
 }
 
 func TestHandleLazyCheck_TimeoutKillCapturesCostAndExitCode(t *testing.T) {

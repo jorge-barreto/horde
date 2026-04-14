@@ -2987,7 +2987,7 @@ func TestResolveLaunchedBy_ECS_NilConfig(t *testing.T) {
 
 func TestResolveLaunchedBy_ECS_NoCredentials(t *testing.T) {
 	t.Parallel()
-	cfg := aws.Config{}
+	cfg := aws.Config{Credentials: aws.AnonymousCredentials{}}
 	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", &cfg, "")
 	if err == nil {
 		t.Fatalf("resolveLaunchedBy(aws-ecs, empty config) = %q, want error", got)

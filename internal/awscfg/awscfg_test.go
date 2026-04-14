@@ -66,7 +66,7 @@ func TestLoad_RegionFromEnv(t *testing.T) {
 
 func TestCallerIdentity_Error(t *testing.T) {
 	t.Parallel()
-	_, err := CallerIdentity(context.Background(), aws.Config{}, "")
+	_, err := CallerIdentity(context.Background(), aws.Config{Credentials: aws.AnonymousCredentials{}}, "")
 	if err == nil {
 		t.Fatal("CallerIdentity() with empty config expected error, got nil")
 	}

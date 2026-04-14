@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -274,14 +275,17 @@ The entrypoint re-runs and orc picks up from where it left off. Use
 				return err
 			}
 
-			if run.Status == store.StatusRunning || run.Status == store.StatusPending {
-				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", runID, run.Status)
+			if run.Status == store.StatusPending {
+				return fmt.Errorf("run %s is still pending", runID)
+			}
+			if run.Status == store.StatusRunning {
+				return fmt.Errorf("run %s is still running — kill it first or wait for completion", runID)
 			}
 			if run.Status == store.StatusSuccess {
 				return fmt.Errorf("run %s already succeeded — nothing to retry", runID)
 			}
 
-			// Verify the container still exists
+			// Verify the container is still running (sleeping)
 			instStatus, err := prov.Status(ctx, run.InstanceID)
 			if err != nil {
 				return fmt.Errorf("checking container: %w", err)
@@ -289,10 +293,22 @@ The entrypoint re-runs and orc picks up from where it left off. Use
 			if instStatus.State == "unknown" {
 				return fmt.Errorf("container for run %s no longer exists — use 'horde launch' to start fresh", runID)
 			}
+			if instStatus.State != "running" {
+				return fmt.Errorf("container for run %s is stopped — use 'horde launch' to start fresh", runID)
+			}
 
-			// Restart the stopped container
-			if err := prov.Start(ctx, run.InstanceID); err != nil {
-				return err
+			// Clear previous completion marker and exec orc inside the running container
+			prov.ExecInContainer(ctx, run.InstanceID, "rm -f /workspace/.horde-exit-code")
+
+			ticket := run.Ticket
+			orcCmd := "cd /workspace && orc run " + ticket + " --auto --no-color; echo $? > /workspace/.horde-exit-code"
+			if run.Workflow != "" {
+				orcCmd = "cd /workspace && orc run -w " + run.Workflow + " " + ticket + " --auto --no-color; echo $? > /workspace/.horde-exit-code"
+			}
+			execCmd := exec.CommandContext(ctx, "docker", "exec", "-d",
+				run.InstanceID, "bash", "-c", orcCmd)
+			if _, err := execCmd.Output(); err != nil {
+				return fmt.Errorf("starting orc retry: %w", err)
 			}
 
 			// Update the same run record back to running
@@ -758,10 +774,9 @@ func shellCmd() *cli.Command {
 		Name:      "shell",
 		Usage:     "Open a shell in a run's container",
 		ArgsUsage: "<run-id>",
-		Description: `Starts the stopped container and opens an interactive shell via
-'docker exec'. Use this for manual inspection or to run orc commands
-directly (e.g., 'orc run --resume'). The container is left running
-after the shell exits — use 'horde kill' to stop it.`,
+		Description: `Opens an interactive bash shell in the run's container. The container
+stays alive after orc finishes, so you can inspect files, run orc commands
+directly (e.g., 'orc run --resume'), or fix issues manually.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
 			if runID == "" {
@@ -801,12 +816,8 @@ after the shell exits — use 'horde kill' to stop it.`,
 			if instStatus.State == "unknown" {
 				return fmt.Errorf("container for run %s no longer exists", runID)
 			}
-
-			// Start the container if it's stopped (entrypoint runs in background)
-			if instStatus.State == "stopped" {
-				if err := prov.Start(ctx, run.InstanceID); err != nil {
-					return fmt.Errorf("starting container: %w", err)
-				}
+			if instStatus.State != "running" {
+				return fmt.Errorf("container for run %s is not running — use 'horde retry' first", runID)
 			}
 
 			// Exec into the running container
@@ -909,63 +920,8 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 	}
 
 	switch instanceStatus.State {
-	case "stopped":
-		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-		// Best-effort copy of artifacts and logs — container is preserved for retry
-		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
-		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
-
-		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
-			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-				os.MkdirAll(resultsDir, 0o755)
-				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
-			}
-			logs.Close()
-		}
-
-		// Parse run-result.json for cost (best effort)
-		var resultPath string
-		if run.Workflow != "" {
-			resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-		} else {
-			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-		}
-		var cost *float64
-		if data, err := os.ReadFile(resultPath); err == nil {
-			var rr runResult
-			if json.Unmarshal(data, &rr) == nil {
-				cost = rr.TotalCostUSD
-			}
-		}
-
-		var completedAt *time.Time
-		if instanceStatus.FinishedAt != nil && !instanceStatus.FinishedAt.IsZero() {
-			completedAt = instanceStatus.FinishedAt
-		} else {
-			now := time.Now()
-			completedAt = &now
-		}
-
-		var newStatus store.Status
-		if instanceStatus.ExitCode != nil {
-			newStatus = mapExitCode(*instanceStatus.ExitCode)
-		} else {
-			newStatus = store.StatusFailed
-		}
-		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-			Status:       &newStatus,
-			ExitCode:     instanceStatus.ExitCode,
-			CompletedAt:  completedAt,
-			TotalCostUSD: cost,
-		}); err != nil {
-			return fmt.Errorf("updating run after completion: %w", err)
-		}
-		run.Status = newStatus
-		run.ExitCode = instanceStatus.ExitCode
-		run.CompletedAt = completedAt
-		run.TotalCostUSD = cost
-
 	case "running":
+		// Check timeout first
 		if time.Now().After(run.TimeoutAt) {
 			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 			if err := prov.Stop(ctx, provider.StopOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
@@ -1003,7 +959,105 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			run.CompletedAt = &now
 			run.TotalCostUSD = cost
 			run.ExitCode = exitCode
+			return nil
 		}
+
+		// Check if orc finished (marker file exists — container stays alive via sleep infinity)
+		exitData, err := prov.ReadContainerFile(ctx, run.InstanceID, "/workspace/.horde-exit-code")
+		if err != nil {
+			return nil // orc still running, nothing to do
+		}
+		exitCode := 1 // default to failure
+		fmt.Sscanf(strings.TrimSpace(string(exitData)), "%d", &exitCode)
+
+		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
+		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+
+		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
+			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
+				os.MkdirAll(resultsDir, 0o755)
+				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+			}
+			logs.Close()
+		}
+
+		var resultPath string
+		if run.Workflow != "" {
+			resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+		} else {
+			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+		}
+		var cost *float64
+		if data, err := os.ReadFile(resultPath); err == nil {
+			var rr runResult
+			if json.Unmarshal(data, &rr) == nil {
+				cost = rr.TotalCostUSD
+			}
+		}
+
+		newStatus := mapExitCode(exitCode)
+		now := time.Now()
+		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+			Status:       &newStatus,
+			ExitCode:     &exitCode,
+			CompletedAt:  &now,
+			TotalCostUSD: cost,
+		}); err != nil {
+			return fmt.Errorf("updating run after completion: %w", err)
+		}
+		run.Status = newStatus
+		run.ExitCode = &exitCode
+		run.CompletedAt = &now
+		run.TotalCostUSD = cost
+
+	case "stopped":
+		// Fallback for containers that were killed or crashed
+		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
+		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+
+		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
+			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
+				os.MkdirAll(resultsDir, 0o755)
+				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+			}
+			logs.Close()
+		}
+
+		var resultPath string
+		if run.Workflow != "" {
+			resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+		} else {
+			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+		}
+		var cost *float64
+		if data, err := os.ReadFile(resultPath); err == nil {
+			var rr runResult
+			if json.Unmarshal(data, &rr) == nil {
+				cost = rr.TotalCostUSD
+			}
+		}
+
+		var newStatus store.Status
+		if instanceStatus.ExitCode != nil {
+			newStatus = mapExitCode(*instanceStatus.ExitCode)
+		} else {
+			newStatus = store.StatusFailed
+		}
+		completedNow := time.Now()
+		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+			Status:       &newStatus,
+			ExitCode:     instanceStatus.ExitCode,
+			CompletedAt:  &completedNow,
+			TotalCostUSD: cost,
+		}); err != nil {
+			return fmt.Errorf("updating run after completion: %w", err)
+		}
+		run.Status = newStatus
+		run.ExitCode = instanceStatus.ExitCode
+		run.CompletedAt = &completedNow
+		run.TotalCostUSD = cost
 
 	case "unknown":
 		failedStatus := store.StatusFailed

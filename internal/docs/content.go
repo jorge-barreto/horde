@@ -259,20 +259,21 @@ Planned features:
 const topicRetry = `Retrying and Inspecting Runs
 =============================
 
-When a run fails or is killed, the container is preserved with its full
-filesystem intact — all code changes, orc state, and audit data.
+Containers stay alive after orc finishes (via sleep infinity), so you
+always have shell access and can retry without recreating anything.
 
 Retry
 -----
 
     horde retry <run-id>
 
-Restarts the stopped container via 'docker start'. The entrypoint detects
-that the workspace already exists (skips clone) and re-runs orc. Orc sees
-its own audit state and picks up from the failed phase automatically.
+Runs orc again inside the existing container. The container is already
+running (sleeping after orc exited), so retry just exec's a new orc
+process. Orc sees its own audit state and picks up from the failed
+phase automatically.
 
-The same run ID is reused — no new run or container is created. The
-timeout is reset.
+The same run ID is reused — no new container is created. The timeout
+is reset.
 
     horde retry abc123
     # Output: Retrying horde-k43 (run abc123)
@@ -285,38 +286,37 @@ Shell
 
     horde shell <run-id>
 
-Opens an interactive bash shell into the container's filesystem. Use this
-for manual inspection or to run orc commands directly:
+Opens an interactive bash shell in the running container:
 
     horde shell abc123
     # Inside the container:
     cd /workspace
     orc run horde-k43 --resume          # resume interrupted agent session
     orc run horde-k43 --retry implement # retry from a specific phase
+    git push origin HEAD:refs/heads/horde/horde-k43  # push work manually
 
-The shell runs in a snapshot of the container (via 'docker commit'), so
-changes made in the shell do not affect the original container. The
-snapshot is cleaned up on exit.
+Changes made in the shell affect the container directly. This is the
+real container, not a snapshot.
 
 Clean
 -----
 
-    horde clean              # remove all stopped containers
-    horde clean <run-id>     # remove a specific container
+    horde clean              # stop and remove all terminal containers
+    horde clean <run-id>     # stop and remove a specific container
 
-Containers for completed runs are preserved by default for retry and
-shell access. Use 'horde clean' to free up disk space when you no longer
-need them. Running and pending runs cannot be cleaned.
+Containers are preserved by default for retry and shell access. Use
+'horde clean' to free up resources when you no longer need them.
+Running and pending runs cannot be cleaned.
 
 Container Lifecycle
 -------------------
 
-    horde launch   →  container created and running
-    orc completes  →  container stopped (preserved)
-    horde status   →  copies artifacts, updates DB (container untouched)
-    horde retry    →  container restarted, orc resumes
-    horde kill     →  container stopped (preserved)
-    horde shell    →  interactive access via snapshot
+    horde launch   →  container created, orc runs
+    orc finishes   →  container stays alive (sleep infinity)
+    horde status   →  detects completion via marker file, copies artifacts
+    horde retry    →  exec's orc again inside the same container
+    horde shell    →  interactive bash in the container
+    horde kill     →  container stopped
     horde clean    →  container removed
 `
 

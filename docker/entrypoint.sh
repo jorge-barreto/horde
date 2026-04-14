@@ -51,6 +51,10 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     if [ -d .orc/audit/ ]; then
         aws s3 cp .orc/audit/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/audit/" --recursive || echo "WARNING: audit upload failed" >&2
     fi
+    # ECS: exit normally so the task stops (billed per second)
+    exit $EXIT_CODE
 fi
 
-exit $EXIT_CODE
+# Docker: write exit code marker and keep container alive for shell/retry
+echo "$EXIT_CODE" > /workspace/.horde-exit-code
+exec sleep infinity

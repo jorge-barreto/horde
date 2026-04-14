@@ -665,6 +665,7 @@ func TestStatus_RunningRun(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
 esac
 `
 	env := setupStatusEnv(t, dockerScript)
@@ -1499,8 +1500,8 @@ case "$1" in
       container1) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
       container2) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
     esac ;;
+  exec) exit 1 ;;
   cp) exit 0 ;;
-  rm) exit 0 ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
@@ -1626,8 +1627,8 @@ case "$1" in
       badcontainer) echo "Error: connection refused" >&2; exit 1 ;;
       goodcontainer) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
     esac ;;
+  exec) exit 1 ;;
   cp) exit 0 ;;
-  rm) exit 0 ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
@@ -2382,6 +2383,7 @@ func TestKill_RunningRun(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
   stop) exit 0 ;;
   cp) exit 0 ;;
 esac
@@ -2511,6 +2513,7 @@ func TestKill_CapturesCostAndExitCode(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
   stop) exit 0 ;;
   cp)
     case "$2" in
@@ -2587,6 +2590,7 @@ func TestKill_CapturesCostAndExitCode_WithWorkflow(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
   stop) exit 0 ;;
   cp)
     case "$2" in
@@ -2694,7 +2698,7 @@ func TestResults_RunNotFound(t *testing.T) {
 }
 
 func TestResults_StillRunning(t *testing.T) {
-	dockerScript := "#!/bin/sh\ncase \"$1\" in\n  inspect) printf '{\"Running\":true,\"ExitCode\":0,\"StartedAt\":\"2024-06-15T10:30:00Z\",\"FinishedAt\":\"0001-01-01T00:00:00Z\"}' ;;\nesac\n"
+	dockerScript := "#!/bin/sh\ncase \"$1\" in\n  inspect) printf '{\"Running\":true,\"ExitCode\":0,\"StartedAt\":\"2024-06-15T10:30:00Z\",\"FinishedAt\":\"0001-01-01T00:00:00Z\"}' ;;\n  exec) exit 1 ;;\nesac\n"
 	env := setupStatusEnv(t, dockerScript)
 	ctx := context.Background()
 	runID := "resultsrun001"

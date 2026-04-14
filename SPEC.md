@@ -178,7 +178,7 @@ horde maps these to run statuses: 0 → `success`, 1/2/3/4/6 → `failed`, 5 →
 ### 6. Kill
 
 `horde kill <run-id>` stops a running instance:
-- **Docker provider:** calls `docker stop`, attempts a best-effort copy of `.orc/audit/` and `.orc/artifacts/` (may be incomplete or absent if orc hadn't written results yet), updates the store to `killed`, removes the container.
+- **Docker provider:** calls `docker stop`, attempts a best-effort copy of `.orc/audit/` and `.orc/artifacts/` (may be incomplete or absent if orc hadn't written results yet), extracts `total_cost_usd` and `exit_code` from `run-result.json` if present, updates the store to `killed`, removes the container.
 - **ECS provider:** calls `ecs:StopTask`. The EventBridge Lambda updates DynamoDB when the task reaches STOPPED state.
 
 ### 7. Timeout

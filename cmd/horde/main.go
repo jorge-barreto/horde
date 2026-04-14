@@ -303,6 +303,8 @@ func killCmd() *cli.Command {
 			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
 			}
+			var cost *float64
+			var exitCode *int
 			if run.InstanceID != "" {
 				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 				prov := provider.NewDockerProvider()
@@ -312,12 +314,29 @@ func killCmd() *cli.Command {
 				}); err != nil {
 					return fmt.Errorf("killing run: %w", err)
 				}
+
+				// Best-effort: read run-result.json for cost and exit code
+				var resultPath string
+				if run.Workflow != "" {
+					resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+				} else {
+					resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+				}
+				if data, err := os.ReadFile(resultPath); err == nil {
+					var rr runResult
+					if json.Unmarshal(data, &rr) == nil {
+						cost = rr.TotalCostUSD
+						exitCode = rr.ExitCode
+					}
+				}
 			}
 			killedStatus := store.StatusKilled
 			now := time.Now()
 			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-				Status:      &killedStatus,
-				CompletedAt: &now,
+				Status:       &killedStatus,
+				CompletedAt:  &now,
+				TotalCostUSD: cost,
+				ExitCode:     exitCode,
 			}); err != nil {
 				return fmt.Errorf("updating run: %w", err)
 			}
@@ -474,6 +493,7 @@ func mapExitCode(code int) store.Status {
 
 type runResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
+	ExitCode     *int     `json:"exit_code"`
 }
 
 type fullRunResult struct {

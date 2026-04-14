@@ -47,6 +47,7 @@ func newApp() *cli.Command {
 		},
 		Commands: []*cli.Command{
 			launchCmd(),
+			resumeCmd(),
 			statusCmd(),
 			logsCmd(),
 			killCmd(),
@@ -191,6 +192,157 @@ func launchCmd() *cli.Command {
 				return fmt.Errorf("updating run status: %w", err)
 			}
 
+			fmt.Println(id)
+			return nil
+		},
+	}
+}
+
+func resumeCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "resume",
+		Usage:     "Resume a failed or killed run",
+		ArgsUsage: "<run-id>",
+		Flags: []cli.Flag{
+			&cli.DurationFlag{
+				Name:  "timeout",
+				Usage: "Timeout for the resumed run",
+				Value: 60 * time.Minute,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			prevID := cmd.Args().First()
+			if prevID == "" {
+				return fmt.Errorf("missing required argument: <run-id>")
+			}
+			timeout := cmd.Duration("timeout")
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+
+			prev, err := st.GetRun(ctx, prevID)
+			if err != nil {
+				if errors.Is(err, store.ErrRunNotFound) {
+					return fmt.Errorf("run not found: %s", prevID)
+				}
+				return fmt.Errorf("reading run: %w", err)
+			}
+			if prev.Status == store.StatusRunning || prev.Status == store.StatusPending {
+				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", prevID, prev.Status)
+			}
+
+			resumeDir := filepath.Join(homeDir, ".horde", "results", prevID)
+			if _, err := os.Stat(resumeDir); err != nil {
+				return fmt.Errorf("no results found for run %s — nothing to resume from", prevID)
+			}
+
+			// Find the failed phase from the previous run's result
+			var retryPhase string
+			var resultPath string
+			if prev.Workflow != "" {
+				resultPath = filepath.Join(resumeDir, "audit", prev.Workflow, prev.Ticket, "run-result.json")
+			} else {
+				resultPath = filepath.Join(resumeDir, "audit", prev.Ticket, "run-result.json")
+			}
+			if data, err := os.ReadFile(resultPath); err == nil {
+				var rr struct {
+					FailedPhase string `json:"failed_phase"`
+				}
+				if json.Unmarshal(data, &rr) == nil && rr.FailedPhase != "" {
+					retryPhase = rr.FailedPhase
+				}
+			}
+
+			repo, err := config.RepoURL(cwd)
+			if err != nil {
+				return err
+			}
+			envPath, err := config.ValidateEnvFile(cwd)
+			if err != nil {
+				return err
+			}
+
+			id, err := runid.Generate()
+			if err != nil {
+				return err
+			}
+
+			prov := provider.NewDockerProvider()
+
+			workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
+			if err != nil {
+				return fmt.Errorf("accessing worker files: %w", err)
+			}
+			if err := prov.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
+				failedStatus := store.StatusFailed
+				now := time.Now()
+				st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now})
+				return fmt.Errorf("preparing worker image: %w", err)
+			}
+
+			now := time.Now()
+			run := &store.Run{
+				ID:         id,
+				Repo:       repo,
+				Ticket:     prev.Ticket,
+				Branch:     prev.Branch,
+				Workflow:   prev.Workflow,
+				Provider:   "docker",
+				Status:     store.StatusPending,
+				LaunchedBy: config.LaunchedBy(cwd),
+				StartedAt:  now,
+				TimeoutAt:  now.Add(timeout),
+			}
+			if err := st.CreateRun(ctx, run); err != nil {
+				return fmt.Errorf("recording run: %w", err)
+			}
+
+			result, err := prov.Launch(ctx, provider.LaunchOpts{
+				Repo:       repo,
+				Ticket:     prev.Ticket,
+				Branch:     prev.Branch,
+				Workflow:   prev.Workflow,
+				RunID:      id,
+				EnvFile:    envPath,
+				ResumeDir:  resumeDir,
+				RetryPhase: retryPhase,
+			})
+			if err != nil {
+				failedStatus := store.StatusFailed
+				now := time.Now()
+				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to mark run as failed: %v\n", updateErr)
+				}
+				return err
+			}
+
+			runningStatus := store.StatusRunning
+			if err := st.UpdateRun(ctx, id, &store.RunUpdate{
+				Status:     &runningStatus,
+				InstanceID: &result.InstanceID,
+				Metadata:   result.Metadata,
+			}); err != nil {
+				return fmt.Errorf("updating run status: %w", err)
+			}
+
+			if retryPhase != "" {
+				fmt.Fprintf(os.Stderr, "Resuming %s from phase %q (run %s)\n", prev.Ticket, retryPhase, prevID)
+			} else {
+				fmt.Fprintf(os.Stderr, "Resuming %s from run %s\n", prev.Ticket, prevID)
+			}
 			fmt.Println(id)
 			return nil
 		},

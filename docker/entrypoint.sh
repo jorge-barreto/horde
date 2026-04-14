@@ -15,11 +15,27 @@ if [ -n "${BRANCH:-}" ]; then
     fi
 fi
 
+# Restore state from a previous run (resume)
+if [ -d "${RESUME_DIR:-}" ]; then
+    echo "Restoring state from previous run..."
+    mkdir -p .orc
+    if [ -d "$RESUME_DIR/artifacts" ]; then
+        cp -a "$RESUME_DIR/artifacts/." .orc/artifacts/
+    fi
+    if [ -d "$RESUME_DIR/audit" ]; then
+        cp -a "$RESUME_DIR/audit/." .orc/audit/
+    fi
+fi
+
 # Run orc
+ORC_ARGS="--auto --no-color"
+if [ -n "${RETRY_PHASE:-}" ]; then
+    ORC_ARGS="$ORC_ARGS --retry $RETRY_PHASE"
+fi
 if [ -n "${WORKFLOW:-}" ]; then
-    orc run -w "$WORKFLOW" "$TICKET" --auto --no-color
+    orc run -w "$WORKFLOW" "$TICKET" $ORC_ARGS
 else
-    orc run "$TICKET" --auto --no-color
+    orc run "$TICKET" $ORC_ARGS
 fi
 EXIT_CODE=$?
 

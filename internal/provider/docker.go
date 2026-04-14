@@ -59,6 +59,12 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	if opts.EnvFile != "" {
 		args = append(args, "--env-file", opts.EnvFile)
 	}
+	if opts.ResumeDir != "" {
+		args = append(args, "-v", opts.ResumeDir+":/resume:ro", "-e", "RESUME_DIR=/resume")
+	}
+	if opts.RetryPhase != "" {
+		args = append(args, "-e", "RETRY_PHASE="+opts.RetryPhase)
+	}
 	args = append(args, dockerImage)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)

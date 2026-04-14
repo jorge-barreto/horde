@@ -546,6 +546,29 @@ func TestProvider_ExplicitDocker(t *testing.T) {
 	}
 }
 
+func TestProfile_AcceptedAsGlobalFlag(t *testing.T) {
+	_ = setupLaunchEnv(t)
+	ctx := context.Background()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	err = newApp().Run(ctx, []string{"horde", "--profile", "staging", "launch", "TICKET-1"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	pr.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- Status tests ---
 
 type statusEnv struct {

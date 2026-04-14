@@ -38,6 +38,10 @@ func newApp() *cli.Command {
 				Value: "docker",
 				Usage: "Override provider selection (docker or aws-ecs)",
 			},
+			&cli.StringFlag{
+				Name:  "profile",
+				Usage: "AWS named profile (passed through to AWS SDK)",
+			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			p := cmd.String("provider")

@@ -21,5 +21,6 @@ ENV PATH="/root/.local/bin:${PATH}"
 COPY entrypoint.sh /entrypoint.sh
 COPY git-askpass.sh /usr/local/bin/git-askpass.sh
 RUN chmod +x /entrypoint.sh /usr/local/bin/git-askpass.sh
+ENV GIT_ASKPASS="/usr/local/bin/git-askpass.sh"
 
 ENTRYPOINT ["/entrypoint.sh"]

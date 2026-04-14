@@ -1,8 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 
-# Clone repo using credential helper (avoids token in process args and .git/config)
-export GIT_ASKPASS="/usr/local/bin/git-askpass.sh"
+# Clone repo (GIT_ASKPASS is set in the Dockerfile for container-wide availability)
 if ! git clone "https://${REPO_URL}" /workspace; then
     echo "ERROR: git clone failed" >&2
     exit 3

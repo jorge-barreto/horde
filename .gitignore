@@ -19,9 +19,8 @@ horde
 .horde/
 .env
 
-# beads (work tracking — db tracked, backups ignored)
-!.beads/beads.db
-.beads/*.bak
+# beads (local state — mounted into containers, not tracked in git)
+.beads/
 
 # IDE
 .idea/

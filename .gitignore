@@ -17,6 +17,7 @@ horde
 
 # horde local data
 .horde/
+.env
 
 # beads (local work tracking)
 .beads/

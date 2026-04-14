@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
 	"time"
 
+	horde "github.com/jorge-barreto/horde"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/runid"
@@ -149,6 +151,15 @@ func launchCmd() *cli.Command {
 			}
 
 			prov := provider.NewDockerProvider()
+
+			workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
+			if err != nil {
+				return fmt.Errorf("accessing worker files: %w", err)
+			}
+			if err := prov.EnsureImage(ctx, workerFS, os.Stderr); err != nil {
+				return fmt.Errorf("preparing worker image: %w", err)
+			}
+
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
 				Repo:     repo,
 				Ticket:   ticket,

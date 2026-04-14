@@ -1,8 +1,8 @@
-ARG ORC_IMAGE=ghcr.io/jorge-barreto/orc:latest
-ARG BD_IMAGE=ghcr.io/jorge-barreto/bd:latest
-
-FROM ${ORC_IMAGE} AS orc-builder
-FROM ${BD_IMAGE} AS bd-builder
+FROM golang:1.23-bookworm AS builder
+ENV GOBIN=/out
+RUN mkdir -p /out \
+    && go install github.com/jorge-barreto/orc/cmd/orc@latest \
+    && go install github.com/jorge-barreto/bd/cmd/bd@latest
 
 FROM debian:bookworm-slim
 
@@ -12,12 +12,11 @@ RUN apt-get update && apt-get install -y git jq bash curl unzip \
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awscliv2.zip \
     && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
 
-COPY --from=orc-builder /orc /usr/local/bin/orc
+COPY --from=builder /out/orc /usr/local/bin/orc
+COPY --from=builder /out/bd /usr/local/bin/bd
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.claude/bin:${PATH}"
-
-COPY --from=bd-builder /bd /usr/local/bin/bd
 
 COPY entrypoint.sh /entrypoint.sh
 COPY git-askpass.sh /usr/local/bin/git-askpass.sh

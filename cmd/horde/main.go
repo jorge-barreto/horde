@@ -228,6 +228,9 @@ func statusCmd() *cli.Command {
 			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
 				return err
 			}
+			if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
+				run.TotalCostUSD = fetchLiveCost(ctx, prov, run)
+			}
 			printRunStatus(run)
 			return nil
 		},
@@ -485,6 +488,9 @@ func listCmd() *cli.Command {
 					fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
 					continue
 				}
+				if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
+					run.TotalCostUSD = fetchLiveCost(ctx, prov, run)
+				}
 			}
 
 			if !all {
@@ -526,6 +532,32 @@ func mapExitCode(code int) store.Status {
 type runResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
+}
+
+type liveCosts struct {
+	TotalCostUSD float64 `json:"total_cost_usd"`
+}
+
+// fetchLiveCost reads the current cost from a running container's costs.json.
+func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *store.Run) *float64 {
+	if run.InstanceID == "" {
+		return nil
+	}
+	var costsPath string
+	if run.Workflow != "" {
+		costsPath = "/workspace/.orc/audit/" + run.Workflow + "/" + run.Ticket + "/costs.json"
+	} else {
+		costsPath = "/workspace/.orc/audit/" + run.Ticket + "/costs.json"
+	}
+	data, err := prov.ReadContainerFile(ctx, run.InstanceID, costsPath)
+	if err != nil {
+		return nil
+	}
+	var lc liveCosts
+	if json.Unmarshal(data, &lc) != nil || lc.TotalCostUSD == 0 {
+		return nil
+	}
+	return &lc.TotalCostUSD
 }
 
 type fullRunResult struct {

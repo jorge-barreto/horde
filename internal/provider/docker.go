@@ -237,6 +237,16 @@ func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
 	return nil
 }
 
+// ReadContainerFile reads a file from a running container via docker exec.
+func (p *DockerProvider) ReadContainerFile(ctx context.Context, instanceID, path string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", instanceID, "cat", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
 	if opts.RunID == "" {
 		return nil, fmt.Errorf("reading file: run ID is required")

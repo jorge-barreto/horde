@@ -1,4 +1,4 @@
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 ENV GOBIN=/out
 RUN mkdir -p /out \
     && go install github.com/jorge-barreto/orc/cmd/orc@latest \

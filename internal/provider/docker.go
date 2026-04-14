@@ -58,12 +58,9 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	}
 	if opts.EnvFile != "" {
 		args = append(args, "--env-file", opts.EnvFile)
-		// Mount .beads/ from the project dir if it exists (local bead state)
-		projectDir := filepath.Dir(opts.EnvFile)
-		beadsDir := filepath.Join(projectDir, ".beads")
-		if _, err := os.Stat(beadsDir); err == nil {
-			args = append(args, "-v", beadsDir+":/workspace/.beads")
-		}
+	}
+	for _, mount := range opts.Mounts {
+		args = append(args, "-v", mount)
 	}
 	if opts.ResumeDir != "" {
 		args = append(args, "-v", opts.ResumeDir+":/resume:ro", "-e", "RESUME_DIR=/resume")

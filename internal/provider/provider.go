@@ -23,8 +23,9 @@ type LaunchOpts struct {
 	Workflow  string
 	RunID     string
 	EnvFile   string // path to .env file (docker provider)
-	ResumeDir  string // host path to previous run's results (mounted as /resume in container)
-	RetryPhase string // phase name to retry from (passed as RETRY_PHASE env var)
+	Mounts     []string // volume mounts in docker format (host:container)
+	ResumeDir  string   // host path to previous run's results (mounted as /resume in container)
+	RetryPhase string   // phase name to retry from (passed as RETRY_PHASE env var)
 }
 
 // LaunchResult contains the outcome of a successful launch.

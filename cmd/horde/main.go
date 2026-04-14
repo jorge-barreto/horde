@@ -167,6 +167,11 @@ func launchCmd() *cli.Command {
 				return fmt.Errorf("preparing worker image: %w", err)
 			}
 
+			projCfg, err := config.LoadProjectConfig(cwd)
+			if err != nil {
+				return err
+			}
+
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
 				Repo:     repo,
 				Ticket:   ticket,
@@ -174,6 +179,7 @@ func launchCmd() *cli.Command {
 				Workflow: workflow,
 				RunID:    id,
 				EnvFile:  envPath,
+				Mounts:   projCfg.ResolveMounts(cwd),
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
@@ -311,6 +317,11 @@ func resumeCmd() *cli.Command {
 				return fmt.Errorf("recording run: %w", err)
 			}
 
+			projCfg, err := config.LoadProjectConfig(cwd)
+			if err != nil {
+				return err
+			}
+
 			resumeBranch := "horde/" + prev.Ticket
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
 				Repo:       repo,
@@ -319,6 +330,7 @@ func resumeCmd() *cli.Command {
 				Workflow:   prev.Workflow,
 				RunID:      id,
 				EnvFile:    envPath,
+				Mounts:     projCfg.ResolveMounts(cwd),
 				ResumeDir:  resumeDir,
 				RetryPhase: retryPhase,
 			})

@@ -15,8 +15,9 @@ horde
 *.db-wal
 *.db-shm
 
-# horde local data
-.horde/
+# horde local data (except project config)
+.horde/*
+!.horde/config.yaml
 .env
 
 # beads (local state — mounted into containers, not tracked in git)

@@ -3,10 +3,13 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	smithy "github.com/aws/smithy-go"
 )
 
 const DefaultSSMPath = "/horde/config"
@@ -51,6 +54,36 @@ func (e *ParseError) Error() string {
 }
 
 func (e *ParseError) Unwrap() error { return e.Err }
+
+// LoadFromSSM reads the horde configuration from an SSM parameter at the given path.
+// It returns typed errors: *NotFoundError, *AccessDeniedError, or *ParseError.
+func LoadFromSSM(ctx context.Context, client SSMClient, path string) (*HordeConfig, error) {
+	out, err := client.GetParameter(ctx, &ssm.GetParameterInput{
+		Name: &path,
+	})
+	if err != nil {
+		var notFound *ssmtypes.ParameterNotFound
+		if errors.As(err, &notFound) {
+			return nil, &NotFoundError{Path: path, Err: err}
+		}
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDeniedException" {
+			return nil, &AccessDeniedError{Path: path, Err: err}
+		}
+		return nil, fmt.Errorf("reading ssm parameter %q: %w", path, err)
+	}
+	if out.Parameter == nil || out.Parameter.Value == nil {
+		return nil, &ParseError{
+			Path: path,
+			Err:  fmt.Errorf("parameter value is nil"),
+		}
+	}
+	cfg, err := ParseHordeConfig([]byte(*out.Parameter.Value))
+	if err != nil {
+		return nil, &ParseError{Path: path, Err: err}
+	}
+	return cfg, nil
+}
 
 // HordeConfig holds ECS infrastructure configuration discovered from SSM.
 // JSON tags match the parameter written by the CDK construct at /horde/config.

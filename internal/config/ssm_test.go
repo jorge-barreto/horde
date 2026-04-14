@@ -1,9 +1,16 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	smithy "github.com/aws/smithy-go"
 )
 
 func validHordeFields() map[string]interface{} {
@@ -27,6 +34,165 @@ func marshalFields(t *testing.T, fields map[string]interface{}) []byte {
 		t.Fatalf("marshaling fields: %v", err)
 	}
 	return data
+}
+
+type fakeSSMClient struct {
+	output *ssm.GetParameterOutput
+	err    error
+}
+
+func (f *fakeSSMClient) GetParameter(_ context.Context, _ *ssm.GetParameterInput, _ ...func(*ssm.Options)) (*ssm.GetParameterOutput, error) {
+	return f.output, f.err
+}
+
+func TestLoadFromSSM_Success(t *testing.T) {
+	t.Parallel()
+	fields := validHordeFields()
+	data := marshalFields(t, fields)
+	val := string(data)
+	client := &fakeSSMClient{
+		output: &ssm.GetParameterOutput{
+			Parameter: &ssmtypes.Parameter{Value: aws.String(val)},
+		},
+	}
+	cfg, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err != nil {
+		t.Fatalf("LoadFromSSM() unexpected error: %v", err)
+	}
+	if cfg.ClusterARN != "arn:aws:ecs:us-east-1:123456789012:cluster/horde" {
+		t.Errorf("ClusterARN = %q, want %q", cfg.ClusterARN, "arn:aws:ecs:us-east-1:123456789012:cluster/horde")
+	}
+	if cfg.MaxConcurrent != 5 {
+		t.Errorf("MaxConcurrent = %d, want 5", cfg.MaxConcurrent)
+	}
+}
+
+func TestLoadFromSSM_NotFound(t *testing.T) {
+	t.Parallel()
+	client := &fakeSSMClient{
+		err: &ssmtypes.ParameterNotFound{Message: aws.String("not found")},
+	}
+	_, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err == nil {
+		t.Fatal("LoadFromSSM() expected error, got nil")
+	}
+	var target *NotFoundError
+	if !errors.As(err, &target) {
+		t.Errorf("expected *NotFoundError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "/horde/config") {
+		t.Errorf("error = %q, want it to contain path", err.Error())
+	}
+}
+
+func TestLoadFromSSM_AccessDenied(t *testing.T) {
+	t.Parallel()
+	client := &fakeSSMClient{
+		err: &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "User is not authorized"},
+	}
+	_, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err == nil {
+		t.Fatal("LoadFromSSM() expected error, got nil")
+	}
+	var target *AccessDeniedError
+	if !errors.As(err, &target) {
+		t.Errorf("expected *AccessDeniedError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "access denied") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "access denied")
+	}
+}
+
+func TestLoadFromSSM_ParseError_InvalidJSON(t *testing.T) {
+	t.Parallel()
+	client := &fakeSSMClient{
+		output: &ssm.GetParameterOutput{
+			Parameter: &ssmtypes.Parameter{Value: aws.String("{not json}")},
+		},
+	}
+	_, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err == nil {
+		t.Fatal("LoadFromSSM() expected error, got nil")
+	}
+	var target *ParseError
+	if !errors.As(err, &target) {
+		t.Errorf("expected *ParseError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "/horde/config") {
+		t.Errorf("error = %q, want it to contain path", err.Error())
+	}
+}
+
+func TestLoadFromSSM_ParseError_ValidationFailure(t *testing.T) {
+	t.Parallel()
+	fields := validHordeFields()
+	fields["max_concurrent"] = 0
+	data := marshalFields(t, fields)
+	client := &fakeSSMClient{
+		output: &ssm.GetParameterOutput{
+			Parameter: &ssmtypes.Parameter{Value: aws.String(string(data))},
+		},
+	}
+	_, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err == nil {
+		t.Fatal("LoadFromSSM() expected error, got nil")
+	}
+	var target *ParseError
+	if !errors.As(err, &target) {
+		t.Errorf("expected *ParseError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "max_concurrent must be at least 1") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "max_concurrent must be at least 1")
+	}
+}
+
+func TestLoadFromSSM_NilValue(t *testing.T) {
+	t.Parallel()
+	client := &fakeSSMClient{
+		output: &ssm.GetParameterOutput{
+			Parameter: &ssmtypes.Parameter{},
+		},
+	}
+	_, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err == nil {
+		t.Fatal("LoadFromSSM() expected error, got nil")
+	}
+	var target *ParseError
+	if !errors.As(err, &target) {
+		t.Errorf("expected *ParseError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "nil")
+	}
+}
+
+func TestLoadFromSSM_UnclassifiedError(t *testing.T) {
+	t.Parallel()
+	client := &fakeSSMClient{
+		err: errors.New("connection refused"),
+	}
+	_, err := LoadFromSSM(context.Background(), client, "/horde/config")
+	if err == nil {
+		t.Fatal("LoadFromSSM() expected error, got nil")
+	}
+	var nf *NotFoundError
+	if errors.As(err, &nf) {
+		t.Errorf("unexpected *NotFoundError")
+	}
+	var ad *AccessDeniedError
+	if errors.As(err, &ad) {
+		t.Errorf("unexpected *AccessDeniedError")
+	}
+	var pe *ParseError
+	if errors.As(err, &pe) {
+		t.Errorf("unexpected *ParseError")
+	}
+	if !strings.Contains(err.Error(), "reading ssm parameter") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "reading ssm parameter")
+	}
+	if !strings.Contains(err.Error(), "/horde/config") {
+		t.Errorf("error = %q, want it to contain path", err.Error())
+	}
 }
 
 func TestParseHordeConfig_Valid(t *testing.T) {

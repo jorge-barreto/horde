@@ -588,13 +588,38 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 				fmt.Fprintf(os.Stderr, "warning: killing timed-out container: %v\n", err)
 				return nil
 			}
+
+			// Best-effort: read run-result.json for cost and exit code
+			var cost *float64
+			var exitCode *int
+			var resultPath string
+			if run.Workflow != "" {
+				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+			} else {
+				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+			}
+			if data, err := os.ReadFile(resultPath); err == nil {
+				var rr runResult
+				if json.Unmarshal(data, &rr) == nil {
+					cost = rr.TotalCostUSD
+					exitCode = rr.ExitCode
+				}
+			}
+
 			killedStatus := store.StatusKilled
 			now := time.Now()
-			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{Status: &killedStatus, CompletedAt: &now}); err != nil {
+			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+				Status:       &killedStatus,
+				CompletedAt:  &now,
+				TotalCostUSD: cost,
+				ExitCode:     exitCode,
+			}); err != nil {
 				return fmt.Errorf("updating run after timeout: %w", err)
 			}
 			run.Status = store.StatusKilled
 			run.CompletedAt = &now
+			run.TotalCostUSD = cost
+			run.ExitCode = exitCode
 		}
 
 	case "unknown":

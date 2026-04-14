@@ -1,10 +1,56 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
+
+const DefaultSSMPath = "/horde/config"
+
+// SSMClient is the subset of the SSM API used by LoadFromSSM.
+type SSMClient interface {
+	GetParameter(ctx context.Context, params *ssm.GetParameterInput, optFns ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
+}
+
+// NotFoundError is returned when the SSM parameter does not exist.
+type NotFoundError struct {
+	Path string
+	Err  error
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("ssm parameter %q not found: %v", e.Path, e.Err)
+}
+
+func (e *NotFoundError) Unwrap() error { return e.Err }
+
+// AccessDeniedError is returned when the caller lacks permission to read the SSM parameter.
+type AccessDeniedError struct {
+	Path string
+	Err  error
+}
+
+func (e *AccessDeniedError) Error() string {
+	return fmt.Sprintf("access denied reading ssm parameter %q: %v", e.Path, e.Err)
+}
+
+func (e *AccessDeniedError) Unwrap() error { return e.Err }
+
+// ParseError is returned when the SSM parameter value cannot be parsed or validated.
+type ParseError struct {
+	Path string
+	Err  error
+}
+
+func (e *ParseError) Error() string {
+	return fmt.Sprintf("parsing ssm parameter %q: %v", e.Path, e.Err)
+}
+
+func (e *ParseError) Unwrap() error { return e.Err }
 
 // HordeConfig holds ECS infrastructure configuration discovered from SSM.
 // JSON tags match the parameter written by the CDK construct at /horde/config.

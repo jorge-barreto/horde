@@ -26,10 +26,10 @@ var topics = []Topic{
 		Content: topicProviders,
 	},
 	{
-		Name:    "resume",
-		Title:   "Resuming Failed Runs",
-		Summary: "State restoration, branch preservation, retry from failed phase",
-		Content: topicResume,
+		Name:    "retry",
+		Title:   "Retrying and Inspecting Runs",
+		Summary: "Retry failed runs, shell access, container cleanup",
+		Content: topicRetry,
 	},
 	{
 		Name:    "env",
@@ -86,7 +86,9 @@ const topicQuickstart = `Quick Start
 Other useful commands:
 
     horde kill <run-id>      # stop a running run
-    horde resume <run-id>    # resume a failed or killed run
+    horde retry <run-id>     # restart — orc picks up where it left off
+    horde shell <run-id>     # interactive shell into the container
+    horde clean [run-id]     # remove stopped containers
     horde docs <topic>       # read detailed documentation
 `
 
@@ -227,16 +229,15 @@ Run data is stored locally:
 
 Completion is detected lazily — the next 'horde status', 'horde results',
 or 'horde list' call checks the container state. On detecting completion,
-horde copies artifacts from the container, updates the database, and
-removes the container.
+horde copies artifacts from the container and updates the database. The
+container is preserved for 'horde retry' and 'horde shell'.
 
 Timeout enforcement is also lazy: each status/results/list call checks
-whether the run has exceeded its timeout_at time. If so, horde kills
-the run.
+whether the run has exceeded its timeout_at time. If so, horde stops
+the container (preserving it for retry).
 
-Logs are available via 'docker logs' while the container exists. After
-the container is removed, horde falls back to the saved container.log
-in the results directory (if it was captured before removal).
+Logs are available via 'docker logs' while the container exists. Saved
+container logs are also available in the results directory.
 
 AWS ECS Provider (planned — v0.2)
 ---------------------------------
@@ -255,66 +256,68 @@ Planned features:
     - Secrets Manager for token injection
 `
 
-const topicResume = `Resuming Failed Runs
-====================
+const topicRetry = `Retrying and Inspecting Runs
+=============================
 
-When a run fails or is killed, you can resume it:
+When a run fails or is killed, the container is preserved with its full
+filesystem intact — all code changes, orc state, and audit data.
 
-    horde resume <run-id>
+Retry
+-----
 
-This creates a new run that picks up where the previous one left off.
+    horde retry <run-id>
 
-Prerequisites
--------------
+Restarts the stopped container via 'docker start'. The entrypoint detects
+that the workspace already exists (skips clone) and re-runs orc. Orc sees
+its own audit state and picks up from the failed phase automatically.
 
-    - The previous run must be in failed or killed status (not running
-      or pending).
-    - Results must exist at ~/.horde/results/<run-id>/ (horde needs the
-      saved artifacts, audit data, and workspace patch from the previous
-      run).
+The same run ID is reused — no new run or container is created. The
+timeout is reset.
 
-What Gets Restored
-------------------
+    horde retry abc123
+    # Output: Retrying horde-k43 (run abc123)
 
-The new container receives the previous run's state:
+The run must be in failed or killed status. Successful runs cannot be
+retried.
 
-    1. Code changes: The container clones from the horde/<ticket> branch,
-       which contains committed work from the previous run (pushed by
-       orc's push phase after each bead).
+Shell
+-----
 
-    2. Orc artifacts: Files from .orc/artifacts/ are copied into the
-       new container, preserving bead plans, review findings, etc.
+    horde shell <run-id>
 
-    3. Orc audit data: Files from .orc/audit/ are copied, preserving
-       run history and phase results.
+Opens an interactive bash shell into the container's filesystem. Use this
+for manual inspection or to run orc commands directly:
 
-    4. Workspace patch: If a workspace.patch file exists in the results
-       directory, it is applied with 'git apply' as a fallback for any
-       uncommitted changes.
+    horde shell abc123
+    # Inside the container:
+    cd /workspace
+    orc run horde-k43 --resume          # resume interrupted agent session
+    orc run horde-k43 --retry implement # retry from a specific phase
 
-Failed Phase Detection
-----------------------
+The shell runs in a snapshot of the container (via 'docker commit'), so
+changes made in the shell do not affect the original container. The
+snapshot is cleaned up on exit.
 
-horde reads run-result.json from the previous run's audit directory. If
-a failed_phase field is present, the new run passes it to orc via the
---retry flag. This tells orc to skip phases before the failure point and
-retry from the failed phase.
+Clean
+-----
 
-    # Previous run failed at the "implement" phase:
-    horde resume abc123
-    # Output: Resuming horde-k43 from phase "implement" (run abc123)
+    horde clean              # remove all stopped containers
+    horde clean <run-id>     # remove a specific container
 
-If no failed phase is detected (e.g., the run was killed before orc
-wrote results), orc starts from the beginning but with restored state.
+Containers for completed runs are preserved by default for retry and
+shell access. Use 'horde clean' to free up disk space when you no longer
+need them. Running and pending runs cannot be cleaned.
 
-New Run
--------
+Container Lifecycle
+-------------------
 
-Resume creates a completely new run with its own run ID. The original
-run record is unchanged. You can resume the same run multiple times.
-
-    horde resume abc123     # creates new run xyz789
-    horde resume abc123     # creates another new run def456
+    horde launch   →  container created and running
+    orc completes  →  container stopped (preserved)
+    horde status   →  copies artifacts, updates DB (container untouched)
+    horde retry    →  container restarted, orc resumes
+    horde kill     →  container stopped (preserved)
+    horde shell    →  interactive access via snapshot
+    horde clean    →  container removed
 `
 
 const topicEnv = `Environment Setup

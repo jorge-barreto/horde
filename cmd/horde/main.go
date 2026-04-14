@@ -8,8 +8,8 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -60,12 +60,14 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 		},
 		Commands: []*cli.Command{
 			launchCmd(),
-			resumeCmd(),
+			retryCmd(),
 			statusCmd(),
 			logsCmd(),
 			killCmd(),
 			resultsCmd(),
 			listCmd(),
+			cleanCmd(),
+			shellCmd(),
 			docsCmd(),
 		},
 	}
@@ -225,33 +227,28 @@ ticket is already active.`,
 	}
 }
 
-func resumeCmd() *cli.Command {
+func retryCmd() *cli.Command {
 	return &cli.Command{
-		Name:      "resume",
-		Usage:     "Resume a failed or killed run",
+		Name:      "retry",
+		Usage:     "Retry a failed or killed run",
 		ArgsUsage: "<run-id>",
-		Description: `Creates a new run that picks up where the previous one left off. Clones
-from the horde/<ticket> branch to recover committed code, restores orc
-artifacts and audit data, and retries from the failed phase if detected
-in the previous run's results. See 'horde docs resume' for details.`,
+		Description: `Restarts the existing container for a failed or killed run. The container's
+filesystem is preserved, so all code changes and orc state remain intact.
+The entrypoint re-runs and orc picks up from where it left off. Use
+'horde shell' for manual control over the retry.`,
 		Flags: []cli.Flag{
 			&cli.DurationFlag{
 				Name:  "timeout",
-				Usage: "Timeout for the resumed run",
+				Usage: "Timeout for the retried run",
 				Value: 60 * time.Minute,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			prevID := cmd.Args().First()
-			if prevID == "" {
+			runID := cmd.Args().First()
+			if runID == "" {
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 			timeout := cmd.Duration("timeout")
-
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("getting working directory: %w", err)
-			}
 
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
@@ -264,128 +261,49 @@ in the previous run's results. See 'horde docs resume' for details.`,
 			}
 			defer st.Close()
 
-			prev, err := st.GetRun(ctx, prevID)
+			run, err := st.GetRun(ctx, runID)
 			if err != nil {
 				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", prevID)
+					return fmt.Errorf("run not found: %s", runID)
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
-			if prev.Status == store.StatusRunning || prev.Status == store.StatusPending {
-				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", prevID, prev.Status)
+			if run.Status == store.StatusRunning || run.Status == store.StatusPending {
+				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", runID, run.Status)
 			}
-
-			resumeDir := filepath.Join(homeDir, ".horde", "results", prevID)
-			if _, err := os.Stat(resumeDir); err != nil {
-				return fmt.Errorf("no results found for run %s — nothing to resume from", prevID)
-			}
-
-			// Find the failed phase from the previous run's result
-			var retryPhase string
-			var resultPath string
-			if prev.Workflow != "" {
-				resultPath = filepath.Join(resumeDir, "audit", prev.Workflow, prev.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(resumeDir, "audit", prev.Ticket, "run-result.json")
-			}
-			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr struct {
-					FailedPhase string `json:"failed_phase"`
-				}
-				if json.Unmarshal(data, &rr) == nil && rr.FailedPhase != "" {
-					retryPhase = rr.FailedPhase
-				}
-			}
-
-			repo, err := config.RepoURL(cwd)
-			if err != nil {
-				return err
-			}
-			envPath, err := config.ValidateEnvFile(cwd)
-			if err != nil {
-				return err
-			}
-
-			id, err := runid.Generate()
-			if err != nil {
-				return err
+			if run.Status == store.StatusSuccess {
+				return fmt.Errorf("run %s already succeeded — nothing to retry", runID)
 			}
 
 			prov := provider.NewDockerProvider()
 
-			workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
+			// Verify the container still exists
+			instStatus, err := prov.Status(ctx, run.InstanceID)
 			if err != nil {
-				return fmt.Errorf("accessing worker files: %w", err)
+				return fmt.Errorf("checking container: %w", err)
 			}
-			if err := prov.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
-				failedStatus := store.StatusFailed
-				now := time.Now()
-				st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now})
-				return fmt.Errorf("preparing worker image: %w", err)
+			if instStatus.State == "unknown" {
+				return fmt.Errorf("container for run %s no longer exists — use 'horde launch' to start fresh", runID)
 			}
 
-			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil, cmd.String("profile"))
-			if err != nil {
-				return err
-			}
-			now := time.Now()
-			run := &store.Run{
-				ID:         id,
-				Repo:       repo,
-				Ticket:     prev.Ticket,
-				Branch:     prev.Branch,
-				Workflow:   prev.Workflow,
-				Provider:   "docker",
-				Status:     store.StatusPending,
-				LaunchedBy: launchedBy,
-				StartedAt:  now,
-				TimeoutAt:  now.Add(timeout),
-			}
-			if err := st.CreateRun(ctx, run); err != nil {
-				return fmt.Errorf("recording run: %w", err)
-			}
-
-			projCfg, err := config.LoadProjectConfig(cwd)
-			if err != nil {
+			// Restart the stopped container
+			if err := prov.Start(ctx, run.InstanceID); err != nil {
 				return err
 			}
 
-			resumeBranch := "horde/" + prev.Ticket
-			result, err := prov.Launch(ctx, provider.LaunchOpts{
-				Repo:       repo,
-				Ticket:     prev.Ticket,
-				Branch:     resumeBranch,
-				Workflow:   prev.Workflow,
-				RunID:      id,
-				EnvFile:    envPath,
-				Mounts:     projCfg.ResolveMounts(cwd),
-				ResumeDir:  resumeDir,
-				RetryPhase: retryPhase,
-			})
-			if err != nil {
-				failedStatus := store.StatusFailed
-				now := time.Now()
-				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: failed to mark run as failed: %v\n", updateErr)
-				}
-				return err
-			}
-
+			// Update the same run record back to running
 			runningStatus := store.StatusRunning
-			if err := st.UpdateRun(ctx, id, &store.RunUpdate{
-				Status:     &runningStatus,
-				InstanceID: &result.InstanceID,
-				Metadata:   result.Metadata,
+			now := time.Now()
+			timeoutAt := now.Add(timeout)
+			if err := st.UpdateRun(ctx, runID, &store.RunUpdate{
+				Status:    &runningStatus,
+				TimeoutAt: &timeoutAt,
 			}); err != nil {
 				return fmt.Errorf("updating run status: %w", err)
 			}
 
-			if retryPhase != "" {
-				fmt.Fprintf(os.Stderr, "Resuming %s from phase %q (run %s)\n", prev.Ticket, retryPhase, prevID)
-			} else {
-				fmt.Fprintf(os.Stderr, "Resuming %s from run %s\n", prev.Ticket, prevID)
-			}
-			fmt.Println(id)
+			fmt.Fprintf(os.Stderr, "Retrying %s (run %s)\n", run.Ticket, runID)
+			fmt.Println(runID)
 			return nil
 		},
 	}
@@ -504,9 +422,8 @@ func killCmd() *cli.Command {
 		Name:      "kill",
 		Usage:     "Kill a running run",
 		ArgsUsage: "<run-id>",
-		Description: `Stops a running container, saves logs and workspace patch (best-effort),
-copies artifacts from the container, updates the run status to killed,
-and removes the container. The saved state can be used by 'horde resume'.`,
+		Description: `Stops a running container and copies artifacts. The container is preserved
+for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
 			if runID == "" {
@@ -538,7 +455,7 @@ and removes the container. The saved state can be used by 'horde resume'.`,
 				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 				prov := provider.NewDockerProvider()
 
-				// Capture container logs and workspace patch before kill removes the container
+				// Capture container logs before stopping
 				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
 					if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
 						os.MkdirAll(resultsDir, 0o755)
@@ -546,9 +463,8 @@ and removes the container. The saved state can be used by 'horde resume'.`,
 					}
 					logs.Close()
 				}
-				saveWorkspacePatch(ctx, prov, run.InstanceID, resultsDir)
 
-				if err := prov.Kill(ctx, provider.KillOpts{
+				if err := prov.Stop(ctx, provider.StopOpts{
 					InstanceID: run.InstanceID,
 					ResultsDir: resultsDir,
 				}); err != nil {
@@ -745,6 +661,162 @@ type runResult struct {
 	ExitCode     *int     `json:"exit_code"`
 }
 
+func cleanCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "clean",
+		Usage:     "Remove stopped containers",
+		ArgsUsage: "[run-id]",
+		Description: `Removes Docker containers for completed runs. Without arguments, removes
+containers for all terminal runs (success, failed, killed). With a run ID,
+removes only that run's container. Does not affect running or pending runs.`,
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+
+			prov := provider.NewDockerProvider()
+			runID := cmd.Args().First()
+
+			if runID != "" {
+				// Clean a specific run
+				run, err := st.GetRun(ctx, runID)
+				if err != nil {
+					if errors.Is(err, store.ErrRunNotFound) {
+						return fmt.Errorf("run not found: %s", runID)
+					}
+					return fmt.Errorf("reading run: %w", err)
+				}
+				if run.Status == store.StatusRunning || run.Status == store.StatusPending {
+					return fmt.Errorf("run %s is still %s — kill it first", runID, run.Status)
+				}
+				if run.InstanceID == "" {
+					fmt.Printf("Run %s has no container\n", runID)
+					return nil
+				}
+				if err := prov.RemoveContainer(ctx, run.InstanceID); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+				} else {
+					fmt.Printf("Removed container for run %s\n", runID)
+				}
+				return nil
+			}
+
+			// Clean all terminal runs
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+			repo, err := config.RepoURL(cwd)
+			if err != nil {
+				return err
+			}
+			runs, err := st.ListByRepo(ctx, repo, false)
+			if err != nil {
+				return fmt.Errorf("listing runs: %w", err)
+			}
+			allRuns, err := st.ListByRepo(ctx, repo, true)
+			if err != nil {
+				return fmt.Errorf("listing runs: %w", err)
+			}
+
+			// Terminal runs = all minus active
+			activeIDs := make(map[string]bool)
+			for _, r := range runs {
+				activeIDs[r.ID] = true
+			}
+			var cleaned int
+			for _, r := range allRuns {
+				if activeIDs[r.ID] || r.InstanceID == "" {
+					continue
+				}
+				if err := prov.RemoveContainer(ctx, r.InstanceID); err == nil {
+					cleaned++
+				}
+			}
+			fmt.Printf("Removed %d container(s)\n", cleaned)
+			return nil
+		},
+	}
+}
+
+func shellCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "shell",
+		Usage:     "Open a shell in a run's container",
+		ArgsUsage: "<run-id>",
+		Description: `Opens an interactive shell into the filesystem of a stopped container.
+Creates a temporary snapshot image via 'docker commit', runs bash in it,
+and cleans up the image on exit. Use this for manual inspection or to
+run orc commands directly (e.g., 'orc run --resume').`,
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			runID := cmd.Args().First()
+			if runID == "" {
+				return fmt.Errorf("missing required argument: <run-id>")
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("opening store: %w", err)
+			}
+			defer st.Close()
+
+			run, err := st.GetRun(ctx, runID)
+			if err != nil {
+				if errors.Is(err, store.ErrRunNotFound) {
+					return fmt.Errorf("run not found: %s", runID)
+				}
+				return fmt.Errorf("reading run: %w", err)
+			}
+			if run.Status == store.StatusRunning || run.Status == store.StatusPending {
+				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", runID, run.Status)
+			}
+
+			prov := provider.NewDockerProvider()
+			instStatus, err := prov.Status(ctx, run.InstanceID)
+			if err != nil {
+				return fmt.Errorf("checking container: %w", err)
+			}
+			if instStatus.State == "unknown" {
+				return fmt.Errorf("container for run %s no longer exists", runID)
+			}
+
+			// Snapshot the container's filesystem into a temporary image
+			tempImage := "horde-shell-" + runID
+			commitCmd := exec.CommandContext(ctx, "docker", "commit", run.InstanceID, tempImage)
+			if _, err := commitCmd.Output(); err != nil {
+				return fmt.Errorf("creating shell snapshot: %w", err)
+			}
+
+			// Run interactive bash in the snapshot
+			fmt.Fprintf(os.Stderr, "Opening shell for run %s (%s). Type 'exit' to leave.\n", runID, run.Ticket)
+			shellExec := exec.CommandContext(ctx, "docker", "run", "-it", "--rm",
+				"--workdir", "/workspace",
+				"--env-file", filepath.Join(".", ".env"),
+				tempImage, "bash")
+			shellExec.Stdin = os.Stdin
+			shellExec.Stdout = os.Stdout
+			shellExec.Stderr = os.Stderr
+			shellExec.Run() // ignore exit code — user may ctrl-c
+
+			// Clean up temp image
+			cleanupCmd := exec.CommandContext(ctx, "docker", "rmi", tempImage)
+			cleanupCmd.Run()
+			return nil
+		},
+	}
+}
+
 func docsCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "docs",
@@ -800,26 +872,6 @@ func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *stor
 
 // saveWorkspacePatch captures all code changes (committed + uncommitted) from the
 // container as a patch file in resultsDir. Best-effort — errors are silently ignored.
-func saveWorkspacePatch(ctx context.Context, prov *provider.DockerProvider, instanceID, resultsDir string) {
-	baseRef, err := prov.ReadContainerFile(ctx, instanceID, "/workspace/.horde-base-ref")
-	if err != nil {
-		return
-	}
-	ref := strings.TrimSpace(string(baseRef))
-	if ref == "" {
-		return
-	}
-
-	script := fmt.Sprintf("cd /workspace && git add -A && git diff --cached %s", ref)
-	patchData, err := prov.ExecInContainer(ctx, instanceID, script)
-	if err != nil || len(patchData) == 0 {
-		return
-	}
-
-	os.MkdirAll(resultsDir, 0o755)
-	os.WriteFile(filepath.Join(resultsDir, "workspace.patch"), patchData, 0o644)
-}
-
 type fullRunResult struct {
 	ExitCode      int           `json:"exit_code"`
 	Status        string        `json:"status"`
@@ -853,11 +905,10 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 	switch instanceStatus.State {
 	case "stopped":
 		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-		// Best-effort copy — errors ignored
+		// Best-effort copy of artifacts and logs — container is preserved for retry
 		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
 		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
 
-		// Capture container stdout/stderr and workspace patch before removal
 		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
 			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
 				os.MkdirAll(resultsDir, 0o755)
@@ -865,7 +916,6 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			}
 			logs.Close()
 		}
-		saveWorkspacePatch(ctx, prov, run.InstanceID, resultsDir)
 
 		// Parse run-result.json for cost (best effort)
 		var resultPath string
@@ -882,7 +932,6 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			}
 		}
 
-		// Determine CompletedAt — guard against Docker returning a zero time
 		var completedAt *time.Time
 		if instanceStatus.FinishedAt != nil && !instanceStatus.FinishedAt.IsZero() {
 			completedAt = instanceStatus.FinishedAt
@@ -897,19 +946,14 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 		} else {
 			newStatus = store.StatusFailed
 		}
-		update := &store.RunUpdate{
+		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
 			Status:       &newStatus,
 			ExitCode:     instanceStatus.ExitCode,
 			CompletedAt:  completedAt,
 			TotalCostUSD: cost,
-		}
-		if err := st.UpdateRun(ctx, run.ID, update); err != nil {
+		}); err != nil {
 			return fmt.Errorf("updating run after completion: %w", err)
 		}
-		// Best-effort remove — error ignored
-		prov.RemoveContainer(ctx, run.InstanceID)
-
-		// Mutate run in place
 		run.Status = newStatus
 		run.ExitCode = instanceStatus.ExitCode
 		run.CompletedAt = completedAt
@@ -918,12 +962,11 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 	case "running":
 		if time.Now().After(run.TimeoutAt) {
 			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-			if err := prov.Kill(ctx, provider.KillOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: killing timed-out container: %v\n", err)
+			if err := prov.Stop(ctx, provider.StopOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: stopping timed-out container: %v\n", err)
 				return nil
 			}
 
-			// Best-effort: read run-result.json for cost and exit code
 			var cost *float64
 			var exitCode *int
 			var resultPath string

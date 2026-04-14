@@ -241,6 +241,10 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 		setClauses = append(setClauses, "total_cost_usd = ?")
 		args = append(args, *update.TotalCostUSD)
 	}
+	if update.TimeoutAt != nil {
+		setClauses = append(setClauses, "timeout_at = ?")
+		args = append(args, update.TimeoutAt.UTC().Format(time.RFC3339))
+	}
 
 	if len(setClauses) == 0 {
 		var exists bool

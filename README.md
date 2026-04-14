@@ -55,9 +55,11 @@ horde list --all                  # include completed/failed/killed
 # Results
 horde results <run-id>
 
-# Stop or resume
+# Stop, retry, inspect
 horde kill <run-id>
-horde resume <run-id>             # retry from failed phase
+horde retry <run-id>              # restart container — orc picks up where it left off
+horde shell <run-id>              # interactive shell into the container
+horde clean [run-id]              # remove stopped containers
 
 # Documentation
 horde docs                        # list topics

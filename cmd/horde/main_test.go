@@ -2163,7 +2163,7 @@ esac
 	}
 
 	// Verify warning was logged
-	if !strings.Contains(string(stderrOut), "warning: killing timed-out container") {
+	if !strings.Contains(string(stderrOut), "warning: stopping timed-out container") {
 		t.Errorf("stderr missing warning: %s", string(stderrOut))
 	}
 

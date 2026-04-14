@@ -31,6 +31,24 @@ func NewDockerProvider() *DockerProvider {
 
 var _ Provider = (*DockerProvider)(nil)
 
+// Start restarts a stopped container. The entrypoint re-runs on the
+// preserved filesystem — it detects the existing workspace and skips clone.
+func (p *DockerProvider) Start(ctx context.Context, instanceID string) error {
+	cmd := exec.CommandContext(ctx, "docker", "start", instanceID)
+	if _, err := cmd.Output(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if strings.Contains(strings.ToLower(stderr), "no such") {
+				return fmt.Errorf("starting container: container not found: %s", instanceID)
+			}
+			return fmt.Errorf("starting container: %s", stderr)
+		}
+		return fmt.Errorf("starting container: %w", err)
+	}
+	return nil
+}
+
 // logReadCloser wraps a pipe reader and its associated docker logs process.
 // Closing kills the process and closes the pipe.
 type logReadCloser struct {
@@ -61,12 +79,6 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	}
 	for _, mount := range opts.Mounts {
 		args = append(args, "-v", mount)
-	}
-	if opts.ResumeDir != "" {
-		args = append(args, "-v", opts.ResumeDir+":/resume:ro", "-e", "RESUME_DIR=/resume")
-	}
-	if opts.RetryPhase != "" {
-		args = append(args, "-e", "RETRY_PHASE="+opts.RetryPhase)
 	}
 	args = append(args, dockerImage)
 
@@ -215,7 +227,7 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 	return &logReadCloser{ReadCloser: pr, cmd: cmd, done: done}, nil
 }
 
-func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
+func (p *DockerProvider) Stop(ctx context.Context, opts StopOpts) error {
 	// Stop container directly — no pre-check to avoid TOCTOU race.
 	// docker stop succeeds on already-stopped containers and fails with
 	// "No such container" for nonexistent ones.
@@ -225,22 +237,18 @@ func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
 		if errors.As(err, &exitErr) {
 			stderr := strings.TrimSpace(string(exitErr.Stderr))
 			if strings.Contains(strings.ToLower(stderr), "no such") {
-				return fmt.Errorf("killing container: container not found: %s", opts.InstanceID)
+				return fmt.Errorf("stopping container: container not found: %s", opts.InstanceID)
 			}
 			return fmt.Errorf("stopping container: %s", stderr)
 		}
 		return fmt.Errorf("stopping container: %w", err)
 	}
 
-	// Best-effort copy of audit and artifacts — errors are intentionally ignored
+	// Best-effort copy of audit and artifacts — errors are intentionally ignored.
+	// Container is preserved for retry/shell — not removed here.
 	if opts.ResultsDir != "" {
 		p.CopyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/audit/.", filepath.Join(opts.ResultsDir, "audit"))
 		p.CopyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(opts.ResultsDir, "artifacts"))
-	}
-
-	// Remove container
-	if err := p.RemoveContainer(ctx, opts.InstanceID); err != nil {
-		return fmt.Errorf("killing container: %w", err)
 	}
 
 	return nil

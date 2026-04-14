@@ -767,7 +767,7 @@ fi
 	}
 }
 
-func TestDockerProvider_Kill_Success(t *testing.T) {
+func TestDockerProvider_Stop_Success(t *testing.T) {
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
@@ -782,13 +782,13 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: resultsDir})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "abc123", ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestDockerProvider_Kill_ContainerNotFound(t *testing.T) {
+func TestDockerProvider_Stop_ContainerNotFound(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
 if [ "$1" = "stop" ]; then
@@ -799,11 +799,11 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "killing container") {
+	if !strings.Contains(err.Error(), "stopping container") {
 		t.Errorf("expected 'killing container' in error, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "container not found") {
@@ -811,7 +811,7 @@ fi
 	}
 }
 
-func TestDockerProvider_Kill_AlreadyStopped(t *testing.T) {
+func TestDockerProvider_Stop_AlreadyStopped(t *testing.T) {
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
@@ -826,13 +826,13 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: resultsDir})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "abc123", ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("expected no error for already-stopped container, got: %v", err)
 	}
 }
 
-func TestDockerProvider_Kill_StopError(t *testing.T) {
+func TestDockerProvider_Stop_StopError(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
 if [ "$1" = "stop" ]; then
@@ -843,7 +843,7 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -855,7 +855,7 @@ fi
 	}
 }
 
-func TestDockerProvider_Kill_CopyFailure_OK(t *testing.T) {
+func TestDockerProvider_Stop_CopyFailure_OK(t *testing.T) {
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `
@@ -871,40 +871,13 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: resultsDir})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "abc123", ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("expected no error when copy fails (best-effort), got: %v", err)
 	}
 }
 
-func TestDockerProvider_Kill_RemoveError(t *testing.T) {
-	dir := t.TempDir()
-	writeFakeDocker(t, dir, `
-if [ "$1" = "stop" ]; then
-  exit 0
-elif [ "$1" = "cp" ]; then
-  exit 0
-elif [ "$1" = "rm" ]; then
-  echo "Error: removal in progress" >&2
-  exit 1
-fi
-`)
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-
-	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "killing container") {
-		t.Errorf("expected 'killing container' in error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "removing container") {
-		t.Errorf("expected 'removing container' in error, got: %v", err)
-	}
-}
-
-func TestDockerProvider_Kill_VerifyStopArgs(t *testing.T) {
+func TestDockerProvider_Stop_VerifyStopArgs(t *testing.T) {
 	stopArgsFile := filepath.Join(t.TempDir(), "stop-args.txt")
 	dir := t.TempDir()
 	script := fmt.Sprintf(`
@@ -921,7 +894,7 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "container-xyz", ResultsDir: t.TempDir()})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "container-xyz", ResultsDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -938,7 +911,7 @@ fi
 	}
 }
 
-func TestDockerProvider_Kill_CopyPaths(t *testing.T) {
+func TestDockerProvider_Stop_CopyPaths(t *testing.T) {
 	cpArgsFile := filepath.Join(t.TempDir(), "cp-args.txt")
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	dir := t.TempDir()
@@ -956,7 +929,7 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "cid", ResultsDir: resultsDir})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "cid", ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -979,7 +952,7 @@ fi
 	}
 }
 
-func TestDockerProvider_Kill_EmptyResultsDir(t *testing.T) {
+func TestDockerProvider_Stop_EmptyResultsDir(t *testing.T) {
 	cpArgsFile := filepath.Join(t.TempDir(), "cp-args.txt")
 	dir := t.TempDir()
 	script := fmt.Sprintf(`
@@ -996,7 +969,7 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.Kill(context.Background(), KillOpts{InstanceID: "abc123", ResultsDir: ""})
+	err := p.Stop(context.Background(), StopOpts{InstanceID: "abc123", ResultsDir: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

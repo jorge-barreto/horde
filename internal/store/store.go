@@ -45,6 +45,7 @@ type RunUpdate struct {
 	ExitCode     *int
 	CompletedAt  *time.Time
 	TotalCostUSD *float64
+	TimeoutAt    *time.Time
 }
 
 type Store interface {

@@ -2,14 +2,24 @@
 set -uo pipefail
 
 # Clone repo (GIT_ASKPASS is set in the Dockerfile for container-wide availability)
-if ! git clone "https://${REPO_URL}" /workspace; then
-    echo "ERROR: git clone failed" >&2
+# Use init+fetch instead of clone — volume mounts may pre-create /workspace/
+mkdir -p /workspace
+cd /workspace || { echo "ERROR: cd /workspace failed" >&2; exit 3; }
+git init
+git remote add origin "https://${REPO_URL}"
+if ! git fetch origin; then
+    echo "ERROR: git fetch failed" >&2
     exit 3
 fi
-cd /workspace || { echo "ERROR: cd /workspace failed" >&2; exit 3; }
 if [ -n "${BRANCH:-}" ]; then
     if ! git checkout "$BRANCH"; then
         echo "ERROR: git checkout failed for branch ${BRANCH}" >&2
+        exit 3
+    fi
+else
+    DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||')
+    if ! git checkout "${DEFAULT_BRANCH:-main}"; then
+        echo "ERROR: git checkout failed" >&2
         exit 3
     fi
 fi

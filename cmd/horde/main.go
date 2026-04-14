@@ -119,7 +119,7 @@ func launchCmd() *cli.Command {
 				return err
 			}
 
-			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil)
+			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil, cmd.String("profile"))
 			if err != nil {
 				return err
 			}
@@ -303,7 +303,7 @@ func resumeCmd() *cli.Command {
 				return fmt.Errorf("preparing worker image: %w", err)
 			}
 
-			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil)
+			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil, cmd.String("profile"))
 			if err != nil {
 				return err
 			}
@@ -999,7 +999,7 @@ func printPartialResults(run *store.Run) {
 
 // resolveLaunchedBy returns the identity string for run records.
 // Docker uses the local git user name; aws-ecs uses the IAM ARN from STS.
-func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, awsCfg *aws.Config) (string, error) {
+func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, awsCfg *aws.Config, profile string) (string, error) {
 	switch providerName {
 	case "docker":
 		return config.LaunchedBy(cwd), nil
@@ -1007,7 +1007,7 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 		if awsCfg == nil {
 			return "", fmt.Errorf("resolving launched_by: AWS config required for aws-ecs provider")
 		}
-		arn, err := awscfg.CallerIdentity(ctx, *awsCfg)
+		arn, err := awscfg.CallerIdentity(ctx, *awsCfg, profile)
 		if err != nil {
 			return "", fmt.Errorf("resolving launched_by: %w", err)
 		}

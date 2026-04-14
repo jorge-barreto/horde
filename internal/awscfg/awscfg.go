@@ -24,10 +24,10 @@ func Load(ctx context.Context, profile string) (aws.Config, error) {
 }
 
 // CallerIdentity calls sts:GetCallerIdentity and returns the caller's ARN.
-func CallerIdentity(ctx context.Context, cfg aws.Config) (string, error) {
+func CallerIdentity(ctx context.Context, cfg aws.Config, profile string) (string, error) {
 	out, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
-		return "", fmt.Errorf("getting caller identity: %w", err)
+		return "", fmt.Errorf("getting caller identity: %w\nhint: %s", err, DiagnoseError(err, profile))
 	}
 	if out.Arn == nil {
 		return "", fmt.Errorf("getting caller identity: ARN not present in response")

@@ -2965,7 +2965,7 @@ func TestResolveLaunchedBy_Docker(t *testing.T) {
 	run("git", "init")
 	run("git", "config", "user.name", "Test User")
 
-	got, err := resolveLaunchedBy(context.Background(), "docker", dir, nil)
+	got, err := resolveLaunchedBy(context.Background(), "docker", dir, nil, "")
 	if err != nil {
 		t.Fatalf("resolveLaunchedBy(docker) unexpected error: %v", err)
 	}
@@ -2976,7 +2976,7 @@ func TestResolveLaunchedBy_Docker(t *testing.T) {
 
 func TestResolveLaunchedBy_ECS_NilConfig(t *testing.T) {
 	t.Parallel()
-	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", nil)
+	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", nil, "")
 	if err == nil {
 		t.Fatalf("resolveLaunchedBy(aws-ecs, nil config) = %q, want error", got)
 	}
@@ -2988,18 +2988,21 @@ func TestResolveLaunchedBy_ECS_NilConfig(t *testing.T) {
 func TestResolveLaunchedBy_ECS_NoCredentials(t *testing.T) {
 	t.Parallel()
 	cfg := aws.Config{}
-	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", &cfg)
+	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", &cfg, "")
 	if err == nil {
 		t.Fatalf("resolveLaunchedBy(aws-ecs, empty config) = %q, want error", got)
 	}
 	if !strings.Contains(err.Error(), "resolving launched_by") {
 		t.Errorf("error = %q, want it to contain %q", err.Error(), "resolving launched_by")
 	}
+	if !strings.Contains(err.Error(), "hint:") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "hint:")
+	}
 }
 
 func TestResolveLaunchedBy_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
-	got, err := resolveLaunchedBy(context.Background(), "unknown", "", nil)
+	got, err := resolveLaunchedBy(context.Background(), "unknown", "", nil, "")
 	if err == nil {
 		t.Fatalf("resolveLaunchedBy(unknown) = %q, want error", got)
 	}

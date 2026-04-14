@@ -66,11 +66,14 @@ func TestLoad_RegionFromEnv(t *testing.T) {
 
 func TestCallerIdentity_Error(t *testing.T) {
 	t.Parallel()
-	_, err := CallerIdentity(context.Background(), aws.Config{})
+	_, err := CallerIdentity(context.Background(), aws.Config{}, "")
 	if err == nil {
 		t.Fatal("CallerIdentity() with empty config expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), "getting caller identity") {
 		t.Errorf("CallerIdentity() error = %q, want it to contain %q", err.Error(), "getting caller identity")
+	}
+	if !strings.Contains(err.Error(), "hint:") {
+		t.Errorf("CallerIdentity() error = %q, want it to contain %q", err.Error(), "hint:")
 	}
 }

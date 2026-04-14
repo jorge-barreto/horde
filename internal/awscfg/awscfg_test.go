@@ -35,6 +35,9 @@ func TestLoad_WithProfile(t *testing.T) {
 	if !strings.Contains(err.Error(), "loading AWS config") {
 		t.Errorf("Load() error = %q, want it to contain %q", err.Error(), "loading AWS config")
 	}
+	if !strings.Contains(err.Error(), "hint:") {
+		t.Errorf("Load() error = %q, want it to contain %q", err.Error(), "hint:")
+	}
 }
 
 func TestLoad_RespectsContext(t *testing.T) {

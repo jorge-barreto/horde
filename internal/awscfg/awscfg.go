@@ -18,7 +18,7 @@ func Load(ctx context.Context, profile string) (aws.Config, error) {
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
-		return aws.Config{}, fmt.Errorf("loading AWS config: %w", err)
+		return aws.Config{}, fmt.Errorf("loading AWS config: %w\nhint: %s", err, DiagnoseError(err, profile))
 	}
 	return cfg, nil
 }

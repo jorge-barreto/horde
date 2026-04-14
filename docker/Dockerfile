@@ -16,7 +16,7 @@ COPY --from=builder /out/orc /usr/local/bin/orc
 COPY --from=builder /out/bd /usr/local/bin/bd
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/root/.claude/bin:${PATH}"
+ENV PATH="/root/.local/bin:${PATH}"
 
 COPY entrypoint.sh /entrypoint.sh
 COPY git-askpass.sh /usr/local/bin/git-askpass.sh

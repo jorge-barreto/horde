@@ -114,6 +114,12 @@ phases:
     model: sonnet
     timeout: 5
 
+  - name: push
+    type: script
+    description: Push committed work to remote horde branch
+    run: .orc/scripts/push.sh
+    timeout: 2
+
   - name: check-remaining
     type: script
     description: Loop back if incomplete beads remain

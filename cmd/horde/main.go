@@ -311,10 +311,11 @@ func resumeCmd() *cli.Command {
 				return fmt.Errorf("recording run: %w", err)
 			}
 
+			resumeBranch := "horde/" + prev.Ticket
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
 				Repo:       repo,
 				Ticket:     prev.Ticket,
-				Branch:     prev.Branch,
+				Branch:     resumeBranch,
 				Workflow:   prev.Workflow,
 				RunID:      id,
 				EnvFile:    envPath,

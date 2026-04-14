@@ -36,6 +36,9 @@ if [ -d "${RESUME_DIR:-}" ]; then
     fi
 fi
 
+# gh CLI uses the same token as git push
+export GH_TOKEN="${GIT_TOKEN:-}"
+
 # Run orc
 ORC_ARGS="--auto --no-color"
 if [ -n "${RETRY_PHASE:-}" ]; then

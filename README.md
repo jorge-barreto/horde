@@ -6,6 +6,11 @@ See [SPEC.md](SPEC.md) for the full design and [ROADMAP.md](ROADMAP.md) for the 
 
 ## Setup
 
+### Prerequisites
+
+- Go (1.24+)
+- Docker
+
 ### Install
 
 ```bash
@@ -16,28 +21,34 @@ make install
 
 ```bash
 cp .env.example .env
-# Edit .env — fill in ANTHROPIC_API_KEY and GIT_TOKEN
 ```
 
-`GIT_TOKEN` needs read access to the repo you want to run orc against.
+Edit `.env` and fill in:
 
-### Launch
+- **`CLAUDE_CODE_OAUTH_TOKEN`** — run `claude setup-token` to generate a long-lived OAuth token for the Claude CLI.
+- **`GIT_TOKEN`** — a GitHub fine-grained personal access token. Recommended permissions:
+
+  | Permission       | Access     | Used for                              |
+  |------------------|------------|---------------------------------------|
+  | Contents         | Read/Write | Clone repos, push to `horde/` branches |
+  | Metadata         | Read       | Required for all fine-grained PATs    |
+  | Pull requests    | Read/Write | Open PRs via `gh pr create`           |
+  | Issues           | Read       | Read ticket/issue context             |
+  | Workflows        | Read/Write | Push changes to `.github/workflows/`  |
+
+### Usage
 
 ```bash
-horde launch <ticket>       # auto-builds worker image on first run
+horde launch <ticket>          # auto-builds worker image on first run
 horde logs <run-id> --follow
 horde status <run-id>
 horde results <run-id>
 horde list --all
 horde kill <run-id>
+horde resume <run-id>          # retry from failed phase
 ```
 
-The first `horde launch` builds the `horde-worker:latest` Docker image automatically. Subsequent launches rebuild only when the embedded Dockerfile changes (after `make install`). To build the image manually: `make worker`.
-
-### Prerequisites
-
-- Go (1.22+)
-- Docker
+The first `horde launch` builds the `horde-worker:latest` Docker image automatically. Subsequent launches rebuild only when the embedded Dockerfile changes (after `make install`).
 
 ## License
 

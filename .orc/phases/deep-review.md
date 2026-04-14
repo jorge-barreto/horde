@@ -203,6 +203,7 @@ If no findings in a category, write `None.`
 > - **Run ID handling:** Are run IDs validated before use?
 > - **Store lifecycle:** Is the store opened before use and closed on exit?
 > - **Signal handling:** Does the CLI handle SIGINT/SIGTERM gracefully?
+> - **Documentation surfaces:** If the change affects user-visible behavior (commands, flags, output format, error messages), are all doc surfaces updated (`cmd/horde/main.go` help text, `README.md`, `SPEC.md`)?
 >
 > Write findings to `$ARTIFACTS_DIR/reviews/cli.md`.
 > Only flag issues in code introduced by this diff.

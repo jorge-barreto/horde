@@ -197,3 +197,11 @@ phases:
     run: .orc/scripts/wave-summary.sh
     timeout: 1
     condition: '[ "$(cat "$ORC_ARTIFACTS_DIR/run-mode.txt" 2>/dev/null)" = "wave" ]'
+
+  # -- Terminus: open PR -----------------------------------
+
+  - name: open-pr
+    type: script
+    description: Push final state and open a pull request
+    run: .orc/scripts/open-pr.sh
+    timeout: 2

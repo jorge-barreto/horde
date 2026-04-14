@@ -202,6 +202,7 @@ If no findings in a category, write `None.`
 > - **Run ID handling:** Are run IDs validated before use?
 > - **Store lifecycle:** Is the store opened before use and closed on exit?
 > - **Signal handling:** Does the CLI handle SIGINT/SIGTERM gracefully?
+> - **Documentation surfaces:** If the change affects user-visible behavior (commands, flags, output format, error messages), are all doc surfaces updated (`cmd/horde/main.go` help text, `README.md`, `SPEC.md`)?
 >
 > Write findings to `$ARTIFACTS_DIR/reviews/cli.md`.
 > Only flag issues in code introduced by this wave's diff.
@@ -285,7 +286,7 @@ If no findings in a category, write `None.`
 > - **Import graph:** Are there new circular dependencies or unnecessary coupling between packages?
 > - **Error message consistency:** Do error messages from different items follow the same format and tone?
 > - **Missing integration tests:** Are there scenarios where two features interact that no individual item's tests cover?
-> - **Documentation coherence:** Do the combined doc changes tell a consistent story? Are there contradictions between sections updated by different items?
+> - **Documentation coherence:** Do the combined doc changes tell a consistent story across all three surfaces (`cmd/horde/main.go` help text, `README.md`, `SPEC.md`)? Are there contradictions between sections updated by different items? Are there user-visible changes with no corresponding doc updates?
 >
 > Write findings to `$ARTIFACTS_DIR/reviews/integration.md`.
 > Only flag issues in code introduced by this wave's diff.

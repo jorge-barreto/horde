@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/jorge-barreto/horde/internal/store"
 )
 
@@ -536,6 +537,29 @@ func TestProvider_ExplicitDocker(t *testing.T) {
 	defer func() { os.Stdout = origStdout }()
 
 	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	pr.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProfile_AcceptedAsGlobalFlag(t *testing.T) {
+	_ = setupLaunchEnv(t)
+	ctx := context.Background()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	err = newApp().Run(ctx, []string{"horde", "--profile", "staging", "launch", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -2925,5 +2949,64 @@ func TestResults_LazyCompletion(t *testing.T) {
 	}
 	if !strings.Contains(outStr, "success") {
 		t.Errorf("output missing 'success': %s", outStr)
+	}
+}
+
+func TestResolveLaunchedBy_Docker(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.name", "Test User")
+
+	got, err := resolveLaunchedBy(context.Background(), "docker", dir, nil, "")
+	if err != nil {
+		t.Fatalf("resolveLaunchedBy(docker) unexpected error: %v", err)
+	}
+	if got != "Test User" {
+		t.Errorf("resolveLaunchedBy(docker) = %q, want %q", got, "Test User")
+	}
+}
+
+func TestResolveLaunchedBy_ECS_NilConfig(t *testing.T) {
+	t.Parallel()
+	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", nil, "")
+	if err == nil {
+		t.Fatalf("resolveLaunchedBy(aws-ecs, nil config) = %q, want error", got)
+	}
+	if !strings.Contains(err.Error(), "AWS config required") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "AWS config required")
+	}
+}
+
+func TestResolveLaunchedBy_ECS_NoCredentials(t *testing.T) {
+	t.Parallel()
+	cfg := aws.Config{Credentials: aws.AnonymousCredentials{}}
+	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", &cfg, "")
+	if err == nil {
+		t.Fatalf("resolveLaunchedBy(aws-ecs, empty config) = %q, want error", got)
+	}
+	if !strings.Contains(err.Error(), "resolving launched_by") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "resolving launched_by")
+	}
+	if !strings.Contains(err.Error(), "hint:") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "hint:")
+	}
+}
+
+func TestResolveLaunchedBy_UnsupportedProvider(t *testing.T) {
+	t.Parallel()
+	got, err := resolveLaunchedBy(context.Background(), "unknown", "", nil, "")
+	if err == nil {
+		t.Fatalf("resolveLaunchedBy(unknown) = %q, want error", got)
+	}
+	if !strings.Contains(err.Error(), "unsupported provider") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "unsupported provider")
 	}
 }

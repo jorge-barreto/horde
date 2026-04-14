@@ -13,7 +13,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	horde "github.com/jorge-barreto/horde"
+	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/runid"
@@ -37,6 +39,10 @@ func newApp() *cli.Command {
 				Name:  "provider",
 				Value: "docker",
 				Usage: "Override provider selection (docker or aws-ecs)",
+			},
+			&cli.StringFlag{
+				Name:  "profile",
+				Usage: "AWS named profile (passed through to AWS SDK)",
 			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
@@ -113,7 +119,10 @@ func launchCmd() *cli.Command {
 				return err
 			}
 
-			launchedBy := config.LaunchedBy(cwd)
+			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil, cmd.String("profile"))
+			if err != nil {
+				return err
+			}
 
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
@@ -300,6 +309,10 @@ func resumeCmd() *cli.Command {
 				return fmt.Errorf("preparing worker image: %w", err)
 			}
 
+			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil, cmd.String("profile"))
+			if err != nil {
+				return err
+			}
 			now := time.Now()
 			run := &store.Run{
 				ID:         id,
@@ -309,7 +322,7 @@ func resumeCmd() *cli.Command {
 				Workflow:   prev.Workflow,
 				Provider:   "docker",
 				Status:     store.StatusPending,
-				LaunchedBy: config.LaunchedBy(cwd),
+				LaunchedBy: launchedBy,
 				StartedAt:  now,
 				TimeoutAt:  now.Add(timeout),
 			}
@@ -995,4 +1008,24 @@ func printPartialResults(run *store.Run) {
 	}
 	fmt.Println()
 	fmt.Println("Detailed results unavailable (run-result.json not found).")
+}
+
+// resolveLaunchedBy returns the identity string for run records.
+// Docker uses the local git user name; aws-ecs uses the IAM ARN from STS.
+func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, awsCfg *aws.Config, profile string) (string, error) {
+	switch providerName {
+	case "docker":
+		return config.LaunchedBy(cwd), nil
+	case "aws-ecs":
+		if awsCfg == nil {
+			return "", fmt.Errorf("resolving launched_by: AWS config required for aws-ecs provider")
+		}
+		arn, err := awscfg.CallerIdentity(ctx, *awsCfg, profile)
+		if err != nil {
+			return "", fmt.Errorf("resolving launched_by: %w", err)
+		}
+		return arn, nil
+	default:
+		return "", fmt.Errorf("resolving launched_by: unsupported provider %q", providerName)
+	}
 }

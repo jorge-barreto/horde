@@ -1,4 +1,4 @@
 # Project-level horde configuration.
-# Paths relative to project root to mount into the worker container.
+# Volume mounts in host:container format (host side relative to project root).
 mounts:
-  - .beads
+  - .beads:/workspace/.beads

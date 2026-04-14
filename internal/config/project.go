@@ -11,7 +11,7 @@ import (
 
 // ProjectConfig holds project-level horde settings from .horde/config.yaml.
 type ProjectConfig struct {
-	Mounts []string `yaml:"mounts"` // paths relative to project root to mount into /workspace/
+	Mounts []string `yaml:"mounts"` // volume mounts in host:container format (host side relative to project root)
 }
 
 // LoadProjectConfig reads .horde/config.yaml from dir.
@@ -33,20 +33,30 @@ func LoadProjectConfig(dir string) (*ProjectConfig, error) {
 	return &cfg, nil
 }
 
-// ResolveMounts converts relative mount paths to docker volume mount strings
-// (host:container format). Skips paths that don't exist on the host.
+// ResolveMounts resolves mount entries to absolute host:container paths.
+// Each entry should be in host:container format (e.g. ".beads:/workspace/.beads").
+// The host side is resolved relative to projectDir. Skips entries where the
+// host path doesn't exist.
 func (c *ProjectConfig) ResolveMounts(projectDir string) []string {
 	var mounts []string
-	for _, rel := range c.Mounts {
-		rel = strings.TrimSpace(rel)
-		if rel == "" {
+	for _, entry := range c.Mounts {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
 			continue
 		}
-		hostPath := filepath.Join(projectDir, rel)
+		parts := strings.SplitN(entry, ":", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		hostRel, containerPath := parts[0], parts[1]
+		hostPath := hostRel
+		if !filepath.IsAbs(hostRel) {
+			hostPath = filepath.Join(projectDir, hostRel)
+		}
 		if _, err := os.Stat(hostPath); err != nil {
 			continue
 		}
-		mounts = append(mounts, hostPath+":/workspace/"+rel)
+		mounts = append(mounts, hostPath+":"+containerPath)
 	}
 	return mounts
 }

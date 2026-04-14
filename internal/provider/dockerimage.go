@@ -14,10 +14,14 @@ import (
 	"time"
 )
 
-// EnsureImage checks that the worker Docker image exists and is up to date.
-// If the image is missing or older than the embedded worker files, it rebuilds
-// automatically. Build progress is streamed to out.
-func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, out io.Writer) error {
+const baseImage = "horde-worker-base:latest"
+
+// EnsureImage ensures the worker image is ready. It manages two layers:
+//
+//  1. Base image (horde-worker-base:latest) — built from embedded files (orc, claude, bd, entrypoint).
+//  2. Project image (horde-worker:latest) — if projectDir/worker/Dockerfile exists, built from that
+//     (typically FROM horde-worker-base:latest + project tools). Otherwise the base is tagged directly.
+func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, projectDir string, out io.Writer) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("getting home directory: %w", err)
@@ -28,14 +32,30 @@ func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, out
 		return fmt.Errorf("syncing worker files: %w", err)
 	}
 
-	imageTime, exists, err := inspectImageTime(ctx)
+	// --- Base image ---
+	if err := ensureBaseImage(ctx, workerDir, out); err != nil {
+		return err
+	}
+
+	// --- Project image ---
+	projectDockerfile := filepath.Join(projectDir, "worker", "Dockerfile")
+	if _, err := os.Stat(projectDockerfile); err == nil {
+		return ensureProjectImage(ctx, filepath.Join(projectDir, "worker"), out)
+	}
+
+	// No project Dockerfile — tag base as the run image
+	return tagImage(ctx, baseImage, dockerImage)
+}
+
+func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error {
+	imageTime, exists, err := inspectImageTimeOf(ctx, baseImage)
 	if err != nil {
 		return err
 	}
 
 	if !exists {
-		fmt.Fprintf(out, "Worker image %s not found. Building...\n", dockerImage)
-		return buildImage(ctx, workerDir, out)
+		fmt.Fprintf(out, "Base image %s not found. Building...\n", baseImage)
+		return buildImageAs(ctx, baseImage, workerDir, out)
 	}
 
 	srcTime, err := newestFileMtime(workerDir)
@@ -44,9 +64,43 @@ func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, out
 	}
 
 	if srcTime.After(imageTime) {
-		fmt.Fprintf(out, "Worker image outdated (image: %s, sources: %s). Rebuilding...\n",
-			imageTime.Format("2006-01-02 15:04:05"), srcTime.Format("2006-01-02 15:04:05"))
-		return buildImage(ctx, workerDir, out)
+		fmt.Fprintf(out, "Base image outdated. Rebuilding...\n")
+		return buildImageAs(ctx, baseImage, workerDir, out)
+	}
+
+	return nil
+}
+
+func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Writer) error {
+	projectTime, projectExists, err := inspectImageTimeOf(ctx, dockerImage)
+	if err != nil {
+		return err
+	}
+
+	// Rebuild if project image is missing
+	if !projectExists {
+		fmt.Fprintf(out, "Project image %s not found. Building...\n", dockerImage)
+		return buildImageAs(ctx, dockerImage, projectWorkerDir, out)
+	}
+
+	// Rebuild if base is newer than project image
+	baseTime, baseExists, err := inspectImageTimeOf(ctx, baseImage)
+	if err != nil {
+		return err
+	}
+	if baseExists && baseTime.After(projectTime) {
+		fmt.Fprintf(out, "Project image outdated (base rebuilt). Rebuilding...\n")
+		return buildImageAs(ctx, dockerImage, projectWorkerDir, out)
+	}
+
+	// Rebuild if project sources are newer than project image
+	srcTime, err := newestFileMtime(projectWorkerDir)
+	if err != nil {
+		return fmt.Errorf("checking project worker file timestamps: %w", err)
+	}
+	if srcTime.After(projectTime) {
+		fmt.Fprintf(out, "Project image outdated (worker/ changed). Rebuilding...\n")
+		return buildImageAs(ctx, dockerImage, projectWorkerDir, out)
 	}
 
 	return nil
@@ -89,8 +143,8 @@ func syncWorkerFiles(embedded fs.FS, dst string) error {
 	return nil
 }
 
-func inspectImageTime(ctx context.Context) (time.Time, bool, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", dockerImage, "--format", "{{.Created}}")
+func inspectImageTimeOf(ctx context.Context, image string) (time.Time, bool, error) {
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image, "--format", "{{.Created}}")
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -132,12 +186,20 @@ func newestFileMtime(dir string) (time.Time, error) {
 	return newest, nil
 }
 
-func buildImage(ctx context.Context, contextDir string, out io.Writer) error {
-	cmd := exec.CommandContext(ctx, "docker", "build", "-t", dockerImage, contextDir)
+func buildImageAs(ctx context.Context, tag, contextDir string, out io.Writer) error {
+	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, contextDir)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("building worker image: %w", err)
+		return fmt.Errorf("building image %s: %w", tag, err)
+	}
+	return nil
+}
+
+func tagImage(ctx context.Context, src, dst string) error {
+	cmd := exec.CommandContext(ctx, "docker", "tag", src, dst)
+	if _, err := cmd.Output(); err != nil {
+		return fmt.Errorf("tagging %s as %s: %w", src, dst, err)
 	}
 	return nil
 }

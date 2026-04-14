@@ -90,11 +90,12 @@ func TestSyncWorkerFiles_UpdatesMtimeOnContentChange(t *testing.T) {
 	}
 }
 
-func TestEnsureImage_MissingImage(t *testing.T) {
+func TestEnsureImage_MissingBase(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `case "$1" in
   image) exit 1;;
   build) exit 0;;
+  tag) exit 0;;
 esac
 `)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
@@ -107,7 +108,7 @@ esac
 
 	p := NewDockerProvider()
 	var buf bytes.Buffer
-	if err := p.EnsureImage(context.Background(), embedded, &buf); err != nil {
+	if err := p.EnsureImage(context.Background(), embedded, t.TempDir(), &buf); err != nil {
 		t.Fatalf("EnsureImage: %v", err)
 	}
 
@@ -118,9 +119,9 @@ esac
 
 func TestEnsureImage_UpToDate(t *testing.T) {
 	dir := t.TempDir()
-	// Return a far-future timestamp so image is newer than any file
 	writeFakeDocker(t, dir, `case "$1" in
   image) echo "2099-01-01T00:00:00Z";;
+  tag) exit 0;;
 esac
 `)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
@@ -132,22 +133,21 @@ esac
 
 	p := NewDockerProvider()
 	var buf bytes.Buffer
-	if err := p.EnsureImage(context.Background(), embedded, &buf); err != nil {
+	if err := p.EnsureImage(context.Background(), embedded, t.TempDir(), &buf); err != nil {
 		t.Fatalf("EnsureImage: %v", err)
 	}
 
-	// Should be silent — no rebuild message
 	if strings.Contains(buf.String(), "Building") || strings.Contains(buf.String(), "Rebuilding") {
 		t.Errorf("unexpected build output for up-to-date image: %q", buf.String())
 	}
 }
 
-func TestEnsureImage_StaleImage(t *testing.T) {
+func TestEnsureImage_StaleBase(t *testing.T) {
 	dir := t.TempDir()
-	// Return a timestamp in the past
 	writeFakeDocker(t, dir, `case "$1" in
   image) echo "2000-01-01T00:00:00Z";;
   build) exit 0;;
+  tag) exit 0;;
 esac
 `)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
@@ -159,7 +159,7 @@ esac
 
 	p := NewDockerProvider()
 	var buf bytes.Buffer
-	if err := p.EnsureImage(context.Background(), embedded, &buf); err != nil {
+	if err := p.EnsureImage(context.Background(), embedded, t.TempDir(), &buf); err != nil {
 		t.Fatalf("EnsureImage: %v", err)
 	}
 
@@ -184,11 +184,47 @@ esac
 
 	p := NewDockerProvider()
 	var buf bytes.Buffer
-	err := p.EnsureImage(context.Background(), embedded, &buf)
+	err := p.EnsureImage(context.Background(), embedded, t.TempDir(), &buf)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "building worker image") {
-		t.Errorf("error %q does not contain 'building worker image'", err.Error())
+	if !strings.Contains(err.Error(), "building image") {
+		t.Errorf("error %q does not contain 'building image'", err.Error())
+	}
+}
+
+func TestEnsureImage_WithProjectDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `case "$1" in
+  image) echo "2099-01-01T00:00:00Z";;
+  build) exit 0;;
+esac
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+
+	embedded := fstest.MapFS{
+		"Dockerfile": {Data: []byte("FROM debian\n")},
+	}
+
+	// Create a project with worker/Dockerfile
+	projectDir := t.TempDir()
+	workerDir := filepath.Join(projectDir, "worker")
+	os.MkdirAll(workerDir, 0o755)
+	os.WriteFile(filepath.Join(workerDir, "Dockerfile"), []byte("FROM horde-worker-base:latest\nRUN apt-get install -y golang\n"), 0o644)
+
+	p := NewDockerProvider()
+	var buf bytes.Buffer
+	if err := p.EnsureImage(context.Background(), embedded, projectDir, &buf); err != nil {
+		t.Fatalf("EnsureImage: %v", err)
+	}
+
+	// The fake docker returns 2099 for all image inspects, so both base and project
+	// appear up to date. But since the project worker/Dockerfile was just created
+	// (mtime = now), it's newer than the project image (2099 won't be newer than now
+	// in this test... actually 2099 IS newer). So this should NOT rebuild.
+	if strings.Contains(buf.String(), "Project image") && strings.Contains(buf.String(), "Building") {
+		// The fake returns 2099 for all images, so project should be up to date
+		t.Errorf("unexpected project rebuild: %q", buf.String())
 	}
 }

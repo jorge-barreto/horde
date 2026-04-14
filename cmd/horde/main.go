@@ -156,7 +156,7 @@ func launchCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("accessing worker files: %w", err)
 			}
-			if err := prov.EnsureImage(ctx, workerFS, os.Stderr); err != nil {
+			if err := prov.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
 				failedStatus := store.StatusFailed
 				now := time.Now()
 				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {

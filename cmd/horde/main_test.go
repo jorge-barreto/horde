@@ -426,7 +426,7 @@ func TestLaunch_DockerFailure(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()
 
-	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\ncase \"$1\" in\n  image) echo \"2099-01-01T00:00:00Z\";;\n  *) echo \"Error: Cannot connect to the Docker daemon\" >&2; exit 1;;\nesac\n"), 0o755)
+	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\ncase \"$1\" in\n  image) echo \"2099-01-01T00:00:00Z\";;\n  tag) exit 0;;\n  *) echo \"Error: Cannot connect to the Docker daemon\" >&2; exit 1;;\nesac\n"), 0o755)
 
 	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
 	if err == nil {
@@ -462,7 +462,7 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()
 
-	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\ncase \"$1\" in\n  image) echo \"2099-01-01T00:00:00Z\";;\n  *) echo \"Error: Cannot connect to the Docker daemon\" >&2; exit 1;;\nesac\n"), 0o755)
+	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\ncase \"$1\" in\n  image) echo \"2099-01-01T00:00:00Z\";;\n  tag) exit 0;;\n  *) echo \"Error: Cannot connect to the Docker daemon\" >&2; exit 1;;\nesac\n"), 0o755)
 
 	origStderr := os.Stderr
 	stderrR, stderrW, err := os.Pipe()

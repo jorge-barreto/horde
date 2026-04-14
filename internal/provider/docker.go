@@ -90,7 +90,7 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			if strings.Contains(string(exitErr.Stderr), "No such") {
+			if strings.Contains(strings.ToLower(string(exitErr.Stderr)), "no such") {
 				return &InstanceStatus{State: "unknown"}, nil
 			}
 			return nil, fmt.Errorf("inspecting container: %s", strings.TrimSpace(string(exitErr.Stderr)))
@@ -164,7 +164,7 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			outStr := strings.TrimSpace(string(out))
-			if strings.Contains(outStr, "No such") {
+			if strings.Contains(strings.ToLower(outStr), "no such") {
 				return nil, fmt.Errorf("container not found: %s", instanceID)
 			}
 			var exitErr *exec.ExitError
@@ -181,7 +181,7 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 	if _, err := checkCmd.Output(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			if strings.Contains(string(exitErr.Stderr), "No such") {
+			if strings.Contains(strings.ToLower(string(exitErr.Stderr)), "no such") {
 				return nil, fmt.Errorf("container not found: %s", instanceID)
 			}
 			return nil, fmt.Errorf("reading container logs: %s", strings.TrimSpace(string(exitErr.Stderr)))
@@ -221,7 +221,7 @@ func (p *DockerProvider) Kill(ctx context.Context, opts KillOpts) error {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			stderr := strings.TrimSpace(string(exitErr.Stderr))
-			if strings.Contains(stderr, "No such") {
+			if strings.Contains(strings.ToLower(stderr), "no such") {
 				return fmt.Errorf("killing container: container not found: %s", opts.InstanceID)
 			}
 			return fmt.Errorf("stopping container: %s", stderr)

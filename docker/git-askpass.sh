@@ -1,2 +1,6 @@
 #!/bin/bash
-echo "x-access-token:${GIT_TOKEN}"
+# GIT_ASKPASS is called with a prompt: "Username for ..." or "Password for ..."
+case "$1" in
+    Username*) echo "x-access-token" ;;
+    Password*) echo "${GIT_TOKEN}" ;;
+esac

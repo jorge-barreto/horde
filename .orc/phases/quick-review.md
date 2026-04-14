@@ -80,4 +80,5 @@ Do NOT create `quick-review-pass.txt`. Its absence signals failure.
 - Do NOT flag style preferences, alternative approaches, or things outside this bead's scope.
 - Do NOT launch subagents.
 - If the bead plan was followed correctly and the code works, write PASS.
+- **Empirical correctness rule.** If the code deviates from the bead plan's test assertions, but all tests pass, check whether the implementer discovered that the plan's behavioral assumption was wrong. If the deviation is in a test assertion (not the implementation) and tests confirm the implementer's version is correct, this is NOT a blocking issue — pass the review. A passing test suite is stronger evidence than a plan's prediction about third-party behavior. Note the deviation in your findings as informational, not blocking.
 - Maximum 5 blocking issues per review. If you find more, list the 5 most critical.

@@ -82,6 +82,10 @@ Do NOT skip this step. Do NOT trust the plan's descriptions without checking the
 - Can each implementation step be executed as described? Are there steps that are vague enough that the implementer would have to make design decisions?
 - Does the test strategy test the right things? Are the proposed test cases actually meaningful?
 
+### G. Third-Party Behavioral Claims
+- Does the plan assert specific behavior of external libraries (AWS SDK, database drivers, etc.) in test assertions?
+- Can the claim be verified by reading project source or running the code? If neither is possible, flag as **blocking**: "Behavioral claim about [library] cannot be verified — mark as `[verify empirically]` so the implementer discovers actual behavior." Plans that prescribe exact test assertions based on unverified assumptions about third-party behavior cause deadlocks between the implement and review phases.
+
 ## Step 5: Write Review
 
 Write your review to `$ARTIFACTS_DIR/plan-review.md`:

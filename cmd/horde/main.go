@@ -157,6 +157,11 @@ func launchCmd() *cli.Command {
 				return fmt.Errorf("accessing worker files: %w", err)
 			}
 			if err := prov.EnsureImage(ctx, workerFS, os.Stderr); err != nil {
+				failedStatus := store.StatusFailed
+				now := time.Now()
+				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to mark run as failed: %v\n", updateErr)
+				}
 				return fmt.Errorf("preparing worker image: %w", err)
 			}
 

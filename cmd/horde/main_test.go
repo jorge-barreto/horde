@@ -2381,9 +2381,9 @@ esac
 func TestKill_RunningRun(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
   stop) exit 0 ;;
   cp) exit 0 ;;
-  rm) exit 0 ;;
 esac
 `
 	env := setupStatusEnv(t, dockerScript)
@@ -2510,13 +2510,13 @@ func TestKill_PendingRun(t *testing.T) {
 func TestKill_CapturesCostAndExitCode(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
   stop) exit 0 ;;
   cp)
     case "$2" in
       *audit*) mkdir -p "$3/TICKET-1" && printf '{"total_cost_usd": 3.14, "exit_code": 0}' > "$3/TICKET-1/run-result.json" ;;
     esac
     ;;
-  rm) exit 0 ;;
 esac
 `
 	env := setupStatusEnv(t, dockerScript)
@@ -2586,13 +2586,13 @@ esac
 func TestKill_CapturesCostAndExitCode_WithWorkflow(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
   stop) exit 0 ;;
   cp)
     case "$2" in
       *audit*) mkdir -p "$3/plan/TICKET-1" && printf '{"total_cost_usd": 7.50, "exit_code": 2}' > "$3/plan/TICKET-1/run-result.json" ;;
     esac
     ;;
-  rm) exit 0 ;;
 esac
 `
 	env := setupStatusEnv(t, dockerScript)

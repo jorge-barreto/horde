@@ -268,14 +268,18 @@ The entrypoint re-runs and orc picks up from where it left off. Use
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
+
+			prov := provider.NewDockerProvider()
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
+			}
+
 			if run.Status == store.StatusRunning || run.Status == store.StatusPending {
 				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", runID, run.Status)
 			}
 			if run.Status == store.StatusSuccess {
 				return fmt.Errorf("run %s already succeeded — nothing to retry", runID)
 			}
-
-			prov := provider.NewDockerProvider()
 
 			// Verify the container still exists
 			instStatus, err := prov.Status(ctx, run.InstanceID)
@@ -446,6 +450,10 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
+			prov := provider.NewDockerProvider()
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
+			}
 			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
 			}
@@ -453,7 +461,6 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 			var exitCode *int
 			if run.InstanceID != "" {
 				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-				prov := provider.NewDockerProvider()
 
 				// Capture container logs before stopping
 				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
@@ -778,11 +785,15 @@ run orc commands directly (e.g., 'orc run --resume').`,
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
+
+			prov := provider.NewDockerProvider()
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
+			}
+
 			if run.Status == store.StatusRunning || run.Status == store.StatusPending {
 				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", runID, run.Status)
 			}
-
-			prov := provider.NewDockerProvider()
 			instStatus, err := prov.Status(ctx, run.InstanceID)
 			if err != nil {
 				return fmt.Errorf("checking container: %w", err)

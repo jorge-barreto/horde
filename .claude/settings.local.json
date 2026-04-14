@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sqlite3:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(/home/jb/go/bin/bd --help)",
+      "Bash(bd create:*)",
+      "Bash(bd dep:*)",
+      "Bash(bd docs:*)",
+      "Bash(bd init:*)",
+      "Bash(bd ready:*)",
+      "Bash(bd list:*)",
+      "Bash(bd deps:*)",
+      "Bash(bd show:*)",
+      "Bash(for id:*)",
+      "Bash(do echo:*)",
+      "Bash(done)",
+      "Bash(bd update:*)",
+      "Bash(bd close:*)",
+      "Bash(go mod:*)",
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(bd)",
+      "Bash(chmod:*)",
+      "Bash(python3:*)",
+      "Bash(bd search:*)",
+      "WebFetch(domain:ona.com)",
+      "Bash(go test:*)",
+      "Bash(gofmt:*)"
+    ]
+  }
+}

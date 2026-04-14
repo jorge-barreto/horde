@@ -49,6 +49,22 @@ else
 fi
 EXIT_CODE=$?
 
+# Push work to a horde branch so it survives container removal
+HORDE_BRANCH="horde/${TICKET}"
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    BASE_REF=$(cat /workspace/.horde-base-ref 2>/dev/null || true)
+    # Only push if there are changes since the base
+    if [ -n "$BASE_REF" ] && [ "$(git rev-parse HEAD)" != "$BASE_REF" ] || ! git diff --quiet HEAD 2>/dev/null; then
+        git checkout -B "$HORDE_BRANCH" 2>/dev/null
+        # Stage and commit any uncommitted work
+        if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet HEAD 2>/dev/null; then
+            git add -A
+            git commit -m "horde: work in progress (run ${RUN_ID})" --no-verify 2>/dev/null || true
+        fi
+        git push origin "$HORDE_BRANCH" --force 2>/dev/null && echo "Pushed to branch $HORDE_BRANCH" || echo "WARNING: failed to push to $HORDE_BRANCH" >&2
+    fi
+fi
+
 # Upload artifacts to S3 (ECS only — env vars are absent in docker mode)
 if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     if [ -d .orc/artifacts/ ]; then

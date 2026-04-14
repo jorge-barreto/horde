@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
 func TestLoad_DefaultProfile(t *testing.T) {
@@ -56,5 +58,16 @@ func TestLoad_RegionFromEnv(t *testing.T) {
 	}
 	if cfg.Region != "us-west-2" {
 		t.Errorf("cfg.Region = %q, want %q", cfg.Region, "us-west-2")
+	}
+}
+
+func TestCallerIdentity_Error(t *testing.T) {
+	t.Parallel()
+	_, err := CallerIdentity(context.Background(), aws.Config{})
+	if err == nil {
+		t.Fatal("CallerIdentity() with empty config expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "getting caller identity") {
+		t.Errorf("CallerIdentity() error = %q, want it to contain %q", err.Error(), "getting caller identity")
 	}
 }

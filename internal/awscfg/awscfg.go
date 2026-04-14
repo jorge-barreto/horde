@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // Load returns an AWS SDK config using the default credential chain.
@@ -20,4 +21,16 @@ func Load(ctx context.Context, profile string) (aws.Config, error) {
 		return aws.Config{}, fmt.Errorf("loading AWS config: %w", err)
 	}
 	return cfg, nil
+}
+
+// CallerIdentity calls sts:GetCallerIdentity and returns the caller's ARN.
+func CallerIdentity(ctx context.Context, cfg aws.Config) (string, error) {
+	out, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", fmt.Errorf("getting caller identity: %w", err)
+	}
+	if out.Arn == nil {
+		return "", fmt.Errorf("getting caller identity: ARN not present in response")
+	}
+	return *out.Arn, nil
 }

@@ -17,6 +17,7 @@ import (
 	horde "github.com/jorge-barreto/horde"
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/config"
+	"github.com/jorge-barreto/horde/internal/docs"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/runid"
 	"github.com/jorge-barreto/horde/internal/store"
@@ -34,6 +35,11 @@ func newApp() *cli.Command {
 	return &cli.Command{
 		Name:  "horde",
 		Usage: "Cloud launcher for orc workflows",
+		Description: `horde runs orc workflows on ephemeral Docker containers (or ECS Fargate
+in v0.2). It clones a repo, runs orc, collects results, and tears down.
+
+horde must be run from inside a git repository — the repo URL is inferred
+from the local git remote. Run 'horde docs' for detailed documentation.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "provider",
@@ -60,6 +66,7 @@ func newApp() *cli.Command {
 			killCmd(),
 			resultsCmd(),
 			listCmd(),
+			docsCmd(),
 		},
 	}
 }
@@ -69,6 +76,10 @@ func launchCmd() *cli.Command {
 		Name:      "launch",
 		Usage:     "Launch an orc workflow",
 		ArgsUsage: "<ticket>",
+		Description: `Builds the worker Docker image if needed, validates the .env file,
+and launches a container that clones the repo and runs orc. Prints the
+run ID on success. Use --force to launch even if a run with the same
+ticket is already active.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "branch",
@@ -219,6 +230,10 @@ func resumeCmd() *cli.Command {
 		Name:      "resume",
 		Usage:     "Resume a failed or killed run",
 		ArgsUsage: "<run-id>",
+		Description: `Creates a new run that picks up where the previous one left off. Clones
+from the horde/<ticket> branch to recover committed code, restores orc
+artifacts and audit data, and retries from the failed phase if detected
+in the previous run's results. See 'horde docs resume' for details.`,
 		Flags: []cli.Flag{
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -381,6 +396,10 @@ func statusCmd() *cli.Command {
 		Name:      "status",
 		Usage:     "Show status of a run",
 		ArgsUsage: "<run-id>",
+		Description: `Shows run detail: ID, ticket, status, exit code, duration, cost, and
+who launched it. For running containers, reads live cost from the
+container. Also detects completed or timed-out runs and triggers
+result collection.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
 			if runID == "" {
@@ -421,6 +440,9 @@ func logsCmd() *cli.Command {
 		Name:      "logs",
 		Usage:     "Show logs for a run",
 		ArgsUsage: "<run-id>",
+		Description: `Streams container stdout/stderr. With --follow, tails in real time
+until the run completes. For completed runs whose container has been
+removed, falls back to the saved container.log in the results directory.`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "follow",
@@ -482,6 +504,9 @@ func killCmd() *cli.Command {
 		Name:      "kill",
 		Usage:     "Kill a running run",
 		ArgsUsage: "<run-id>",
+		Description: `Stops a running container, saves logs and workspace patch (best-effort),
+copies artifacts from the container, updates the run status to killed,
+and removes the container. The saved state can be used by 'horde resume'.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
 			if runID == "" {
@@ -566,6 +591,9 @@ func resultsCmd() *cli.Command {
 		Name:      "results",
 		Usage:     "Show results of a run",
 		ArgsUsage: "<run-id>",
+		Description: `Displays the run's result summary from run-result.json: overall status,
+total cost, total duration, and a per-phase breakdown. Reports partial
+information if the result file is missing (e.g., orc crashed early).`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
 			if runID == "" {
@@ -627,6 +655,9 @@ func listCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "list",
 		Usage: "List runs for the current repo",
+		Description: `Lists runs scoped to the current repo (inferred from git remote).
+By default shows only active runs (pending/running). Use --all to
+include completed, failed, and killed runs.`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "all",
@@ -712,6 +743,33 @@ func mapExitCode(code int) store.Status {
 type runResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
+}
+
+func docsCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "docs",
+		Usage:     "Show documentation",
+		ArgsUsage: "[topic]",
+		Description: `Without arguments, lists available documentation topics. With a topic
+name, displays the full article.`,
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			name := cmd.Args().First()
+			if name == "" {
+				fmt.Print("\nAvailable topics:\n\n")
+				for _, t := range docs.All() {
+					fmt.Printf("  %-14s %s\n", t.Name, t.Summary)
+				}
+				fmt.Println("\nRun 'horde docs <topic>' to read a topic.")
+				return nil
+			}
+			t, err := docs.Get(name)
+			if err != nil {
+				return err
+			}
+			fmt.Print(t.Content)
+			return nil
+		},
+	}
 }
 
 type liveCosts struct {

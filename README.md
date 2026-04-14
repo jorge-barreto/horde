@@ -1,23 +1,23 @@
 # horde
 
-Cloud launcher for [orc](https://github.com/jorge-barreto/orc) workflows. Runs orc on ephemeral cloud instances — spin up, clone, run, collect, tear down.
+Cloud launcher for [orc](https://github.com/jorge-barreto/orc) workflows. Runs orc on ephemeral Docker containers — spin up, clone, run, collect, tear down.
 
-See [SPEC.md](SPEC.md) for the full design and [ROADMAP.md](ROADMAP.md) for the implementation plan.
+orc handles the "what" (workflow phases), horde handles the "where" (infrastructure). Any repo with an `.orc/` directory is deployable. Git is a hard requirement — horde infers the repo URL from the local git remote.
 
-## Setup
+See [SPEC.md](SPEC.md) for the full design.
 
-### Prerequisites
+## Prerequisites
 
 - Go (1.24+)
 - Docker
 
-### Install
+## Install
 
 ```bash
 make install
 ```
 
-### Set up secrets
+## Setup
 
 ```bash
 cp .env.example .env
@@ -36,19 +36,66 @@ Edit `.env` and fill in:
   | Issues           | Read       | Read ticket/issue context             |
   | Workflows        | Read/Write | Push changes to `.github/workflows/`  |
 
-### Usage
+Run `horde docs env` for more detail on token setup and security.
+
+## Usage
 
 ```bash
-horde launch <ticket>          # auto-builds worker image on first run
-horde logs <run-id> --follow
+# Launch a run
+horde launch PROJ-123
+horde launch PROJ-123 --branch feature/xyz
+horde launch PROJ-123 --workflow bugfix --timeout 30m
+
+# Monitor
 horde status <run-id>
+horde logs <run-id> --follow
+horde list                        # active runs
+horde list --all                  # include completed/failed/killed
+
+# Results
 horde results <run-id>
-horde list --all
+
+# Stop or resume
 horde kill <run-id>
-horde resume <run-id>          # retry from failed phase
+horde resume <run-id>             # retry from failed phase
+
+# Documentation
+horde docs                        # list topics
+horde docs <topic>                # read a topic
 ```
 
-The first `horde launch` builds the `horde-worker:latest` Docker image automatically. Subsequent launches rebuild only when the embedded Dockerfile changes (after `make install`).
+The first `horde launch` builds the worker Docker image automatically. Subsequent launches reuse the cached image unless the Dockerfile changes.
+
+## Worker Image
+
+horde uses a two-layer Docker image system:
+
+- **`horde-worker-base:latest`** — built from files embedded in the horde binary (orc, claude CLI, bd, git, gh, AWS CLI). Rebuilds when horde is upgraded.
+- **`horde-worker:latest`** — built from `worker/Dockerfile` if present (extends the base with project-specific tools), or tagged from base otherwise.
+
+Both are built automatically on launch. Run `horde docs worker-image` for details.
+
+## Project Config
+
+Optional project-level settings in `.horde/config.yaml`:
+
+```yaml
+mounts:
+  - .beads:/workspace/.beads
+```
+
+Mounts use Docker's `host:container` format. Host paths are relative to the project root. Run `horde docs config` for the full schema.
+
+## Run Data
+
+All local data lives under `~/.horde/`:
+
+```
+~/.horde/
+  horde.db                  # SQLite run history
+  results/<run-id>/         # artifacts, audit logs, saved container logs
+  workerfiles/              # synced Docker build context
+```
 
 ## License
 

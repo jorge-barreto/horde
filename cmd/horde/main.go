@@ -758,10 +758,10 @@ func shellCmd() *cli.Command {
 		Name:      "shell",
 		Usage:     "Open a shell in a run's container",
 		ArgsUsage: "<run-id>",
-		Description: `Opens an interactive shell into the filesystem of a stopped container.
-Creates a temporary snapshot image via 'docker commit', runs bash in it,
-and cleans up the image on exit. Use this for manual inspection or to
-run orc commands directly (e.g., 'orc run --resume').`,
+		Description: `Starts the stopped container and opens an interactive shell via
+'docker exec'. Use this for manual inspection or to run orc commands
+directly (e.g., 'orc run --resume'). The container is left running
+after the shell exits — use 'horde kill' to stop it.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
 			if runID == "" {
@@ -791,8 +791,8 @@ run orc commands directly (e.g., 'orc run --resume').`,
 				return err
 			}
 
-			if run.Status == store.StatusRunning || run.Status == store.StatusPending {
-				return fmt.Errorf("run %s is still %s — kill it first or wait for completion", runID, run.Status)
+			if run.InstanceID == "" {
+				return fmt.Errorf("run %s has no container", runID)
 			}
 			instStatus, err := prov.Status(ctx, run.InstanceID)
 			if err != nil {
@@ -802,27 +802,22 @@ run orc commands directly (e.g., 'orc run --resume').`,
 				return fmt.Errorf("container for run %s no longer exists", runID)
 			}
 
-			// Snapshot the container's filesystem into a temporary image
-			tempImage := "horde-shell-" + runID
-			commitCmd := exec.CommandContext(ctx, "docker", "commit", run.InstanceID, tempImage)
-			if _, err := commitCmd.Output(); err != nil {
-				return fmt.Errorf("creating shell snapshot: %w", err)
+			// Start the container if it's stopped (entrypoint runs in background)
+			if instStatus.State == "stopped" {
+				if err := prov.Start(ctx, run.InstanceID); err != nil {
+					return fmt.Errorf("starting container: %w", err)
+				}
 			}
 
-			// Run interactive bash in the snapshot
+			// Exec into the running container
 			fmt.Fprintf(os.Stderr, "Opening shell for run %s (%s). Type 'exit' to leave.\n", runID, run.Ticket)
-			shellExec := exec.CommandContext(ctx, "docker", "run", "-it", "--rm",
-				"--workdir", "/workspace",
-				"--env-file", filepath.Join(".", ".env"),
-				tempImage, "bash")
+			shellExec := exec.CommandContext(ctx, "docker", "exec", "-it",
+				"-w", "/workspace",
+				run.InstanceID, "bash")
 			shellExec.Stdin = os.Stdin
 			shellExec.Stdout = os.Stdout
 			shellExec.Stderr = os.Stderr
-			shellExec.Run() // ignore exit code — user may ctrl-c
-
-			// Clean up temp image
-			cleanupCmd := exec.CommandContext(ctx, "docker", "rmi", tempImage)
-			cleanupCmd.Run()
+			shellExec.Run()
 			return nil
 		},
 	}

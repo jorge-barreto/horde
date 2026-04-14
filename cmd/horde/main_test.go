@@ -42,7 +42,7 @@ func setupLaunchEnv(t *testing.T) launchEnv {
 	run("git", "remote", "add", "origin", "https://github.com/test/repo.git")
 
 	// Write .env — pattern from internal/config/envfile_test.go
-	envContent := "ANTHROPIC_API_KEY=test-key\nGIT_TOKEN=test-token\n"
+	envContent := "CLAUDE_CODE_OAUTH_TOKEN=test-key\nGIT_TOKEN=test-token\n"
 	if err := os.WriteFile(filepath.Join(projectDir, ".env"), []byte(envContent), 0o644); err != nil {
 		t.Fatalf("writing .env: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestLaunch_NotGitRepo(t *testing.T) {
 	tmpHome := t.TempDir()
 	projectDir := filepath.Join(tmpHome, "project")
 	os.MkdirAll(projectDir, 0o755)
-	os.WriteFile(filepath.Join(projectDir, ".env"), []byte("ANTHROPIC_API_KEY=test-key\nGIT_TOKEN=test-token\n"), 0o644)
+	os.WriteFile(filepath.Join(projectDir, ".env"), []byte("CLAUDE_CODE_OAUTH_TOKEN=test-key\nGIT_TOKEN=test-token\n"), 0o644)
 	binDir := filepath.Join(tmpHome, "bin")
 	os.MkdirAll(binDir, 0o755)
 	os.WriteFile(filepath.Join(binDir, "docker"), []byte("#!/bin/sh\necho abc123container\n"), 0o755)
@@ -280,8 +280,8 @@ func TestLaunch_MissingEnvKey(t *testing.T) {
 	run("git", "init")
 	run("git", "remote", "add", "origin", "https://github.com/test/repo.git")
 
-	// Write .env with only ANTHROPIC_API_KEY, missing GIT_TOKEN
-	os.WriteFile(filepath.Join(projectDir, ".env"), []byte("ANTHROPIC_API_KEY=test\n"), 0o644)
+	// Write .env with only CLAUDE_CODE_OAUTH_TOKEN, missing GIT_TOKEN
+	os.WriteFile(filepath.Join(projectDir, ".env"), []byte("CLAUDE_CODE_OAUTH_TOKEN=test\n"), 0o644)
 
 	binDir := filepath.Join(tmpHome, "bin")
 	os.MkdirAll(binDir, 0o755)

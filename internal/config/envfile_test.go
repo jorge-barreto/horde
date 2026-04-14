@@ -13,10 +13,10 @@ func TestValidateEnvFile(t *testing.T) {
 		name    string
 		content string
 	}{
-		{"both keys present", "ANTHROPIC_API_KEY=sk-ant-xxx\nGIT_TOKEN=ghp_xxx\n"},
-		{"empty values", "ANTHROPIC_API_KEY=\nGIT_TOKEN=\n"},
-		{"extra keys ignored", "ANTHROPIC_API_KEY=sk\nGIT_TOKEN=ghp\nEXTRA_KEY=foo\n"},
-		{"comments and blank lines", "# comment\n\nANTHROPIC_API_KEY=sk\n\nGIT_TOKEN=ghp\n"},
+		{"both keys present", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-xxx\nGIT_TOKEN=ghp_xxx\n"},
+		{"empty values", "CLAUDE_CODE_OAUTH_TOKEN=\nGIT_TOKEN=\n"},
+		{"extra keys ignored", "CLAUDE_CODE_OAUTH_TOKEN=sk\nGIT_TOKEN=ghp\nEXTRA_KEY=foo\n"},
+		{"comments and blank lines", "# comment\n\nCLAUDE_CODE_OAUTH_TOKEN=sk\n\nGIT_TOKEN=ghp\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,9 +44,9 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 		wantErr string
 	}{
 		{"missing file", false, "", "opening .env file"},
-		{"missing ANTHROPIC_API_KEY", true, "GIT_TOKEN=ghp_xxx\n", "validating .env file: missing required key ANTHROPIC_API_KEY"},
-		{"missing GIT_TOKEN", true, "ANTHROPIC_API_KEY=sk-ant-xxx\n", "validating .env file: missing required key GIT_TOKEN"},
-		{"empty file", true, "", "validating .env file: missing required key ANTHROPIC_API_KEY"},
+		{"missing CLAUDE_CODE_OAUTH_TOKEN", true, "GIT_TOKEN=ghp_xxx\n", "validating .env file: missing required key CLAUDE_CODE_OAUTH_TOKEN"},
+		{"missing GIT_TOKEN", true, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-xxx\n", "validating .env file: missing required key GIT_TOKEN"},
+		{"empty file", true, "", "validating .env file: missing required key CLAUDE_CODE_OAUTH_TOKEN"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ValidateEnvFile checks that dir/.env exists and contains ANTHROPIC_API_KEY and GIT_TOKEN.
+// ValidateEnvFile checks that dir/.env exists and contains CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN.
 // Returns the absolute path to the .env file on success.
 func ValidateEnvFile(dir string) (string, error) {
 	envPath := filepath.Join(dir, ".env")
@@ -39,7 +39,7 @@ func ValidateEnvFile(dir string) (string, error) {
 		return "", fmt.Errorf("reading .env file: %w", err)
 	}
 
-	required := []string{"ANTHROPIC_API_KEY", "GIT_TOKEN"}
+	required := []string{"CLAUDE_CODE_OAUTH_TOKEN", "GIT_TOKEN"}
 	for _, key := range required {
 		if !keys[key] {
 			return "", fmt.Errorf("validating .env file: missing required key %s", key)

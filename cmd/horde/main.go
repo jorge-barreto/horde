@@ -269,7 +269,13 @@ func logsCmd() *cli.Command {
 				return fmt.Errorf("reading run: %w", err)
 			}
 			if run.Status == store.StatusSuccess || run.Status == store.StatusFailed || run.Status == store.StatusKilled {
-				return fmt.Errorf("logs unavailable: run %s is %s (container removed)", runID, run.Status)
+				// Container is gone — try saved logs
+				logPath := filepath.Join(homeDir, ".horde", "results", runID, "container.log")
+				if data, err := os.ReadFile(logPath); err == nil {
+					os.Stdout.Write(data)
+					return nil
+				}
+				return fmt.Errorf("logs unavailable: run %s is %s (container removed, no saved logs)", runID, run.Status)
 			}
 			if run.InstanceID == "" {
 				return fmt.Errorf("logs unavailable: run %s has no container yet", runID)
@@ -324,6 +330,16 @@ func killCmd() *cli.Command {
 			if run.InstanceID != "" {
 				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 				prov := provider.NewDockerProvider()
+
+				// Capture container logs before kill removes the container
+				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
+					if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
+						os.MkdirAll(resultsDir, 0o755)
+						os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+					}
+					logs.Close()
+				}
+
 				if err := prov.Kill(ctx, provider.KillOpts{
 					InstanceID: run.InstanceID,
 					ResultsDir: resultsDir,
@@ -548,6 +564,15 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 		// Best-effort copy — errors ignored
 		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
 		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+
+		// Capture container stdout/stderr before removal
+		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
+			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
+				os.MkdirAll(resultsDir, 0o755)
+				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+			}
+			logs.Close()
+		}
 
 		// Parse run-result.json for cost (best effort)
 		var resultPath string

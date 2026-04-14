@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -390,6 +391,54 @@ func TestParseHordeConfig_ExtraFieldsIgnored(t *testing.T) {
 	_, err := ParseHordeConfig(marshalFields(t, fields))
 	if err != nil {
 		t.Fatalf("ParseHordeConfig() with extra field error: %v", err)
+	}
+}
+
+func TestDiagnostic(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		err    error
+		want   []string
+		noWant []string
+	}{
+		{
+			name: "not found",
+			err:  &NotFoundError{Path: "/horde/config", Err: fmt.Errorf("underlying")},
+			want: []string{"/horde/config", "deploy the @horde/cdk construct"},
+		},
+		{
+			name: "access denied",
+			err:  &AccessDeniedError{Path: "/horde/config", Err: fmt.Errorf("underlying")},
+			want: []string{"/horde/config", "attach the horde CLI user managed policy", "@horde/cdk construct"},
+		},
+		{
+			name: "parse error",
+			err:  &ParseError{Path: "/horde/config", Err: fmt.Errorf("invalid json")},
+			want: []string{"/horde/config", "malformed", "Re-deploy", "invalid json"},
+		},
+		{
+			name:   "unrecognized error",
+			err:    fmt.Errorf("connection refused"),
+			want:   []string{"connection refused"},
+			noWant: []string{"hint:"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Diagnostic(tc.err)
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("Diagnostic() = %q, want it to contain %q", got, w)
+				}
+			}
+			for _, nw := range tc.noWant {
+				if strings.Contains(got, nw) {
+					t.Errorf("Diagnostic() = %q, should not contain %q", got, nw)
+				}
+			}
+		})
 	}
 }
 

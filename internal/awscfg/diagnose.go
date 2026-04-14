@@ -35,11 +35,10 @@ func DiagnoseError(err error, profile string) string {
 	if strings.Contains(msg, "no EC2 IMDS") ||
 		strings.Contains(msg, "failed to refresh cached credentials") ||
 		strings.Contains(msg, "AnonymousCredentials") {
-		hint := "no AWS credentials found; run: aws configure"
-		if profile == "" {
-			hint += ", or set --profile"
+		if profile != "" {
+			return fmt.Sprintf("no AWS credentials found; run: aws configure --profile %s", profile)
 		}
-		return hint
+		return "no AWS credentials found; run: aws configure, or set --profile"
 	}
 
 	// 4. Access denied / not authorized (case-insensitive)
@@ -57,9 +56,8 @@ func DiagnoseError(err error, profile string) string {
 	}
 
 	// 6. Default fallback
-	hint := "check AWS credentials and configuration; run: aws configure"
-	if profile == "" {
-		hint += ", or set --profile"
+	if profile != "" {
+		return fmt.Sprintf("check AWS credentials and configuration; run: aws configure --profile %s", profile)
 	}
-	return hint
+	return "check AWS credentials and configuration; run: aws configure, or set --profile"
 }

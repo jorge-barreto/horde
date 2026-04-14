@@ -59,6 +59,18 @@ func TestDiagnoseError_NoCredentials(t *testing.T) {
 	}
 }
 
+func TestDiagnoseError_NoCredentials_WithProfile(t *testing.T) {
+	t.Parallel()
+	err := errors.New("failed to refresh cached credentials, no credential providers")
+	result := DiagnoseError(err, "staging")
+	if !strings.Contains(result, "no AWS credentials found") {
+		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "no AWS credentials found")
+	}
+	if !strings.Contains(result, "aws configure --profile staging") {
+		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure --profile staging")
+	}
+}
+
 func TestDiagnoseError_AccessDenied(t *testing.T) {
 	t.Parallel()
 	err := errors.New("operation error STS: GetCallerIdentity, AccessDeniedException: not authorized")
@@ -92,6 +104,9 @@ func TestDiagnoseError_UnknownError_WithProfile(t *testing.T) {
 	}
 	if strings.Contains(result, "set --profile") {
 		t.Errorf("DiagnoseError() = %q, want it NOT to contain %q", result, "set --profile")
+	}
+	if !strings.Contains(result, "aws configure --profile myprofile") {
+		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure --profile myprofile")
 	}
 }
 

@@ -15,6 +15,9 @@ if [ -n "${BRANCH:-}" ]; then
     fi
 fi
 
+# Save base ref for workspace patch generation on completion
+git rev-parse HEAD > /workspace/.horde-base-ref
+
 # Restore state from a previous run (resume)
 if [ -d "${RESUME_DIR:-}" ]; then
     echo "Restoring state from previous run..."
@@ -24,6 +27,13 @@ if [ -d "${RESUME_DIR:-}" ]; then
     fi
     if [ -d "$RESUME_DIR/audit" ]; then
         cp -a "$RESUME_DIR/audit/." .orc/audit/
+    fi
+    # Apply code changes from previous run
+    if [ -f "$RESUME_DIR/workspace.patch" ] && [ -s "$RESUME_DIR/workspace.patch" ]; then
+        echo "Applying workspace changes from previous run..."
+        if ! git apply "$RESUME_DIR/workspace.patch"; then
+            echo "WARNING: failed to apply workspace patch — starting from clean checkout" >&2
+        fi
     fi
 fi
 

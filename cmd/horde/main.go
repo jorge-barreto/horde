@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -486,7 +487,7 @@ func killCmd() *cli.Command {
 				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 				prov := provider.NewDockerProvider()
 
-				// Capture container logs before kill removes the container
+				// Capture container logs and workspace patch before kill removes the container
 				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
 					if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
 						os.MkdirAll(resultsDir, 0o755)
@@ -494,6 +495,7 @@ func killCmd() *cli.Command {
 					}
 					logs.Close()
 				}
+				saveWorkspacePatch(ctx, prov, run.InstanceID, resultsDir)
 
 				if err := prov.Kill(ctx, provider.KillOpts{
 					InstanceID: run.InstanceID,
@@ -712,6 +714,28 @@ func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *stor
 	return &lc.TotalCostUSD
 }
 
+// saveWorkspacePatch captures all code changes (committed + uncommitted) from the
+// container as a patch file in resultsDir. Best-effort — errors are silently ignored.
+func saveWorkspacePatch(ctx context.Context, prov *provider.DockerProvider, instanceID, resultsDir string) {
+	baseRef, err := prov.ReadContainerFile(ctx, instanceID, "/workspace/.horde-base-ref")
+	if err != nil {
+		return
+	}
+	ref := strings.TrimSpace(string(baseRef))
+	if ref == "" {
+		return
+	}
+
+	script := fmt.Sprintf("cd /workspace && git add -A && git diff --cached %s", ref)
+	patchData, err := prov.ExecInContainer(ctx, instanceID, script)
+	if err != nil || len(patchData) == 0 {
+		return
+	}
+
+	os.MkdirAll(resultsDir, 0o755)
+	os.WriteFile(filepath.Join(resultsDir, "workspace.patch"), patchData, 0o644)
+}
+
 type fullRunResult struct {
 	ExitCode      int           `json:"exit_code"`
 	Status        string        `json:"status"`
@@ -749,7 +773,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
 		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
 
-		// Capture container stdout/stderr before removal
+		// Capture container stdout/stderr and workspace patch before removal
 		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
 			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
 				os.MkdirAll(resultsDir, 0o755)
@@ -757,6 +781,7 @@ func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st stor
 			}
 			logs.Close()
 		}
+		saveWorkspacePatch(ctx, prov, run.InstanceID, resultsDir)
 
 		// Parse run-result.json for cost (best effort)
 		var resultPath string

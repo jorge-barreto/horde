@@ -253,6 +253,16 @@ func (p *DockerProvider) ReadContainerFile(ctx context.Context, instanceID, path
 	return out, nil
 }
 
+// ExecInContainer runs a shell command in a container and returns stdout.
+func (p *DockerProvider) ExecInContainer(ctx context.Context, instanceID, script string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", instanceID, "sh", "-c", script)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
 	if opts.RunID == "" {
 		return nil, fmt.Errorf("reading file: run ID is required")

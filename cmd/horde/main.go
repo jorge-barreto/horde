@@ -248,10 +248,9 @@ func retryCmd() *cli.Command {
 		Name:      "retry",
 		Usage:     "Retry a failed or killed run",
 		ArgsUsage: "<run-id> [-- <orc-args>...]",
-		Description: `Retries a failed or killed run. If the container is still alive, exec's
-orc inside it. If the container is gone, launches a new one against the
-preserved workspace — orc picks up from where it left off. Use
-'horde shell' for manual control over the retry.
+		Description: `Retries a failed or killed run by launching a new container against the
+preserved workspace — orc picks up from where it left off. If the old
+container is still alive, it is stopped first.
 
 Extra orc flags can be passed after --:
   horde retry abc123 -- --resume
@@ -298,88 +297,69 @@ Extra orc flags can be passed after --:
 				return fmt.Errorf("run %s already succeeded — nothing to retry", runID)
 			}
 
+			// Stop old container if still running
 			instStatus, err := prov.Status(ctx, run.InstanceID)
 			if err != nil {
 				return fmt.Errorf("checking container: %w", err)
 			}
-
 			if instStatus.State == "running" {
-				// Container alive — exec orc directly
-				dp, ok := prov.(*provider.DockerProvider)
-				if !ok {
-					return fmt.Errorf("retry exec is only supported for the docker provider")
+				if err := prov.Stop(ctx, provider.StopOpts{InstanceID: run.InstanceID}); err != nil {
+					return fmt.Errorf("stopping old container: %w", err)
 				}
-				dp.ExecInContainer(ctx, run.InstanceID, "rm -f /workspace/.horde-exit-code")
+			}
 
-				ticket := run.Ticket
-				extraArgs := ""
-				if len(orcArgs) > 0 {
-					extraArgs = " " + strings.Join(orcArgs, " ")
-				}
-				orcCmd := "cd /workspace && orc run " + ticket + " --auto --no-color" + extraArgs + "; echo $? > /workspace/.horde-exit-code"
-				if run.Workflow != "" {
-					orcCmd = "cd /workspace && orc run -w " + run.Workflow + " " + ticket + " --auto --no-color" + extraArgs + "; echo $? > /workspace/.horde-exit-code"
-				}
-				execCmd := exec.CommandContext(ctx, "docker", "exec", "-d",
-					run.InstanceID, "bash", "-c", orcCmd)
-				if _, err := execCmd.Output(); err != nil {
-					return fmt.Errorf("starting orc retry: %w", err)
-				}
-			} else {
-				// Container stopped or gone — relaunch with preserved workspace
-				workspaceDir := provider.WorkspacePath(homeDir, run.ID)
-				if _, err := os.Stat(filepath.Join(workspaceDir, ".git")); err != nil {
-					return fmt.Errorf("workspace for run %s not found at %s — use 'horde launch' to start fresh", runID, workspaceDir)
-				}
+			// Relaunch with preserved workspace
+			workspaceDir := provider.WorkspacePath(homeDir, run.ID)
+			if _, err := os.Stat(filepath.Join(workspaceDir, ".git")); err != nil {
+				return fmt.Errorf("workspace for run %s not found at %s — use 'horde launch' to start fresh", runID, workspaceDir)
+			}
 
-				cwd, err := os.Getwd()
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting working directory: %w", err)
+			}
+			envPath, err := config.ValidateEnvFile(cwd)
+			if err != nil {
+				return err
+			}
+			projCfg, err := config.LoadProjectConfig(cwd)
+			if err != nil {
+				return err
+			}
+
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
 				if err != nil {
-					return fmt.Errorf("getting working directory: %w", err)
+					return fmt.Errorf("accessing worker files: %w", err)
 				}
-				envPath, err := config.ValidateEnvFile(cwd)
-				if err != nil {
-					return err
+				if err := dp.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
+					return fmt.Errorf("preparing worker image: %w", err)
 				}
-				projCfg, err := config.LoadProjectConfig(cwd)
-				if err != nil {
-					return err
-				}
+			}
 
-				if dp, ok := prov.(*provider.DockerProvider); ok {
-					workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
-					if err != nil {
-						return fmt.Errorf("accessing worker files: %w", err)
-					}
-					if err := dp.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
-						return fmt.Errorf("preparing worker image: %w", err)
-					}
-				}
+			// Clear stale exit code marker from workspace
+			os.Remove(filepath.Join(workspaceDir, ".horde-exit-code"))
 
-				// Clear stale exit code marker from workspace
-				os.Remove(filepath.Join(workspaceDir, ".horde-exit-code"))
+			result, err := prov.Launch(ctx, provider.LaunchOpts{
+				Repo:     run.Repo,
+				Ticket:   run.Ticket,
+				Branch:   run.Branch,
+				Workflow: run.Workflow,
+				RunID:    run.ID,
+				EnvFile:  envPath,
+				Mounts:   projCfg.ResolveMounts(cwd),
+				HomeDir:  homeDir,
+				OrcArgs:  orcArgs,
+			})
+			if err != nil {
+				return fmt.Errorf("relaunching container for retry: %w", err)
+			}
 
-				result, err := prov.Launch(ctx, provider.LaunchOpts{
-					Repo:     run.Repo,
-					Ticket:   run.Ticket,
-					Branch:   run.Branch,
-					Workflow: run.Workflow,
-					RunID:    run.ID,
-					EnvFile:  envPath,
-					Mounts:   projCfg.ResolveMounts(cwd),
-					HomeDir:  homeDir,
-					OrcArgs:  orcArgs,
-				})
-				if err != nil {
-					return fmt.Errorf("relaunching container for retry: %w", err)
-				}
-
-				// Update run with new container ID
-				if err := st.UpdateRun(ctx, runID, &store.RunUpdate{
-					InstanceID: &result.InstanceID,
-				}); err != nil {
-					return fmt.Errorf("updating instance ID: %w", err)
-				}
-				fmt.Fprintf(os.Stderr, "Relaunched container for %s (workspace preserved)\n", run.Ticket)
+			// Update run with new container ID
+			if err := st.UpdateRun(ctx, runID, &store.RunUpdate{
+				InstanceID: &result.InstanceID,
+			}); err != nil {
+				return fmt.Errorf("updating instance ID: %w", err)
 			}
 
 			// Update run back to running with fresh timeout

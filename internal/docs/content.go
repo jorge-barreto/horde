@@ -272,9 +272,8 @@ Retry
 
     horde retry <run-id> [-- <orc-args>...]
 
-If the container is still alive (sleeping after orc exited), exec's orc
-directly inside it. If the container is gone, launches a new container
-against the preserved workspace. Either way, orc sees its audit state
+Launches a new container against the preserved workspace. If the old
+container is still alive, it is stopped first. orc sees its audit state
 and picks up from the failed phase automatically.
 
 The same run ID is reused. The timeout is reset.

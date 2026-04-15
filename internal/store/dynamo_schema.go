@@ -14,6 +14,7 @@ const (
 	AttrWorkflow        = "workflow"
 	AttrProvider        = "provider"
 	AttrInstanceID      = "instance_id"
+	AttrMetadata        = "metadata"
 	AttrStatus          = "status"
 	AttrExitCode        = "exit_code"
 	AttrLaunchedBy      = "launched_by"

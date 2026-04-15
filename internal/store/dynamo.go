@@ -87,8 +87,152 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 	return nil
 }
 
+func parseRun(item map[string]types.AttributeValue) (*Run, error) {
+	idAttr, ok := item[AttrID].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run: missing or invalid %q attribute", AttrID)
+	}
+	id := idAttr.Value
+
+	run := &Run{ID: id}
+
+	repoAttr, ok := item[AttrRepo].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrRepo)
+	}
+	run.Repo = repoAttr.Value
+
+	ticketAttr, ok := item[AttrTicket].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrTicket)
+	}
+	run.Ticket = ticketAttr.Value
+
+	branchAttr, ok := item[AttrBranch].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrBranch)
+	}
+	run.Branch = branchAttr.Value
+
+	workflowAttr, ok := item[AttrWorkflow].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrWorkflow)
+	}
+	run.Workflow = workflowAttr.Value
+
+	providerAttr, ok := item[AttrProvider].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrProvider)
+	}
+	run.Provider = providerAttr.Value
+
+	instanceIDAttr, ok := item[AttrInstanceID].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrInstanceID)
+	}
+	run.InstanceID = instanceIDAttr.Value
+
+	launchedByAttr, ok := item[AttrLaunchedBy].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrLaunchedBy)
+	}
+	run.LaunchedBy = launchedByAttr.Value
+
+	statusAttr, ok := item[AttrStatus].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrStatus)
+	}
+	run.Status = Status(statusAttr.Value)
+
+	var err error
+
+	startedAtAttr, ok := item[AttrStartedAt].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrStartedAt)
+	}
+	run.StartedAt, err = time.Parse(time.RFC3339, startedAtAttr.Value)
+	if err != nil {
+		return nil, fmt.Errorf("parsing run %q: parsing started_at: %w", id, err)
+	}
+
+	timeoutAtAttr, ok := item[AttrTimeoutAt].(*types.AttributeValueMemberS)
+	if !ok {
+		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrTimeoutAt)
+	}
+	run.TimeoutAt, err = time.Parse(time.RFC3339, timeoutAtAttr.Value)
+	if err != nil {
+		return nil, fmt.Errorf("parsing run %q: parsing timeout_at: %w", id, err)
+	}
+
+	if av, ok := item[AttrExitCode]; ok {
+		nv, ok := av.(*types.AttributeValueMemberN)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrExitCode)
+		}
+		v, err := strconv.Atoi(nv.Value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing run %q: parsing exit_code: %w", id, err)
+		}
+		run.ExitCode = &v
+	}
+
+	if av, ok := item[AttrCompletedAt]; ok {
+		sv, ok := av.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrCompletedAt)
+		}
+		t, err := time.Parse(time.RFC3339, sv.Value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing run %q: parsing completed_at: %w", id, err)
+		}
+		run.CompletedAt = &t
+	}
+
+	if av, ok := item[AttrTotalCostUSD]; ok {
+		nv, ok := av.(*types.AttributeValueMemberN)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrTotalCostUSD)
+		}
+		v, err := strconv.ParseFloat(nv.Value, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing run %q: parsing total_cost_usd: %w", id, err)
+		}
+		run.TotalCostUSD = &v
+	}
+
+	if av, ok := item[AttrMetadata]; ok {
+		mv, ok := av.(*types.AttributeValueMemberM)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrMetadata)
+		}
+		meta := make(map[string]string, len(mv.Value))
+		for k, v := range mv.Value {
+			sv, ok := v.(*types.AttributeValueMemberS)
+			if !ok {
+				return nil, fmt.Errorf("parsing run %q: metadata[%q] is not a string", id, k)
+			}
+			meta[k] = sv.Value
+		}
+		run.Metadata = meta
+	}
+
+	return run, nil
+}
+
 func (s *DynamoStore) GetRun(ctx context.Context, id string) (*Run, error) {
-	return nil, fmt.Errorf("DynamoStore.GetRun: not implemented")
+	out, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]types.AttributeValue{
+			AttrID: &types.AttributeValueMemberS{Value: id},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getting run %q: %w", id, err)
+	}
+	if out.Item == nil {
+		return nil, fmt.Errorf("%w: %s", ErrRunNotFound, id)
+	}
+	return parseRun(out.Item)
 }
 
 func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdate) error {

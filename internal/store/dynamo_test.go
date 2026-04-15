@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -447,5 +448,243 @@ func TestDynamoStore_CreateRun_UsesTableName(t *testing.T) {
 	}
 	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_not_exists(id)" {
 		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_not_exists(id)")
+	}
+}
+
+func TestDynamoStore_GetRun_AllFields(t *testing.T) {
+	t.Parallel()
+	startedAt := time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)
+	timeoutAt := time.Date(2026, 4, 15, 11, 0, 0, 0, time.UTC)
+	completedAt := time.Date(2026, 4, 15, 10, 30, 0, 0, time.UTC)
+	item := map[string]types.AttributeValue{
+		AttrID:           &types.AttributeValueMemberS{Value: "k7m2xp4qr9n3"},
+		AttrRepo:         &types.AttributeValueMemberS{Value: "github.com/acme/myrepo"},
+		AttrTicket:       &types.AttributeValueMemberS{Value: "PROJ-42"},
+		AttrBranch:       &types.AttributeValueMemberS{Value: "feature/new-thing"},
+		AttrWorkflow:     &types.AttributeValueMemberS{Value: "ci"},
+		AttrProvider:     &types.AttributeValueMemberS{Value: "aws-ecs"},
+		AttrInstanceID:   &types.AttributeValueMemberS{Value: "arn:aws:ecs:us-east-1:123456789012:task/abc"},
+		AttrStatus:       &types.AttributeValueMemberS{Value: "running"},
+		AttrLaunchedBy:   &types.AttributeValueMemberS{Value: "alice"},
+		AttrStartedAt:    &types.AttributeValueMemberS{Value: "2026-04-15T10:00:00Z"},
+		AttrTimeoutAt:    &types.AttributeValueMemberS{Value: "2026-04-15T11:00:00Z"},
+		AttrExitCode:     &types.AttributeValueMemberN{Value: "0"},
+		AttrCompletedAt:  &types.AttributeValueMemberS{Value: "2026-04-15T10:30:00Z"},
+		AttrTotalCostUSD: &types.AttributeValueMemberN{Value: "1.25"},
+		AttrMetadata: &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+			"key1": &types.AttributeValueMemberS{Value: "val1"},
+			"key2": &types.AttributeValueMemberS{Value: "val2"},
+		}},
+	}
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: item}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	run, err := store.GetRun(context.Background(), "k7m2xp4qr9n3")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.ID != "k7m2xp4qr9n3" {
+		t.Errorf("ID = %q, want %q", run.ID, "k7m2xp4qr9n3")
+	}
+	if run.Repo != "github.com/acme/myrepo" {
+		t.Errorf("Repo = %q, want %q", run.Repo, "github.com/acme/myrepo")
+	}
+	if run.Ticket != "PROJ-42" {
+		t.Errorf("Ticket = %q, want %q", run.Ticket, "PROJ-42")
+	}
+	if run.Branch != "feature/new-thing" {
+		t.Errorf("Branch = %q, want %q", run.Branch, "feature/new-thing")
+	}
+	if run.Workflow != "ci" {
+		t.Errorf("Workflow = %q, want %q", run.Workflow, "ci")
+	}
+	if run.Provider != "aws-ecs" {
+		t.Errorf("Provider = %q, want %q", run.Provider, "aws-ecs")
+	}
+	if run.InstanceID != "arn:aws:ecs:us-east-1:123456789012:task/abc" {
+		t.Errorf("InstanceID = %q, want %q", run.InstanceID, "arn:aws:ecs:us-east-1:123456789012:task/abc")
+	}
+	if run.Status != StatusRunning {
+		t.Errorf("Status = %q, want %q", run.Status, StatusRunning)
+	}
+	if run.LaunchedBy != "alice" {
+		t.Errorf("LaunchedBy = %q, want %q", run.LaunchedBy, "alice")
+	}
+	if !run.StartedAt.Equal(startedAt) {
+		t.Errorf("StartedAt = %v, want %v", run.StartedAt, startedAt)
+	}
+	if !run.TimeoutAt.Equal(timeoutAt) {
+		t.Errorf("TimeoutAt = %v, want %v", run.TimeoutAt, timeoutAt)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 0 {
+		t.Errorf("ExitCode = %v, want 0", run.ExitCode)
+	}
+	if run.CompletedAt == nil || !run.CompletedAt.Equal(completedAt) {
+		t.Errorf("CompletedAt = %v, want %v", run.CompletedAt, completedAt)
+	}
+	if run.TotalCostUSD == nil || *run.TotalCostUSD != 1.25 {
+		t.Errorf("TotalCostUSD = %v, want 1.25", run.TotalCostUSD)
+	}
+	if run.Metadata["key1"] != "val1" || run.Metadata["key2"] != "val2" {
+		t.Errorf("Metadata = %v, want key1=val1, key2=val2", run.Metadata)
+	}
+}
+
+func TestDynamoStore_GetRun_NotFound(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.GetRun(context.Background(), "missing-id")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("expected errors.Is(err, ErrRunNotFound), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "missing-id") {
+		t.Errorf("error %q should contain %q", err.Error(), "missing-id")
+	}
+}
+
+func TestDynamoStore_GetRun_GetItemError(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return nil, fmt.Errorf("connection refused")
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.GetRun(context.Background(), "some-id")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "getting run") {
+		t.Errorf("error %q should contain %q", err.Error(), "getting run")
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("error %q should contain %q", err.Error(), "connection refused")
+	}
+}
+
+func TestDynamoStore_GetRun_NilOptionalFields(t *testing.T) {
+	t.Parallel()
+	item := map[string]types.AttributeValue{
+		AttrID:         &types.AttributeValueMemberS{Value: "run-req-only"},
+		AttrRepo:       &types.AttributeValueMemberS{Value: "github.com/acme/repo"},
+		AttrTicket:     &types.AttributeValueMemberS{Value: "PROJ-1"},
+		AttrBranch:     &types.AttributeValueMemberS{Value: "main"},
+		AttrWorkflow:   &types.AttributeValueMemberS{Value: "ci"},
+		AttrProvider:   &types.AttributeValueMemberS{Value: "docker"},
+		AttrInstanceID: &types.AttributeValueMemberS{Value: "abc123"},
+		AttrStatus:     &types.AttributeValueMemberS{Value: "pending"},
+		AttrLaunchedBy: &types.AttributeValueMemberS{Value: "bob"},
+		AttrStartedAt:  &types.AttributeValueMemberS{Value: "2026-04-15T10:00:00Z"},
+		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: "2026-04-15T11:00:00Z"},
+	}
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: item}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	run, err := store.GetRun(context.Background(), "run-req-only")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.ExitCode != nil {
+		t.Errorf("ExitCode should be nil, got %v", run.ExitCode)
+	}
+	if run.CompletedAt != nil {
+		t.Errorf("CompletedAt should be nil, got %v", run.CompletedAt)
+	}
+	if run.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD should be nil, got %v", run.TotalCostUSD)
+	}
+	if run.Metadata != nil {
+		t.Errorf("Metadata should be nil, got %v", run.Metadata)
+	}
+}
+
+func TestDynamoStore_GetRun_UsesTableName(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.GetItemInput
+	item := map[string]types.AttributeValue{
+		AttrID:         &types.AttributeValueMemberS{Value: "run-tbl"},
+		AttrRepo:       &types.AttributeValueMemberS{Value: "github.com/acme/repo"},
+		AttrTicket:     &types.AttributeValueMemberS{Value: "PROJ-1"},
+		AttrBranch:     &types.AttributeValueMemberS{Value: "main"},
+		AttrWorkflow:   &types.AttributeValueMemberS{Value: "ci"},
+		AttrProvider:   &types.AttributeValueMemberS{Value: "docker"},
+		AttrInstanceID: &types.AttributeValueMemberS{Value: "abc123"},
+		AttrStatus:     &types.AttributeValueMemberS{Value: "pending"},
+		AttrLaunchedBy: &types.AttributeValueMemberS{Value: "bob"},
+		AttrStartedAt:  &types.AttributeValueMemberS{Value: "2026-04-15T10:00:00Z"},
+		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: "2026-04-15T11:00:00Z"},
+	}
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, params *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.GetItemOutput{Item: item}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "my-custom-table")
+	_, err := store.GetRun(context.Background(), "run-tbl")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput == nil {
+		t.Fatal("GetItem was not called")
+	}
+	if capturedInput.TableName == nil || *capturedInput.TableName != "my-custom-table" {
+		t.Errorf("GetItem called with TableName %v, want %q", capturedInput.TableName, "my-custom-table")
+	}
+}
+
+func TestDynamoStore_GetRun_UsesCorrectKey(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.GetItemInput
+	item := map[string]types.AttributeValue{
+		AttrID:         &types.AttributeValueMemberS{Value: "test-run-id"},
+		AttrRepo:       &types.AttributeValueMemberS{Value: "github.com/acme/repo"},
+		AttrTicket:     &types.AttributeValueMemberS{Value: "PROJ-1"},
+		AttrBranch:     &types.AttributeValueMemberS{Value: "main"},
+		AttrWorkflow:   &types.AttributeValueMemberS{Value: "ci"},
+		AttrProvider:   &types.AttributeValueMemberS{Value: "docker"},
+		AttrInstanceID: &types.AttributeValueMemberS{Value: "abc123"},
+		AttrStatus:     &types.AttributeValueMemberS{Value: "pending"},
+		AttrLaunchedBy: &types.AttributeValueMemberS{Value: "bob"},
+		AttrStartedAt:  &types.AttributeValueMemberS{Value: "2026-04-15T10:00:00Z"},
+		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: "2026-04-15T11:00:00Z"},
+	}
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, params *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.GetItemOutput{Item: item}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.GetRun(context.Background(), "test-run-id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput == nil {
+		t.Fatal("GetItem was not called")
+	}
+	if len(capturedInput.Key) != 1 {
+		t.Errorf("Key has %d entries, want 1", len(capturedInput.Key))
+	}
+	keyVal, ok := capturedInput.Key[AttrID].(*types.AttributeValueMemberS)
+	if !ok {
+		t.Fatalf("Key[AttrID] is not *types.AttributeValueMemberS, got %T", capturedInput.Key[AttrID])
+	}
+	if keyVal.Value != "test-run-id" {
+		t.Errorf("Key[AttrID].Value = %q, want %q", keyVal.Value, "test-run-id")
 	}
 }

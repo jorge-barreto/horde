@@ -17,6 +17,7 @@ type mockDynamoClient struct {
 	describeTableFunc func(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
 	putItemFunc       func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	getItemFunc       func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
+	updateItemFunc    func(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
 }
 
 func (m *mockDynamoClient) DescribeTable(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
@@ -40,6 +41,13 @@ func (m *mockDynamoClient) GetItem(ctx context.Context, params *dynamodb.GetItem
 	return m.getItemFunc(ctx, params, optFns...)
 }
 
+func (m *mockDynamoClient) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+	if m.updateItemFunc == nil {
+		return &dynamodb.UpdateItemOutput{}, nil
+	}
+	return m.updateItemFunc(ctx, params, optFns...)
+}
+
 func newTestDynamoStore(client dynamoAPI, tableName string) *DynamoStore {
 	return &DynamoStore{client: client, tableName: tableName}
 }
@@ -47,6 +55,8 @@ func newTestDynamoStore(client dynamoAPI, tableName string) *DynamoStore {
 func intPtr(v int) *int              { return &v }
 func timePtr(v time.Time) *time.Time { return &v }
 func float64Ptr(v float64) *float64  { return &v }
+func statusPtr(v Status) *Status     { return &v }
+func stringPtr(v string) *string     { return &v }
 
 func validItem() map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{
@@ -877,5 +887,326 @@ func TestDynamoStore_GetRun_NonStringMetadataValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bad-key") {
 		t.Errorf("expected error to contain %q, got %q", "bad-key", err.Error())
+	}
+}
+
+func TestDynamoStore_UpdateRun_AllFields(t *testing.T) {
+	t.Parallel()
+	someTime := time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	update := &RunUpdate{
+		Status:       statusPtr(StatusSuccess),
+		InstanceID:   stringPtr("new-instance"),
+		ExitCode:     intPtr(0),
+		CompletedAt:  timePtr(someTime),
+		TotalCostUSD: float64Ptr(1.25),
+		TimeoutAt:    timePtr(someTime),
+		Metadata:     map[string]string{"new": "val"},
+	}
+	err := store.UpdateRun(context.Background(), "the-id", update)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput == nil {
+		t.Fatal("UpdateItem was not called")
+	}
+	if !strings.HasPrefix(*capturedInput.UpdateExpression, "SET ") {
+		t.Errorf("UpdateExpression = %q, want to start with %q", *capturedInput.UpdateExpression, "SET ")
+	}
+	for _, placeholder := range []string{":st", ":iid", ":ec", ":ca", ":cost", ":ta", ":meta"} {
+		if !strings.Contains(*capturedInput.UpdateExpression, placeholder) {
+			t.Errorf("UpdateExpression %q missing placeholder %q", *capturedInput.UpdateExpression, placeholder)
+		}
+	}
+	if len(capturedInput.ExpressionAttributeValues) != 7 {
+		t.Errorf("ExpressionAttributeValues len = %d, want 7", len(capturedInput.ExpressionAttributeValues))
+	}
+	if capturedInput.ExpressionAttributeNames["#st"] != "status" {
+		t.Errorf("ExpressionAttributeNames[\"#st\"] = %q, want %q", capturedInput.ExpressionAttributeNames["#st"], "status")
+	}
+	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_exists(id)" {
+		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_exists(id)")
+	}
+	keyVal, ok := capturedInput.Key[AttrID].(*types.AttributeValueMemberS)
+	if !ok || keyVal.Value != "the-id" {
+		t.Errorf("Key[AttrID] = %v, want S{\"the-id\"}", capturedInput.Key[AttrID])
+	}
+	if capturedInput.TableName == nil || *capturedInput.TableName != "runs-table" {
+		t.Errorf("TableName = %v, want %q", capturedInput.TableName, "runs-table")
+	}
+	caVal, ok := capturedInput.ExpressionAttributeValues[":ca"].(*types.AttributeValueMemberS)
+	if !ok || !strings.HasSuffix(caVal.Value, "Z") {
+		t.Errorf(":ca = %v, want S ending with Z", capturedInput.ExpressionAttributeValues[":ca"])
+	}
+	taVal, ok := capturedInput.ExpressionAttributeValues[":ta"].(*types.AttributeValueMemberS)
+	if !ok || !strings.HasSuffix(taVal.Value, "Z") {
+		t.Errorf(":ta = %v, want S ending with Z", capturedInput.ExpressionAttributeValues[":ta"])
+	}
+	ecVal, ok := capturedInput.ExpressionAttributeValues[":ec"].(*types.AttributeValueMemberN)
+	if !ok || ecVal.Value != "0" {
+		t.Errorf(":ec = %v, want N{\"0\"}", capturedInput.ExpressionAttributeValues[":ec"])
+	}
+	costVal, ok := capturedInput.ExpressionAttributeValues[":cost"].(*types.AttributeValueMemberN)
+	if !ok || costVal.Value != "1.25" {
+		t.Errorf(":cost = %v, want N{\"1.25\"}", capturedInput.ExpressionAttributeValues[":cost"])
+	}
+	metaVal, ok := capturedInput.ExpressionAttributeValues[":meta"].(*types.AttributeValueMemberM)
+	if !ok {
+		t.Fatalf(":meta is not *types.AttributeValueMemberM, got %T", capturedInput.ExpressionAttributeValues[":meta"])
+	}
+	sv, ok := metaVal.Value["new"].(*types.AttributeValueMemberS)
+	if !ok || sv.Value != "val" {
+		t.Errorf("metadata[\"new\"] = %v, want S{\"val\"}", metaVal.Value["new"])
+	}
+}
+
+func TestDynamoStore_UpdateRun_SingleField(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{Status: statusPtr(StatusRunning)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput.UpdateExpression == nil || *capturedInput.UpdateExpression != "SET #st = :st" {
+		t.Errorf("UpdateExpression = %v, want %q", capturedInput.UpdateExpression, "SET #st = :st")
+	}
+	if len(capturedInput.ExpressionAttributeValues) != 1 {
+		t.Errorf("ExpressionAttributeValues len = %d, want 1", len(capturedInput.ExpressionAttributeValues))
+	}
+	stVal, ok := capturedInput.ExpressionAttributeValues[":st"].(*types.AttributeValueMemberS)
+	if !ok || stVal.Value != "running" {
+		t.Errorf(":st = %v, want S{\"running\"}", capturedInput.ExpressionAttributeValues[":st"])
+	}
+	if capturedInput.ExpressionAttributeNames["#st"] != "status" {
+		t.Errorf("ExpressionAttributeNames[\"#st\"] = %q, want %q", capturedInput.ExpressionAttributeNames["#st"], "status")
+	}
+	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_exists(id)" {
+		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_exists(id)")
+	}
+}
+
+func TestDynamoStore_UpdateRun_NoFieldsSet_ExistingRun(t *testing.T) {
+	t.Parallel()
+	var updateCalled, getCalled bool
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			getCalled = true
+			return &dynamodb.GetItemOutput{Item: validItem()}, nil
+		},
+		updateItemFunc: func(_ context.Context, _ *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			updateCalled = true
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "test-run-id", &RunUpdate{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updateCalled {
+		t.Error("UpdateItem should not be called when no fields are set")
+	}
+	if !getCalled {
+		t.Error("GetItem should be called when no fields are set")
+	}
+}
+
+func TestDynamoStore_UpdateRun_NoFieldsSet_NotFound(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "missing-id", &RunUpdate{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("expected errors.Is(err, ErrRunNotFound), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "missing-id") {
+		t.Errorf("error %q should contain %q", err.Error(), "missing-id")
+	}
+}
+
+func TestDynamoStore_UpdateRun_NotFound(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, _ *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			return nil, &types.ConditionalCheckFailedException{Message: aws.String("The conditional request failed")}
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "missing-id", &RunUpdate{Status: statusPtr(StatusRunning)})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Errorf("expected errors.Is(err, ErrRunNotFound), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "missing-id") {
+		t.Errorf("error %q should contain %q", err.Error(), "missing-id")
+	}
+}
+
+func TestDynamoStore_UpdateRun_UpdateItemError(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, _ *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			return nil, fmt.Errorf("throttled")
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{Status: statusPtr(StatusRunning)})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "updating run") {
+		t.Errorf("error %q should contain %q", err.Error(), "updating run")
+	}
+	if !strings.Contains(err.Error(), "throttled") {
+		t.Errorf("error %q should contain %q", err.Error(), "throttled")
+	}
+}
+
+func TestDynamoStore_UpdateRun_UsesTableName(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "my-custom-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{Status: statusPtr(StatusRunning)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput.TableName == nil || *capturedInput.TableName != "my-custom-table" {
+		t.Errorf("TableName = %v, want %q", capturedInput.TableName, "my-custom-table")
+	}
+	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_exists(id)" {
+		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_exists(id)")
+	}
+}
+
+func TestDynamoStore_UpdateRun_UTCNormalization(t *testing.T) {
+	t.Parallel()
+	est := time.FixedZone("EST", -5*3600)
+	completedAt := time.Date(2026, 4, 15, 5, 0, 0, 0, est)
+	timeoutAt := time.Date(2026, 4, 15, 6, 0, 0, 0, est)
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{
+		CompletedAt: timePtr(completedAt),
+		TimeoutAt:   timePtr(timeoutAt),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	caVal, ok := capturedInput.ExpressionAttributeValues[":ca"].(*types.AttributeValueMemberS)
+	if !ok || caVal.Value != "2026-04-15T10:00:00Z" {
+		t.Errorf(":ca = %v, want S{\"2026-04-15T10:00:00Z\"}", capturedInput.ExpressionAttributeValues[":ca"])
+	}
+	taVal, ok := capturedInput.ExpressionAttributeValues[":ta"].(*types.AttributeValueMemberS)
+	if !ok || taVal.Value != "2026-04-15T11:00:00Z" {
+		t.Errorf(":ta = %v, want S{\"2026-04-15T11:00:00Z\"}", capturedInput.ExpressionAttributeValues[":ta"])
+	}
+}
+
+func TestDynamoStore_UpdateRun_MetadataOverwrite(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{
+		Metadata: map[string]string{"new": "val"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	metaVal, ok := capturedInput.ExpressionAttributeValues[":meta"].(*types.AttributeValueMemberM)
+	if !ok {
+		t.Fatalf(":meta is not *types.AttributeValueMemberM, got %T", capturedInput.ExpressionAttributeValues[":meta"])
+	}
+	sv, ok := metaVal.Value["new"].(*types.AttributeValueMemberS)
+	if !ok || sv.Value != "val" {
+		t.Errorf("metadata[\"new\"] = %v, want S{\"val\"}", metaVal.Value["new"])
+	}
+	if len(capturedInput.ExpressionAttributeNames) > 0 {
+		t.Errorf("ExpressionAttributeNames should be nil or empty when only metadata is updated, got %v", capturedInput.ExpressionAttributeNames)
+	}
+}
+
+func TestDynamoStore_UpdateRun_StatusReservedWord(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{Status: statusPtr(StatusRunning)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput.ExpressionAttributeNames["#st"] != "status" {
+		t.Errorf("ExpressionAttributeNames[\"#st\"] = %q, want %q", capturedInput.ExpressionAttributeNames["#st"], "status")
+	}
+	if !strings.Contains(*capturedInput.UpdateExpression, "#st") {
+		t.Errorf("UpdateExpression %q should contain %q", *capturedInput.UpdateExpression, "#st")
+	}
+	if strings.Contains(*capturedInput.UpdateExpression, " status ") {
+		t.Errorf("UpdateExpression %q should not contain bare reserved word %q", *capturedInput.UpdateExpression, " status ")
+	}
+}
+
+func TestDynamoStore_UpdateRun_NoFieldsSet_GetItemError(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return nil, fmt.Errorf("connection refused")
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "checking run") {
+		t.Errorf("error %q should contain %q", err.Error(), "checking run")
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("error %q should contain %q", err.Error(), "connection refused")
 	}
 }

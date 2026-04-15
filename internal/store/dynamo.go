@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -18,6 +19,7 @@ type dynamoAPI interface {
 	DescribeTable(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
 	PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
+	UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
 }
 
 type DynamoStore struct {
@@ -240,7 +242,82 @@ func (s *DynamoStore) GetRun(ctx context.Context, id string) (*Run, error) {
 }
 
 func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdate) error {
-	return fmt.Errorf("DynamoStore.UpdateRun: not implemented")
+	var setClauses []string
+	exprAttrValues := map[string]types.AttributeValue{}
+	exprAttrNames := map[string]string{}
+
+	if update.Status != nil {
+		setClauses = append(setClauses, "#st = :st")
+		exprAttrNames["#st"] = "status"
+		exprAttrValues[":st"] = &types.AttributeValueMemberS{Value: string(*update.Status)}
+	}
+	if update.InstanceID != nil {
+		setClauses = append(setClauses, "instance_id = :iid")
+		exprAttrValues[":iid"] = &types.AttributeValueMemberS{Value: *update.InstanceID}
+	}
+	if update.Metadata != nil {
+		metaMap := make(map[string]types.AttributeValue, len(update.Metadata))
+		for k, v := range update.Metadata {
+			metaMap[k] = &types.AttributeValueMemberS{Value: v}
+		}
+		setClauses = append(setClauses, "metadata = :meta")
+		exprAttrValues[":meta"] = &types.AttributeValueMemberM{Value: metaMap}
+	}
+	if update.ExitCode != nil {
+		setClauses = append(setClauses, "exit_code = :ec")
+		exprAttrValues[":ec"] = &types.AttributeValueMemberN{Value: strconv.Itoa(*update.ExitCode)}
+	}
+	if update.CompletedAt != nil {
+		setClauses = append(setClauses, "completed_at = :ca")
+		exprAttrValues[":ca"] = &types.AttributeValueMemberS{Value: update.CompletedAt.UTC().Format(time.RFC3339)}
+	}
+	if update.TotalCostUSD != nil {
+		setClauses = append(setClauses, "total_cost_usd = :cost")
+		exprAttrValues[":cost"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(*update.TotalCostUSD, 'f', -1, 64)}
+	}
+	if update.TimeoutAt != nil {
+		setClauses = append(setClauses, "timeout_at = :ta")
+		exprAttrValues[":ta"] = &types.AttributeValueMemberS{Value: update.TimeoutAt.UTC().Format(time.RFC3339)}
+	}
+
+	if len(setClauses) == 0 {
+		out, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName: aws.String(s.tableName),
+			Key: map[string]types.AttributeValue{
+				AttrID: &types.AttributeValueMemberS{Value: id},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("checking run %q exists: %w", id, err)
+		}
+		if out.Item == nil {
+			return fmt.Errorf("%w: %s", ErrRunNotFound, id)
+		}
+		return nil
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]types.AttributeValue{
+			AttrID: &types.AttributeValueMemberS{Value: id},
+		},
+		UpdateExpression:          aws.String("SET " + strings.Join(setClauses, ", ")),
+		ExpressionAttributeValues: exprAttrValues,
+		ConditionExpression:       aws.String("attribute_exists(id)"),
+	}
+	if len(exprAttrNames) > 0 {
+		input.ExpressionAttributeNames = exprAttrNames
+	}
+
+	_, err := s.client.UpdateItem(ctx, input)
+	if err != nil {
+		var ccfe *types.ConditionalCheckFailedException
+		if errors.As(err, &ccfe) {
+			return fmt.Errorf("%w: %s", ErrRunNotFound, id)
+		}
+		return fmt.Errorf("updating run %q: %w", id, err)
+	}
+	return nil
 }
 
 func (s *DynamoStore) ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error) {

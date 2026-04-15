@@ -151,6 +151,17 @@ ticket is already active.`,
 			if err != nil {
 				return fmt.Errorf("checking active runs: %w", err)
 			}
+			// Reconcile stale records: container may have died since last check.
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				stillActive := active[:0]
+				for _, r := range active {
+					_ = handleLazyCheck(ctx, dp, st, r, homeDir)
+					if r.Status == store.StatusPending || r.Status == store.StatusRunning {
+						stillActive = append(stillActive, r)
+					}
+				}
+				active = stillActive
+			}
 			if len(active) > 0 && !force {
 				fmt.Fprintf(os.Stderr, "ticket %s already has an active run (%s)\n", ticket, active[0].ID)
 				return fmt.Errorf("duplicate active ticket (use --force to override)")

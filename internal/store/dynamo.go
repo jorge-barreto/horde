@@ -232,7 +232,11 @@ func (s *DynamoStore) GetRun(ctx context.Context, id string) (*Run, error) {
 	if out.Item == nil {
 		return nil, fmt.Errorf("%w: %s", ErrRunNotFound, id)
 	}
-	return parseRun(out.Item)
+	run, err := parseRun(out.Item)
+	if err != nil {
+		return nil, fmt.Errorf("getting run %q: %w", id, err)
+	}
+	return run, nil
 }
 
 func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdate) error {

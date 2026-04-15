@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
@@ -165,9 +166,29 @@ func TestDynamoStore_CreateRun_AllFields(t *testing.T) {
 	if len(item) != 15 {
 		t.Errorf("expected 15 attributes, got %d", len(item))
 	}
-	if v, ok := item[AttrID].(*types.AttributeValueMemberS); !ok || v.Value != "k7m2xp4qr9n3" {
-		t.Errorf("AttrID = %v, want S{k7m2xp4qr9n3}", item[AttrID])
+	assertS := func(attr, want string) {
+		t.Helper()
+		v, ok := item[attr].(*types.AttributeValueMemberS)
+		if !ok {
+			t.Errorf("%s: not *types.AttributeValueMemberS, got %T", attr, item[attr])
+			return
+		}
+		if v.Value != want {
+			t.Errorf("%s = %q, want %q", attr, v.Value, want)
+		}
 	}
+	assertS(AttrID, "k7m2xp4qr9n3")
+	assertS(AttrRepo, "github.com/acme/myrepo")
+	assertS(AttrTicket, "PROJ-42")
+	assertS(AttrBranch, "feature/new-thing")
+	assertS(AttrWorkflow, "ci")
+	assertS(AttrProvider, "aws-ecs")
+	assertS(AttrInstanceID, "arn:aws:ecs:us-east-1:123456789012:task/abc")
+	assertS(AttrStatus, "running")
+	assertS(AttrLaunchedBy, "alice")
+	assertS(AttrStartedAt, "2026-04-15T10:00:00Z")
+	assertS(AttrCompletedAt, "2026-04-15T10:30:00Z")
+	assertS(AttrTimeoutAt, "2026-04-15T11:00:00Z")
 	if v, ok := item[AttrExitCode].(*types.AttributeValueMemberN); !ok || v.Value != "0" {
 		t.Errorf("AttrExitCode = %v, want N{0}", item[AttrExitCode])
 	}
@@ -181,13 +202,14 @@ func TestDynamoStore_CreateRun_AllFields(t *testing.T) {
 	if len(metaAttr.Value) != 3 {
 		t.Errorf("metadata map has %d keys, want 3", len(metaAttr.Value))
 	}
-	startedAtStr := item[AttrStartedAt].(*types.AttributeValueMemberS).Value
-	if !strings.HasSuffix(startedAtStr, "Z") {
-		t.Errorf("AttrStartedAt %q does not end in Z", startedAtStr)
+	for _, kv := range []struct{ k, v string }{{"key1", "val1"}, {"key2", "val2"}, {"key3", "val3"}} {
+		mv, ok := metaAttr.Value[kv.k].(*types.AttributeValueMemberS)
+		if !ok || mv.Value != kv.v {
+			t.Errorf("metadata[%q] = %v, want S{%q}", kv.k, metaAttr.Value[kv.k], kv.v)
+		}
 	}
-	timeoutAtStr := item[AttrTimeoutAt].(*types.AttributeValueMemberS).Value
-	if !strings.HasSuffix(timeoutAtStr, "Z") {
-		t.Errorf("AttrTimeoutAt %q does not end in Z", timeoutAtStr)
+	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_not_exists(id)" {
+		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_not_exists(id)")
 	}
 }
 
@@ -305,6 +327,44 @@ func TestDynamoStore_CreateRun_PutItemError(t *testing.T) {
 	}
 }
 
+func TestDynamoStore_CreateRun_DuplicateID(t *testing.T) {
+	t.Parallel()
+	run := &Run{
+		ID:         "run-dup",
+		Repo:       "github.com/acme/repo",
+		Ticket:     "PROJ-6",
+		Branch:     "main",
+		Workflow:   "ci",
+		Provider:   "docker",
+		InstanceID: "abc123",
+		Status:     StatusPending,
+		LaunchedBy: "grace",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	mock := &mockDynamoClient{
+		putItemFunc: func(_ context.Context, _ *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+			return nil, &types.ConditionalCheckFailedException{
+				Message: aws.String("The conditional request failed"),
+			}
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	err := store.CreateRun(context.Background(), run)
+	if err == nil {
+		t.Fatal("expected error for duplicate ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "creating run") {
+		t.Errorf("error %q should contain %q", err.Error(), "creating run")
+	}
+	if !strings.Contains(err.Error(), "duplicate id") {
+		t.Errorf("error %q should contain %q", err.Error(), "duplicate id")
+	}
+	if !strings.Contains(err.Error(), "run-dup") {
+		t.Errorf("error %q should contain run ID %q", err.Error(), "run-dup")
+	}
+}
+
 func TestDynamoStore_CreateRun_TimesAreUTC(t *testing.T) {
 	t.Parallel()
 	est := time.FixedZone("EST", -5*3600)
@@ -336,12 +396,12 @@ func TestDynamoStore_CreateRun_TimesAreUTC(t *testing.T) {
 	}
 	item := capturedInput.Item
 	startedAtStr := item[AttrStartedAt].(*types.AttributeValueMemberS).Value
-	if !strings.HasSuffix(startedAtStr, "Z") {
-		t.Errorf("AttrStartedAt %q does not end in Z", startedAtStr)
+	if startedAtStr != "2026-04-15T10:00:00Z" {
+		t.Errorf("AttrStartedAt = %q, want %q", startedAtStr, "2026-04-15T10:00:00Z")
 	}
 	timeoutAtStr := item[AttrTimeoutAt].(*types.AttributeValueMemberS).Value
-	if !strings.HasSuffix(timeoutAtStr, "Z") {
-		t.Errorf("AttrTimeoutAt %q does not end in Z", timeoutAtStr)
+	if timeoutAtStr != "2026-04-15T11:00:00Z" {
+		t.Errorf("AttrTimeoutAt = %q, want %q", timeoutAtStr, "2026-04-15T11:00:00Z")
 	}
 }
 
@@ -376,5 +436,8 @@ func TestDynamoStore_CreateRun_UsesTableName(t *testing.T) {
 	}
 	if capturedInput.TableName == nil || *capturedInput.TableName != "my-custom-table" {
 		t.Errorf("PutItem called with TableName %v, want %q", capturedInput.TableName, "my-custom-table")
+	}
+	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_not_exists(id)" {
+		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_not_exists(id)")
 	}
 }

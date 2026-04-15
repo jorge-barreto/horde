@@ -24,7 +24,7 @@ func validHordeFields() map[string]interface{} {
 		"artifacts_bucket":        "my-horde-artifacts",
 		"runs_table":              "horde-runs",
 		"max_concurrent":          5,
-		"default_timeout_minutes": 60,
+		"default_timeout_minutes": 1440,
 	}
 }
 
@@ -232,8 +232,8 @@ func TestParseHordeConfig_Valid(t *testing.T) {
 	if cfg.MaxConcurrent != 5 {
 		t.Errorf("MaxConcurrent = %d, want 5", cfg.MaxConcurrent)
 	}
-	if cfg.DefaultTimeoutMinutes != 60 {
-		t.Errorf("DefaultTimeoutMinutes = %d, want 60", cfg.DefaultTimeoutMinutes)
+	if cfg.DefaultTimeoutMinutes != 1440 {
+		t.Errorf("DefaultTimeoutMinutes = %d, want 1440", cfg.DefaultTimeoutMinutes)
 	}
 }
 
@@ -248,7 +248,7 @@ func TestParseHordeConfig_JSONRoundTrip(t *testing.T) {
 		ArtifactsBucket:       "my-horde-artifacts",
 		RunsTable:             "horde-runs",
 		MaxConcurrent:         5,
-		DefaultTimeoutMinutes: 60,
+		DefaultTimeoutMinutes: 1440,
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {

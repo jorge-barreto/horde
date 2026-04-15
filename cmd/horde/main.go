@@ -87,7 +87,7 @@ ticket is already active.`,
 			&cli.DurationFlag{
 				Name:  "timeout",
 				Usage: "Timeout for the run",
-				Value: 60 * time.Minute,
+				Value: 24 * time.Hour,
 			},
 			&cli.BoolFlag{
 				Name:  "force",
@@ -243,7 +243,7 @@ preserved workspace — orc picks up from where it left off. Use
 			&cli.DurationFlag{
 				Name:  "timeout",
 				Usage: "Timeout for the retried run",
-				Value: 60 * time.Minute,
+				Value: 24 * time.Hour,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {

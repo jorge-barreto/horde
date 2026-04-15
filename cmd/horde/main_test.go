@@ -138,9 +138,9 @@ func TestLaunch_Success(t *testing.T) {
 	if r.LaunchedBy == "" {
 		t.Errorf("LaunchedBy is empty")
 	}
-	expectedTimeout := r.StartedAt.Add(60 * time.Minute)
+	expectedTimeout := r.StartedAt.Add(24 * time.Hour)
 	if diff := r.TimeoutAt.Sub(expectedTimeout); diff < -5*time.Second || diff > 5*time.Second {
-		t.Errorf("TimeoutAt %v not within 5s of StartedAt+60m %v", r.TimeoutAt, expectedTimeout)
+		t.Errorf("TimeoutAt %v not within 5s of StartedAt+24h %v", r.TimeoutAt, expectedTimeout)
 	}
 
 	// Verify workspace directory was created

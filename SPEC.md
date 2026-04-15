@@ -183,7 +183,7 @@ horde maps these to run statuses: 0 → `success`, 1/2/3/4/6 → `failed`, 5 →
 
 ### 7. Timeout
 
-Runs have a maximum duration. Default: 60 minutes. Override with `--timeout` on `horde launch`.
+Runs have a maximum duration. Default: 24 hours. Override with `--timeout` on `horde launch`.
 
 - **Docker provider:** timeout is enforced lazily. Each `status`, `results`, or `list` call checks `timeout_at` against the current time. If a run has exceeded its timeout, horde calls `Kill()` and marks the run as `killed`.
 - **ECS provider:** The CDK construct sets `stopTimeout` on the Fargate task definition. Additionally, horde records the timeout in DynamoDB. The EventBridge Lambda checks the timeout and stops overdue tasks.
@@ -341,7 +341,7 @@ For the `aws-ecs` provider, all config is discovered from a single SSM parameter
   "artifacts_bucket": "my-horde-artifacts",
   "runs_table": "horde-runs",
   "max_concurrent": 5,
-  "default_timeout_minutes": 60
+  "default_timeout_minutes": 1440
 }
 ```
 
@@ -562,7 +562,7 @@ new HordeWorker(this, 'Horde', {
   cpu: 1024,                     // 1 vCPU (default)
   memoryMiB: 4096,               // 4 GB (default)
   maxConcurrent: 5,              // Max simultaneous tasks (enforced by CLI, default 5)
-  defaultTimeoutMinutes: 60,     // Default run timeout (default 60)
+  defaultTimeoutMinutes: 1440,   // Default run timeout (default 1440 = 24h)
   logRetentionDays: 30,          // CloudWatch log retention
   ssmParameterPath: '/horde/config',
 });
@@ -658,7 +658,7 @@ Local-only. Validates the horde pipeline end-to-end without AWS.
 - Base worker Docker image + entrypoint (with `git-askpass.sh` credential helper)
 - Run ID generation (12-char lowercase alphanumeric, `crypto/rand`)
 - Duplicate ticket warning (`--force` to override)
-- Run timeout (`--timeout` flag, default 60m, enforced lazily on next status/results/list call)
+- Run timeout (`--timeout` flag, default 24h, enforced lazily on next status/results/list call)
 - `--provider` flag for explicit provider selection
 
 ### v0.2 — AWS MVP

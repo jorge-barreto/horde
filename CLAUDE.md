@@ -51,7 +51,7 @@ go vet ./...                   # lint
 - ECS provider (v0.2) calls RunTask directly — no Lambda indirection. Infra config discovered via SSM at `/horde/config`
 - EventBridge + status sync Lambda keeps DynamoDB accurate even when CLI disconnects (v0.2)
 - maxConcurrent enforcement at launch time — error, not queue (v0.2)
-- Run timeout (default 60m) enforced by CLI timer (docker) and Fargate stopTimeout + Lambda (ECS)
+- Run timeout (default 24h) enforced by CLI timer (docker) and Fargate stopTimeout + Lambda (ECS)
 - Provider.Launch returns `*LaunchResult` with `InstanceID` + `Metadata map[string]string` (no provider-specific fields on the generic type)
 - Docker provider secrets loaded from `.env` file (gitignored) via `docker run --env-file`
 - GIT_TOKEN protected via `GIT_ASKPASS` credential helper — never in process args or `.git/config`

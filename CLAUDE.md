@@ -16,10 +16,10 @@ Cloud launcher for orc workflows. See SPEC.md for design, ORC_CONTRACT_EXPECTATI
 
 ```bash
 go build ./cmd/horde          # build
-go test ./...                  # unit tests (no Docker needed)
+go test -short ./...           # unit tests only (fast, no Docker)
 go vet ./...                   # lint
 
-# Integration tests — real Docker, real orc, real horde
+# Integration tests — real Docker, real orc, real horde (~2 min)
 go test -v -count=1 -timeout 10m ./test/integration/
 ```
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	horde "github.com/jorge-barreto/horde"
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/config"
@@ -1188,5 +1189,68 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 		return arn, nil
 	default:
 		return "", fmt.Errorf("resolving launched_by: unsupported provider %q", providerName)
+	}
+}
+
+// initProviderAndStore creates the Provider and Store based on the --provider flag.
+// Selection rule: "docker" → DockerProvider + SQLite; "aws-ecs" → ECS + DynamoDB
+// (not yet implemented); "" → auto-detect via SSM.
+// Returns a cleanup function that must be deferred to release store resources.
+func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, func(), error) {
+	name := cmd.String("provider")
+	profile := cmd.String("profile")
+
+	switch name {
+	case "docker":
+		prov := provider.NewDockerProvider()
+		st, cleanup, err := openStore("docker")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return prov, st, cleanup, nil
+	case "aws-ecs":
+		awsCfg, err := awscfg.Load(ctx, profile)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
+		}
+		ssmClient := ssm.NewFromConfig(awsCfg)
+		if _, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath); err != nil {
+			return nil, nil, nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
+		}
+		return nil, nil, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+	case "":
+		awsCfg, err := awscfg.Load(ctx, profile)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("auto-detecting provider: %w\nhint: use --provider docker for local mode", err)
+		}
+		ssmClient := ssm.NewFromConfig(awsCfg)
+		if _, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath); err != nil {
+			return nil, nil, nil, fmt.Errorf("auto-detecting provider: %s\nhint: use --provider docker for local mode", config.Diagnostic(err))
+		}
+		return nil, nil, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+	default:
+		return nil, nil, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
+	}
+}
+
+// openStore creates the Store for the given provider name.
+// Returns a cleanup function that must be deferred to release resources.
+func openStore(providerName string) (store.Store, func(), error) {
+	switch providerName {
+	case "docker":
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, nil, fmt.Errorf("getting home directory: %w", err)
+		}
+		dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+		st, err := store.NewSQLiteStore(dbPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("opening store: %w", err)
+		}
+		return st, func() { st.Close() }, nil
+	case "aws-ecs":
+		return nil, nil, fmt.Errorf("aws-ecs store is not yet implemented")
+	default:
+		return nil, nil, fmt.Errorf("openStore: unsupported provider %q", providerName)
 	}
 }

@@ -3014,3 +3014,101 @@ func TestResolveLaunchedBy_UnsupportedProvider(t *testing.T) {
 		t.Errorf("error = %q, want it to contain %q", err.Error(), "unsupported provider")
 	}
 }
+
+func TestOpenStore_Docker(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	st, cleanup, err := openStore("docker")
+	if err != nil {
+		t.Fatalf("openStore(docker) error: %v", err)
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	run := &store.Run{
+		ID:        "testrun123ab",
+		Repo:      "github.com/test/repo.git",
+		Ticket:    "TEST-1",
+		Provider:  "docker",
+		Status:    store.StatusPending,
+		StartedAt: time.Now(),
+		TimeoutAt: time.Now().Add(time.Hour),
+	}
+	if err := st.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	got, err := st.GetRun(ctx, "testrun123ab")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Ticket != "TEST-1" {
+		t.Errorf("Ticket = %q, want %q", got.Ticket, "TEST-1")
+	}
+}
+
+func TestOpenStore_Docker_Cleanup(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	st, cleanup, err := openStore("docker")
+	if err != nil {
+		t.Fatalf("openStore(docker) error: %v", err)
+	}
+
+	cleanup() // Close the store
+
+	ctx := context.Background()
+	_, err = st.GetRun(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error after cleanup, got nil")
+	}
+}
+
+func TestOpenStore_Unsupported(t *testing.T) {
+	t.Parallel()
+	_, _, err := openStore("gcp")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported provider") {
+		t.Errorf("error %q does not contain expected message", err.Error())
+	}
+}
+
+func TestProvider_AWSECS_SSMError(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+	_ = setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "aws-ecs", "launch", "TICKET-1"})
+	if err == nil {
+		t.Fatal("expected error for aws-ecs provider, got nil")
+	}
+	// Before hook (in this bead) catches "aws-ecs" first; after d69.4.2 the factory fires.
+	// Either way, the error must mention "aws-ecs".
+	if !strings.Contains(err.Error(), "aws-ecs") {
+		t.Errorf("error %q does not mention aws-ecs", err.Error())
+	}
+}
+
+func TestProvider_AutoDetect_Error(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+	_ = setupLaunchEnv(t)
+	ctx := context.Background()
+
+	// With --provider defaulting to "docker" and the Before hook in place,
+	// this may succeed. After d69.4.2 removes the Before hook and changes
+	// the default to "", it will fail with the auto-detect error.
+	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	if err != nil && !strings.Contains(err.Error(), "auto-detecting") &&
+		!strings.Contains(err.Error(), "--provider docker") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

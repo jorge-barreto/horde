@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const dockerImage = "horde-worker:latest"
+const DockerImage = "horde-worker:latest"
 
 type dockerInspectState struct {
 	Running    bool   `json:"Running"`
@@ -66,6 +66,18 @@ func (l *logReadCloser) Close() error {
 }
 
 func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error) {
+	// Create persistent workspace directory and prepend it to mounts.
+	// If the directory already exists (retry), this is a no-op.
+	var allMounts []string
+	if opts.HomeDir != "" && opts.RunID != "" {
+		wsDir := WorkspacePath(opts.HomeDir, opts.RunID)
+		if err := os.MkdirAll(wsDir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating workspace directory: %w", err)
+		}
+		allMounts = append(allMounts, wsDir+":/workspace")
+	}
+	allMounts = append(allMounts, opts.Mounts...)
+
 	args := []string{
 		"run", "-d",
 		"-e", "REPO_URL=" + opts.Repo,
@@ -77,10 +89,10 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	if opts.EnvFile != "" {
 		args = append(args, "--env-file", opts.EnvFile)
 	}
-	for _, mount := range opts.Mounts {
+	for _, mount := range allMounts {
 		args = append(args, "-v", mount)
 	}
-	args = append(args, dockerImage)
+	args = append(args, DockerImage)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.Output()

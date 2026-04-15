@@ -44,7 +44,7 @@ func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, pro
 	}
 
 	// No project Dockerfile — tag base as the run image
-	return tagImage(ctx, baseImage, dockerImage)
+	return tagImage(ctx, baseImage, DockerImage)
 }
 
 func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error {
@@ -72,15 +72,15 @@ func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error
 }
 
 func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Writer) error {
-	projectTime, projectExists, err := inspectImageTimeOf(ctx, dockerImage)
+	projectTime, projectExists, err := inspectImageTimeOf(ctx, DockerImage)
 	if err != nil {
 		return err
 	}
 
 	// Rebuild if project image is missing
 	if !projectExists {
-		fmt.Fprintf(out, "Project image %s not found. Building...\n", dockerImage)
-		return buildImageAs(ctx, dockerImage, projectWorkerDir, out)
+		fmt.Fprintf(out, "Project image %s not found. Building...\n", DockerImage)
+		return buildImageAs(ctx, DockerImage, projectWorkerDir, out)
 	}
 
 	// Rebuild if base is newer than project image
@@ -90,7 +90,7 @@ func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Wri
 	}
 	if baseExists && baseTime.After(projectTime) {
 		fmt.Fprintf(out, "Project image outdated (base rebuilt). Rebuilding...\n")
-		return buildImageAs(ctx, dockerImage, projectWorkerDir, out)
+		return buildImageAs(ctx, DockerImage, projectWorkerDir, out)
 	}
 
 	// Rebuild if project sources are newer than project image
@@ -100,7 +100,7 @@ func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Wri
 	}
 	if srcTime.After(projectTime) {
 		fmt.Fprintf(out, "Project image outdated (worker/ changed). Rebuilding...\n")
-		return buildImageAs(ctx, dockerImage, projectWorkerDir, out)
+		return buildImageAs(ctx, DockerImage, projectWorkerDir, out)
 	}
 
 	return nil

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"time"
 )
 
@@ -24,6 +25,12 @@ type LaunchOpts struct {
 	RunID    string
 	EnvFile  string   // path to .env file (docker provider)
 	Mounts   []string // volume mounts in docker format (host:container)
+	HomeDir  string   // home directory for workspace path resolution
+}
+
+// WorkspacePath returns the host path for a run's persistent workspace.
+func WorkspacePath(homeDir, runID string) string {
+	return filepath.Join(homeDir, ".horde", "workspaces", runID)
 }
 
 // LaunchResult contains the outcome of a successful launch.

@@ -88,8 +88,8 @@ func TestDockerProvider_Launch_VerifyArgs(t *testing.T) {
 			t.Errorf("args missing %q; got: %v", want, args)
 		}
 	}
-	if args[len(args)-1] != dockerImage {
-		t.Errorf("last arg = %q, want %q", args[len(args)-1], dockerImage)
+	if args[len(args)-1] != DockerImage {
+		t.Errorf("last arg = %q, want %q", args[len(args)-1], DockerImage)
 	}
 }
 

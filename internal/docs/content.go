@@ -216,15 +216,18 @@ The Docker provider runs horde-worker:latest locally via 'docker run'.
 
 How it works:
 
-    1. Runs the container in detached mode with environment variables
+    1. Creates a persistent workspace at ~/.horde/workspaces/<run-id>/
+       and mounts it into the container at /workspace.
+    2. Runs the container in detached mode with environment variables
        for repo URL, ticket, branch, workflow, and run ID.
-    2. Secrets from .env are passed via --env-file.
-    3. Volume mounts from .horde/config.yaml are applied with -v flags.
-    4. The container's entrypoint clones the repo, runs orc, and exits.
+    3. Secrets from .env are passed via --env-file.
+    4. Volume mounts from .horde/config.yaml are applied with -v flags.
+    5. The container's entrypoint clones the repo, runs orc, and exits.
 
 Run data is stored locally:
 
     ~/.horde/horde.db               SQLite run history
+    ~/.horde/workspaces/<run-id>/   Persistent workspace (survives container loss)
     ~/.horde/results/<run-id>/      Artifacts, audit logs, saved logs
 
 Completion is detected lazily — the next 'horde status', 'horde results',
@@ -259,21 +262,21 @@ Planned features:
 const topicRetry = `Retrying and Inspecting Runs
 =============================
 
-Containers stay alive after orc finishes (via sleep infinity), so you
-always have shell access and can retry without recreating anything.
+Every run's workspace is mounted to the host at ~/.horde/workspaces/<run-id>/.
+If a container vanishes (crash, reboot, OOM), the workspace persists and
+retry or shell access still works by launching a new container.
 
 Retry
 -----
 
     horde retry <run-id>
 
-Runs orc again inside the existing container. The container is already
-running (sleeping after orc exited), so retry just exec's a new orc
-process. Orc sees its own audit state and picks up from the failed
-phase automatically.
+If the container is still alive (sleeping after orc exited), exec's orc
+directly inside it. If the container is gone, launches a new container
+against the preserved workspace. Either way, orc sees its audit state
+and picks up from the failed phase automatically.
 
-The same run ID is reused — no new container is created. The timeout
-is reset.
+The same run ID is reused. The timeout is reset.
 
     horde retry abc123
     # Output: Retrying horde-k43 (run abc123)
@@ -286,7 +289,9 @@ Shell
 
     horde shell <run-id>
 
-Opens an interactive bash shell in the running container:
+Opens an interactive bash shell. If the container is alive, exec's into
+it. If the container is gone but the workspace exists, launches an
+ephemeral container with the workspace mounted:
 
     horde shell abc123
     # Inside the container:
@@ -295,29 +300,45 @@ Opens an interactive bash shell in the running container:
     orc run horde-k43 --retry implement # retry from a specific phase
     git push origin HEAD:refs/heads/horde/horde-k43  # push work manually
 
-Changes made in the shell affect the container directly. This is the
-real container, not a snapshot.
+Changes made in the shell affect the workspace directly.
 
 Clean
 -----
 
-    horde clean              # stop and remove all terminal containers
-    horde clean <run-id>     # stop and remove a specific container
+    horde clean              # remove all terminal containers
+    horde clean <run-id>     # remove a specific container
+    horde clean --purge      # also remove workspace directories
 
-Containers are preserved by default for retry and shell access. Use
-'horde clean' to free up resources when you no longer need them.
-Running and pending runs cannot be cleaned.
+Containers are removed but workspaces are preserved by default for
+retry and shell access. Use --purge to free disk space when you no
+longer need the workspace. Running and pending runs cannot be cleaned.
+
+Workspace Persistence
+---------------------
+
+Each run's workspace lives at ~/.horde/workspaces/<run-id>/ on the host,
+mounted into the container at /workspace. This means:
+
+    - Container crashes: workspace survives, retry launches fresh compute
+    - Docker restarts: same — workspace is on the host filesystem
+    - horde kill: container stopped, workspace preserved
+    - horde clean: container removed, workspace preserved (use --purge)
+
+You can also access the workspace directly from the host:
+
+    ls ~/.horde/workspaces/<run-id>/
+    cd ~/.horde/workspaces/<run-id>/ && git log
 
 Container Lifecycle
 -------------------
 
-    horde launch   →  container created, orc runs
+    horde launch   →  workspace created on host, container mounts it
     orc finishes   →  container stays alive (sleep infinity)
     horde status   →  detects completion via marker file, copies artifacts
-    horde retry    →  exec's orc again inside the same container
-    horde shell    →  interactive bash in the container
-    horde kill     →  container stopped
-    horde clean    →  container removed
+    horde retry    →  exec in live container, or new container with workspace
+    horde shell    →  exec in live container, or ephemeral container
+    horde kill     →  container stopped, workspace preserved
+    horde clean    →  container removed, workspace preserved
 `
 
 const topicEnv = `Environment Setup

@@ -142,6 +142,12 @@ func TestLaunch_Success(t *testing.T) {
 	if diff := r.TimeoutAt.Sub(expectedTimeout); diff < -5*time.Second || diff > 5*time.Second {
 		t.Errorf("TimeoutAt %v not within 5s of StartedAt+60m %v", r.TimeoutAt, expectedTimeout)
 	}
+
+	// Verify workspace directory was created
+	wsDir := filepath.Join(filepath.Dir(env.projectDir), ".horde", "workspaces", runID)
+	if _, err := os.Stat(wsDir); os.IsNotExist(err) {
+		t.Errorf("workspace directory not created at %s", wsDir)
+	}
 }
 
 func TestLaunch_WithFlags(t *testing.T) {

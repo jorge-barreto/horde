@@ -17,13 +17,13 @@ type Provider interface {
 
 // LaunchOpts contains parameters for launching a worker instance.
 type LaunchOpts struct {
-	Repo       string
-	Ticket     string
-	Branch     string
-	Workflow   string
-	RunID      string
-	EnvFile    string   // path to .env file (docker provider)
-	Mounts []string // volume mounts in docker format (host:container)
+	Repo     string
+	Ticket   string
+	Branch   string
+	Workflow string
+	RunID    string
+	EnvFile  string   // path to .env file (docker provider)
+	Mounts   []string // volume mounts in docker format (host:container)
 }
 
 // LaunchResult contains the outcome of a successful launch.

@@ -12,8 +12,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.68.4
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10
+	github.com/aws/smithy-go v1.24.2
 	github.com/mattn/go-sqlite3 v1.14.42
 	github.com/urfave/cli/v3 v3.8.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -31,6 +33,4 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.15 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.19 // indirect
-	github.com/aws/smithy-go v1.24.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

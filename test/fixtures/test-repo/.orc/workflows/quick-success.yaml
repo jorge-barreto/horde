@@ -1,0 +1,7 @@
+name: horde-test
+ticket-pattern: 'TEST-\w+'
+phases:
+  - name: run
+    type: script
+    run: echo "quick-success: done"
+    timeout: 1

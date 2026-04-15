@@ -48,6 +48,22 @@ func intPtr(v int) *int              { return &v }
 func timePtr(v time.Time) *time.Time { return &v }
 func float64Ptr(v float64) *float64  { return &v }
 
+func validItem() map[string]types.AttributeValue {
+	return map[string]types.AttributeValue{
+		AttrID:         &types.AttributeValueMemberS{Value: "test-run-id"},
+		AttrRepo:       &types.AttributeValueMemberS{Value: "github.com/acme/repo"},
+		AttrTicket:     &types.AttributeValueMemberS{Value: "PROJ-1"},
+		AttrBranch:     &types.AttributeValueMemberS{Value: "main"},
+		AttrWorkflow:   &types.AttributeValueMemberS{Value: "ci"},
+		AttrProvider:   &types.AttributeValueMemberS{Value: "docker"},
+		AttrInstanceID: &types.AttributeValueMemberS{Value: "abc123"},
+		AttrStatus:     &types.AttributeValueMemberS{Value: "pending"},
+		AttrLaunchedBy: &types.AttributeValueMemberS{Value: "bob"},
+		AttrStartedAt:  &types.AttributeValueMemberS{Value: "2026-04-15T10:00:00Z"},
+		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: "2026-04-15T11:00:00Z"},
+	}
+}
+
 func TestNewDynamoStore_EmptyTableName(t *testing.T) {
 	t.Parallel()
 	mock := &mockDynamoClient{}
@@ -686,5 +702,180 @@ func TestDynamoStore_GetRun_UsesCorrectKey(t *testing.T) {
 	}
 	if keyVal.Value != "test-run-id" {
 		t.Errorf("Key[AttrID].Value = %q, want %q", keyVal.Value, "test-run-id")
+	}
+}
+
+func TestDynamoStore_GetRun_MissingRequiredField(t *testing.T) {
+	t.Parallel()
+	attrs := []string{
+		AttrID, AttrRepo, AttrTicket, AttrBranch, AttrWorkflow,
+		AttrProvider, AttrInstanceID, AttrLaunchedBy, AttrStatus,
+		AttrStartedAt, AttrTimeoutAt,
+	}
+	for _, attr := range attrs {
+		attr := attr
+		t.Run(attr, func(t *testing.T) {
+			t.Parallel()
+			item := validItem()
+			delete(item, attr)
+			mock := &mockDynamoClient{
+				getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+					return &dynamodb.GetItemOutput{Item: item}, nil
+				},
+			}
+			store := newTestDynamoStore(mock, "runs-table")
+			_, err := store.GetRun(context.Background(), "test-run-id")
+			if err == nil {
+				t.Fatal("expected error for missing attribute, got nil")
+			}
+			if !strings.Contains(err.Error(), attr) {
+				t.Errorf("expected error to contain %q, got %q", attr, err.Error())
+			}
+		})
+	}
+}
+
+func TestDynamoStore_GetRun_WrongTypeRequiredField(t *testing.T) {
+	t.Parallel()
+	attrs := []string{
+		AttrID, AttrRepo, AttrTicket, AttrBranch, AttrWorkflow,
+		AttrProvider, AttrInstanceID, AttrLaunchedBy, AttrStatus,
+		AttrStartedAt, AttrTimeoutAt,
+	}
+	for _, attr := range attrs {
+		attr := attr
+		t.Run(attr, func(t *testing.T) {
+			t.Parallel()
+			item := validItem()
+			item[attr] = &types.AttributeValueMemberN{Value: "999"}
+			mock := &mockDynamoClient{
+				getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+					return &dynamodb.GetItemOutput{Item: item}, nil
+				},
+			}
+			store := newTestDynamoStore(mock, "runs-table")
+			_, err := store.GetRun(context.Background(), "test-run-id")
+			if err == nil {
+				t.Fatal("expected error for wrong-type attribute, got nil")
+			}
+			if !strings.Contains(err.Error(), attr) {
+				t.Errorf("expected error to contain %q, got %q", attr, err.Error())
+			}
+		})
+	}
+}
+
+func TestDynamoStore_GetRun_WrongTypeOptionalField(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		attr     string
+		badValue types.AttributeValue
+	}{
+		{AttrExitCode, &types.AttributeValueMemberS{Value: "not-a-number"}},
+		{AttrCompletedAt, &types.AttributeValueMemberN{Value: "12345"}},
+		{AttrTotalCostUSD, &types.AttributeValueMemberS{Value: "not-a-number"}},
+		{AttrMetadata, &types.AttributeValueMemberS{Value: "not-a-map"}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.attr, func(t *testing.T) {
+			t.Parallel()
+			item := validItem()
+			item[tc.attr] = tc.badValue
+			mock := &mockDynamoClient{
+				getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+					return &dynamodb.GetItemOutput{Item: item}, nil
+				},
+			}
+			store := newTestDynamoStore(mock, "runs-table")
+			_, err := store.GetRun(context.Background(), "test-run-id")
+			if err == nil {
+				t.Fatal("expected error for wrong-type optional attribute, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.attr) {
+				t.Errorf("expected error to contain %q, got %q", tc.attr, err.Error())
+			}
+		})
+	}
+}
+
+func TestDynamoStore_GetRun_UnparseableValues(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		attr     string
+		badValue types.AttributeValue
+		errText  string
+	}{
+		{AttrStartedAt, &types.AttributeValueMemberS{Value: "not-a-date"}, "parsing started_at"},
+		{AttrTimeoutAt, &types.AttributeValueMemberS{Value: "not-a-date"}, "parsing timeout_at"},
+		{AttrExitCode, &types.AttributeValueMemberN{Value: "not-an-int"}, "parsing exit_code"},
+		{AttrCompletedAt, &types.AttributeValueMemberS{Value: "not-a-date"}, "parsing completed_at"},
+		{AttrTotalCostUSD, &types.AttributeValueMemberN{Value: "not-a-float"}, "parsing total_cost_usd"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.attr, func(t *testing.T) {
+			t.Parallel()
+			item := validItem()
+			item[tc.attr] = tc.badValue
+			mock := &mockDynamoClient{
+				getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+					return &dynamodb.GetItemOutput{Item: item}, nil
+				},
+			}
+			store := newTestDynamoStore(mock, "runs-table")
+			_, err := store.GetRun(context.Background(), "test-run-id")
+			if err == nil {
+				t.Fatal("expected error for unparseable value, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.errText) {
+				t.Errorf("expected error to contain %q, got %q", tc.errText, err.Error())
+			}
+		})
+	}
+}
+
+func TestDynamoStore_GetRun_EmptyAttributeMap(t *testing.T) {
+	t.Parallel()
+	item := map[string]types.AttributeValue{}
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: item}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.GetRun(context.Background(), "test-run-id")
+	if err == nil {
+		t.Fatal("expected error for empty attribute map, got nil")
+	}
+	if !strings.Contains(err.Error(), AttrID) {
+		t.Errorf("expected error to contain %q, got %q", AttrID, err.Error())
+	}
+}
+
+func TestDynamoStore_GetRun_NonStringMetadataValue(t *testing.T) {
+	t.Parallel()
+	item := validItem()
+	item[AttrMetadata] = &types.AttributeValueMemberM{
+		Value: map[string]types.AttributeValue{
+			"good-key": &types.AttributeValueMemberS{Value: "val"},
+			"bad-key":  &types.AttributeValueMemberN{Value: "123"},
+		},
+	}
+	mock := &mockDynamoClient{
+		getItemFunc: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: item}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.GetRun(context.Background(), "test-run-id")
+	if err == nil {
+		t.Fatal("expected error for non-string metadata value, got nil")
+	}
+	if !strings.Contains(err.Error(), "metadata") {
+		t.Errorf("expected error to contain %q, got %q", "metadata", err.Error())
+	}
+	if !strings.Contains(err.Error(), "bad-key") {
+		t.Errorf("expected error to contain %q, got %q", "bad-key", err.Error())
 	}
 }

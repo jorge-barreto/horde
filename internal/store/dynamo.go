@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+
+var _ Store = (*DynamoStore)(nil)
 
 type dynamoAPI interface {
 	DescribeTable(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
@@ -69,11 +72,36 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 		item[AttrMetadata] = &types.AttributeValueMemberM{Value: metaMap}
 	}
 	_, err := s.client.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: aws.String(s.tableName),
-		Item:      item,
+		TableName:           aws.String(s.tableName),
+		Item:                item,
+		ConditionExpression: aws.String("attribute_not_exists(id)"),
 	})
 	if err != nil {
+		var ccfe *types.ConditionalCheckFailedException
+		if errors.As(err, &ccfe) {
+			return fmt.Errorf("creating run: duplicate id %q", run.ID)
+		}
 		return fmt.Errorf("creating run: %w", err)
 	}
 	return nil
+}
+
+func (s *DynamoStore) GetRun(ctx context.Context, id string) (*Run, error) {
+	return nil, fmt.Errorf("DynamoStore.GetRun: not implemented")
+}
+
+func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdate) error {
+	return fmt.Errorf("DynamoStore.UpdateRun: not implemented")
+}
+
+func (s *DynamoStore) ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error) {
+	return nil, fmt.Errorf("DynamoStore.ListByRepo: not implemented")
+}
+
+func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
+	return nil, fmt.Errorf("DynamoStore.FindActiveByTicket: not implemented")
+}
+
+func (s *DynamoStore) CountActive(ctx context.Context) (int, error) {
+	return 0, fmt.Errorf("DynamoStore.CountActive: not implemented")
 }

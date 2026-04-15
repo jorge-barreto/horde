@@ -2,19 +2,33 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	cloudwatchlogs "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jorge-barreto/horde/internal/config"
 )
 
-type fakeECSClient struct{}
+type fakeECSClient struct {
+	runTaskInput  *ecs.RunTaskInput
+	runTaskOutput *ecs.RunTaskOutput
+	runTaskErr    error
+}
 
 func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
-	return nil, nil
+	f.runTaskInput = params
+	if f.runTaskErr != nil {
+		return nil, f.runTaskErr
+	}
+	if f.runTaskOutput != nil {
+		return f.runTaskOutput, nil
+	}
+	return &ecs.RunTaskOutput{}, nil
 }
 func (f *fakeECSClient) DescribeTasks(ctx context.Context, params *ecs.DescribeTasksInput, optFns ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 	return nil, nil
@@ -65,18 +79,199 @@ func TestECSProvider_InterfaceCompliance(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Launch_NilResponse(t *testing.T) {
+func TestECSProvider_Launch_Success(t *testing.T) {
 	t.Parallel()
-	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	result, err := p.Launch(context.Background(), LaunchOpts{})
-	if result != nil {
-		t.Errorf("Launch() result = %v, want nil", result)
+	taskARN := "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123"
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{
+				{TaskArn: aws.String(taskARN)},
+			},
+		},
 	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	opts := LaunchOpts{
+		Repo:     "github.com/org/repo.git",
+		Ticket:   "PROJ-123",
+		Branch:   "main",
+		Workflow: "default",
+		RunID:    "k7m2xp4qr9n3",
+	}
+	result, err := p.Launch(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Launch() error = %v, want nil", err)
+	}
+	if result.InstanceID != taskARN {
+		t.Errorf("InstanceID = %q, want %q", result.InstanceID, taskARN)
+	}
+	if result.Metadata["cluster_arn"] != "arn:aws:ecs:us-east-1:123456789012:cluster/horde" {
+		t.Errorf("Metadata[cluster_arn] = %q", result.Metadata["cluster_arn"])
+	}
+	if result.Metadata["log_group"] != "/ecs/horde-worker" {
+		t.Errorf("Metadata[log_group] = %q", result.Metadata["log_group"])
+	}
+	if result.Metadata["artifacts_bucket"] != "my-horde-artifacts" {
+		t.Errorf("Metadata[artifacts_bucket] = %q", result.Metadata["artifacts_bucket"])
+	}
+
+	// Verify RunTaskInput construction
+	in := fake.runTaskInput
+	if in == nil {
+		t.Fatal("RunTask was not called")
+	}
+	if *in.TaskDefinition != "arn:aws:ecs:us-east-1:123456789012:task-definition/horde-worker:1" {
+		t.Errorf("TaskDefinition = %q", *in.TaskDefinition)
+	}
+	if *in.Cluster != "arn:aws:ecs:us-east-1:123456789012:cluster/horde" {
+		t.Errorf("Cluster = %q", *in.Cluster)
+	}
+	if in.LaunchType != ecstypes.LaunchTypeFargate {
+		t.Errorf("LaunchType = %v", in.LaunchType)
+	}
+	if *in.Count != 1 {
+		t.Errorf("Count = %d, want 1", *in.Count)
+	}
+	vpc := in.NetworkConfiguration.AwsvpcConfiguration
+	if len(vpc.Subnets) == 0 || vpc.Subnets[0] != "subnet-abc" {
+		t.Errorf("Subnets = %v", vpc.Subnets)
+	}
+	if len(vpc.SecurityGroups) == 0 || vpc.SecurityGroups[0] != "sg-123" {
+		t.Errorf("SecurityGroups = %v", vpc.SecurityGroups)
+	}
+	if vpc.AssignPublicIp != ecstypes.AssignPublicIpEnabled {
+		t.Errorf("AssignPublicIp = %v", vpc.AssignPublicIp)
+	}
+	overrides := in.Overrides.ContainerOverrides
+	if len(overrides) != 1 {
+		t.Fatalf("ContainerOverrides len = %d, want 1", len(overrides))
+	}
+	if *overrides[0].Name != "horde-worker" {
+		t.Errorf("ContainerOverride Name = %q", *overrides[0].Name)
+	}
+	envMap := make(map[string]string)
+	for _, kv := range overrides[0].Environment {
+		envMap[*kv.Name] = *kv.Value
+	}
+	wantEnv := map[string]string{
+		"REPO_URL":         "github.com/org/repo.git",
+		"TICKET":           "PROJ-123",
+		"BRANCH":           "main",
+		"WORKFLOW":         "default",
+		"RUN_ID":           "k7m2xp4qr9n3",
+		"ARTIFACTS_BUCKET": "my-horde-artifacts",
+	}
+	for k, v := range wantEnv {
+		if envMap[k] != v {
+			t.Errorf("env[%s] = %q, want %q", k, envMap[k], v)
+		}
+	}
+	tagMap := make(map[string]string)
+	for _, tag := range in.Tags {
+		tagMap[*tag.Key] = *tag.Value
+	}
+	if tagMap["horde-run-id"] != "k7m2xp4qr9n3" {
+		t.Errorf("tag horde-run-id = %q", tagMap["horde-run-id"])
+	}
+	if tagMap["horde-ticket"] != "PROJ-123" {
+		t.Errorf("tag horde-ticket = %q", tagMap["horde-ticket"])
+	}
+}
+
+func TestECSProvider_Launch_RunTaskError(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{runTaskErr: fmt.Errorf("AccessDeniedException: not authorized")}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
 	if !strings.Contains(err.Error(), "launching ECS task") {
-		t.Errorf("Launch() error = %q, want it to contain \"launching ECS task\"", err.Error())
+		t.Errorf("error = %q, want it to contain \"launching ECS task\"", err.Error())
+	}
+}
+
+func TestECSProvider_Launch_Failure(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Failures: []ecstypes.Failure{{Reason: aws.String("RESOURCE:ENI")}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{})
+	if err == nil {
+		t.Fatal("Launch() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "launching ECS task") {
+		t.Errorf("error = %q, want it to contain \"launching ECS task\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "RESOURCE:ENI") {
+		t.Errorf("error = %q, want it to contain \"RESOURCE:ENI\"", err.Error())
+	}
+}
+
+func TestECSProvider_Launch_NoTasks(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{Tasks: []ecstypes.Task{}},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{})
+	if err == nil {
+		t.Fatal("Launch() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "no task returned") {
+		t.Errorf("error = %q, want it to contain \"no task returned\"", err.Error())
+	}
+}
+
+func TestECSProvider_Launch_NilTaskArn(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{{}}, // TaskArn is nil
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{})
+	if err == nil {
+		t.Fatal("Launch() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "task ARN is nil") {
+		t.Errorf("error = %q, want it to contain \"task ARN is nil\"", err.Error())
+	}
+}
+
+func TestECSProvider_Launch_EmptyOpts(t *testing.T) {
+	t.Parallel()
+	taskARN := "arn:aws:ecs:us-east-1:123456789012:task/horde/empty"
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{{TaskArn: aws.String(taskARN)}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Launch(context.Background(), LaunchOpts{})
+	if err != nil {
+		t.Fatalf("Launch() error = %v, want nil", err)
+	}
+	if result.InstanceID != taskARN {
+		t.Errorf("InstanceID = %q, want %q", result.InstanceID, taskARN)
+	}
+	// Provider does not validate opts — empty strings are passed through
+	in := fake.runTaskInput
+	envMap := make(map[string]string)
+	for _, kv := range in.Overrides.ContainerOverrides[0].Environment {
+		envMap[*kv.Name] = *kv.Value
+	}
+	for _, key := range []string{"REPO_URL", "TICKET", "BRANCH", "WORKFLOW", "RUN_ID"} {
+		if envMap[key] != "" {
+			t.Errorf("env[%s] = %q, want empty string", key, envMap[key])
+		}
+	}
+	// ARTIFACTS_BUCKET comes from config, not opts
+	if envMap["ARTIFACTS_BUCKET"] != "my-horde-artifacts" {
+		t.Errorf("env[ARTIFACTS_BUCKET] = %q, want \"my-horde-artifacts\"", envMap["ARTIFACTS_BUCKET"])
 	}
 }
 

@@ -423,6 +423,21 @@ func TestDiagnostic(t *testing.T) {
 			want:   []string{"connection refused"},
 			noWant: []string{"hint:"},
 		},
+		{
+			name: "wrapped not found",
+			err:  fmt.Errorf("wrapped: %w", &NotFoundError{Path: "/horde/config", Err: fmt.Errorf("underlying")}),
+			want: []string{"/horde/config", "deploy the @horde/cdk construct"},
+		},
+		{
+			name: "wrapped access denied",
+			err:  fmt.Errorf("wrapped: %w", &AccessDeniedError{Path: "/horde/config", Err: fmt.Errorf("underlying")}),
+			want: []string{"/horde/config", "attach the horde CLI user managed policy", "@horde/cdk construct"},
+		},
+		{
+			name: "wrapped parse error",
+			err:  fmt.Errorf("wrapped: %w", &ParseError{Path: "/horde/config", Err: fmt.Errorf("invalid json")}),
+			want: []string{"/horde/config", "malformed", "Re-deploy", "invalid json"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -440,6 +455,13 @@ func TestDiagnostic(t *testing.T) {
 			}
 		})
 	}
+	t.Run("nil error", func(t *testing.T) {
+		t.Parallel()
+		got := Diagnostic(nil)
+		if got != "" {
+			t.Errorf("Diagnostic(nil) = %q, want empty string", got)
+		}
+	})
 }
 
 func TestHordeConfig_Validate_AllFieldsPresent(t *testing.T) {

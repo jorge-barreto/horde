@@ -87,6 +87,9 @@ func LoadFromSSM(ctx context.Context, client SSMClient, path string) (*HordeConf
 
 // Diagnostic maps a typed SSM error to a user-friendly, actionable message.
 func Diagnostic(err error) string {
+	if err == nil {
+		return ""
+	}
 	var nf *NotFoundError
 	if errors.As(err, &nf) {
 		return fmt.Sprintf("ssm parameter %q not found\n\nhint: deploy the @horde/cdk construct to create the SSM parameter.\nSee: https://github.com/jorge-barreto/horde/tree/main/cdk", nf.Path)

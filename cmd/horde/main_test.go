@@ -86,7 +86,7 @@ func TestLaunch_Success(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -156,7 +156,7 @@ func TestLaunch_WithFlags(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "launch", "--branch", "feature-x", "--workflow", "review", "--timeout", "30m", "TICKET-2"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--branch", "feature-x", "--workflow", "review", "--timeout", "30m", "TICKET-2"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -197,7 +197,7 @@ func TestLaunch_MissingTicket(t *testing.T) {
 	_ = setupLaunchEnv(t)
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "launch"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -221,7 +221,7 @@ func TestLaunch_NotGitRepo(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -257,7 +257,7 @@ func TestLaunch_MissingEnvFile(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -294,7 +294,7 @@ func TestLaunch_MissingEnvKey(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -328,7 +328,7 @@ func TestLaunch_DuplicateTicket_NoForce(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -384,7 +384,7 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "launch", "--force", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--force", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -429,7 +429,7 @@ func TestLaunch_DockerFailure(t *testing.T) {
 
 	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\ncase \"$1\" in\n  image) echo \"2099-01-01T00:00:00Z\";;\n  tag) exit 0;;\n  *) echo \"Error: Cannot connect to the Docker daemon\" >&2; exit 1;;\nesac\n"), 0o755)
 
-	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -473,7 +473,7 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 	os.Stderr = stderrW
 	defer func() { os.Stderr = origStderr }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
 
 	stderrW.Close()
 	os.Stderr = origStderr
@@ -511,15 +511,15 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 	}
 }
 
-func TestProvider_UnsupportedValue(t *testing.T) {
+func TestProvider_InvalidValue(t *testing.T) {
 	_ = setupLaunchEnv(t)
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "--provider", "aws-ecs", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "gcp", "launch", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), `unsupported provider "aws-ecs"`) {
+	if !strings.Contains(err.Error(), `unsupported provider "gcp"`) {
 		t.Errorf("error %q does not contain expected message", err.Error())
 	}
 }
@@ -559,7 +559,7 @@ func TestProfile_AcceptedAsGlobalFlag(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "--profile", "staging", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "--profile", "staging", "launch", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -632,7 +632,7 @@ func TestStatus_CompletedRun(t *testing.T) {
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -700,7 +700,7 @@ esac
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -731,7 +731,7 @@ func TestStatus_NotFound(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "status", "nonexistent"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -744,7 +744,7 @@ func TestStatus_MissingRunID(t *testing.T) {
 	setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "status"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -793,7 +793,7 @@ esac
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -874,7 +874,7 @@ esac
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 	before := time.Now()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	after := time.Now()
 	pw.Close()
 	os.Stdout = origStdout
@@ -964,7 +964,7 @@ esac
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -1037,7 +1037,7 @@ esac
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -1106,7 +1106,7 @@ esac
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -1199,7 +1199,7 @@ esac
 	os.Stdout = w
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 
 	w.Close()
 	os.Stdout = origStdout
@@ -1267,7 +1267,7 @@ func TestList_ActiveOnly(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1323,7 +1323,7 @@ func TestList_All(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list", "--all"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1363,7 +1363,7 @@ func TestList_EmptyResult(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1396,7 +1396,7 @@ func TestList_EmptyResult_All(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list", "--all"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1456,7 +1456,7 @@ esac
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1532,7 +1532,7 @@ esac
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1598,7 +1598,7 @@ esac
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list", "--all"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1669,7 +1669,7 @@ esac
 	os.Stderr = pwErr
 	defer func() { os.Stderr = origStderr }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list"})
 
 	pwOut.Close()
 	os.Stdout = origStdout
@@ -1727,7 +1727,7 @@ func TestList_TableFormat(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list", "--all"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list", "--all"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1777,7 +1777,7 @@ func TestList_OtherRepoFiltered(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "list"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "list"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1828,7 +1828,7 @@ func TestLogs_Success(t *testing.T) {
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "logs", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -1877,7 +1877,7 @@ func TestLogs_Follow_Success(t *testing.T) {
 	}
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "logs", "--follow", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", "--follow", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -1897,7 +1897,7 @@ func TestLogs_MissingRunID(t *testing.T) {
 	setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "logs"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1919,7 +1919,7 @@ func TestLogs_RunNotFound(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "logs", "nonexistent"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1955,7 +1955,7 @@ func TestLogs_CompletedRun(t *testing.T) {
 			}
 			st.Close()
 
-			err = newApp().Run(ctx, []string{"horde", "logs", runID})
+			err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", runID})
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -1994,7 +1994,7 @@ func TestLogs_PendingNoContainer(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "logs", runID})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", runID})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2032,7 +2032,7 @@ func TestLogs_ContainerGone(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "logs", runID})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", runID})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2047,7 +2047,7 @@ func TestKill_MissingRunID(t *testing.T) {
 	setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "kill"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2066,7 +2066,7 @@ func TestKill_RunNotFound(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "kill", "nonexistent123"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", "nonexistent123"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2101,7 +2101,7 @@ func TestKill_AlreadyCompleted(t *testing.T) {
 			}
 			st.Close()
 
-			err = newApp().Run(ctx, []string{"horde", "kill", runID})
+			err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID})
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -2153,7 +2153,7 @@ esac
 	os.Stderr = stderrW
 	defer func() { os.Stderr = origStderr }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 
 	stderrW.Close()
 	os.Stderr = origStderr
@@ -2219,7 +2219,7 @@ esac
 	}
 	st.Close()
 
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
@@ -2285,7 +2285,7 @@ esac
 	}
 	st.Close()
 
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
@@ -2351,7 +2351,7 @@ esac
 	}
 	st.Close()
 
-	runErr := newApp().Run(ctx, []string{"horde", "status", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
@@ -2416,7 +2416,7 @@ esac
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "kill", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2480,7 +2480,7 @@ func TestKill_PendingRun(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "kill", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2551,7 +2551,7 @@ esac
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "kill", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2628,7 +2628,7 @@ esac
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "kill", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2668,7 +2668,7 @@ esac
 func TestResults_MissingRunID(t *testing.T) {
 	setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "results"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2688,7 +2688,7 @@ func TestResults_RunNotFound(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	st.Close()
-	err = newApp().Run(ctx, []string{"horde", "results", "nonexistent"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2720,7 +2720,7 @@ func TestResults_StillRunning(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2766,7 +2766,7 @@ func TestResults_CompletedWithResults(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2811,7 +2811,7 @@ func TestResults_CompletedNoCost(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2859,7 +2859,7 @@ func TestResults_CompletedWithWorkflow(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2902,7 +2902,7 @@ func TestResults_MissingRunResult(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)
@@ -2940,7 +2940,7 @@ func TestResults_LazyCompletion(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "results", runID})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
 	pw.Close()
 	os.Stdout = origStdout
 	out, _ := io.ReadAll(pr)

@@ -37,28 +37,20 @@ func newApp() *cli.Command {
 	return &cli.Command{
 		Name:  "horde",
 		Usage: "Cloud launcher for orc workflows",
-		Description: `horde runs orc workflows on ephemeral Docker containers (or ECS Fargate
-in v0.2). It clones a repo, runs orc, collects results, and tears down.
+		Description: `horde runs orc workflows on ephemeral containers (Docker locally,
+ECS Fargate in AWS). It clones a repo, runs orc, collects results, and tears down.
 
 horde must be run from inside a git repository — the repo URL is inferred
 from the local git remote. Run 'horde docs' for detailed documentation.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "provider",
-				Value: "docker",
-				Usage: "Override provider selection (docker or aws-ecs)",
+				Usage: "Provider (docker or aws-ecs); omit for auto-detection via SSM",
 			},
 			&cli.StringFlag{
 				Name:  "profile",
 				Usage: "AWS named profile (passed through to AWS SDK)",
 			},
-		},
-		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			p := cmd.String("provider")
-			if p != "docker" {
-				return ctx, fmt.Errorf("unsupported provider %q: only \"docker\" is supported in v0.1", p)
-			}
-			return ctx, nil
 		},
 		Commands: []*cli.Command{
 			launchCmd(),
@@ -114,6 +106,18 @@ ticket is already active.`,
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
 
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			provName := cmd.String("provider")
+			if provName == "" {
+				// TODO(d69): when auto-detect succeeds, resolve actual provider name.
+				provName = "docker"
+			}
+
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
@@ -134,21 +138,10 @@ ticket is already active.`,
 				return err
 			}
 
-			launchedBy, err := resolveLaunchedBy(ctx, cmd.String("provider"), cwd, nil, cmd.String("profile"))
+			launchedBy, err := resolveLaunchedBy(ctx, provName, cwd, nil, cmd.String("profile"))
 			if err != nil {
 				return err
 			}
-
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("getting home directory: %w", err)
-			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return err
-			}
-			defer st.Close()
 
 			active, err := st.FindActiveByTicket(ctx, repo, ticket)
 			if err != nil {
@@ -166,7 +159,7 @@ ticket is already active.`,
 				Ticket:     ticket,
 				Branch:     branch,
 				Workflow:   workflow,
-				Provider:   "docker",
+				Provider:   provName,
 				Status:     store.StatusPending,
 				LaunchedBy: launchedBy,
 				StartedAt:  now,
@@ -176,13 +169,16 @@ ticket is already active.`,
 				return fmt.Errorf("recording run: %w", err)
 			}
 
-			prov := provider.NewDockerProvider()
+			dp, ok := prov.(*provider.DockerProvider)
+			if !ok {
+				return fmt.Errorf("image build is only supported for the docker provider")
+			}
 
 			workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
 			if err != nil {
 				return fmt.Errorf("accessing worker files: %w", err)
 			}
-			if err := prov.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
+			if err := dp.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
 				failedStatus := store.StatusFailed
 				now := time.Now()
 				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {
@@ -252,16 +248,16 @@ The entrypoint re-runs and orc picks up from where it left off. Use
 			}
 			timeout := cmd.Duration("timeout")
 
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return err
-			}
-			defer st.Close()
 
 			run, err := st.GetRun(ctx, runID)
 			if err != nil {
@@ -271,9 +267,10 @@ The entrypoint re-runs and orc picks up from where it left off. Use
 				return fmt.Errorf("reading run: %w", err)
 			}
 
-			prov := provider.NewDockerProvider()
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-				return err
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
+					return err
+				}
 			}
 
 			if run.Status == store.StatusPending {
@@ -299,7 +296,11 @@ The entrypoint re-runs and orc picks up from where it left off. Use
 			}
 
 			// Clear previous completion marker and exec orc inside the running container
-			prov.ExecInContainer(ctx, run.InstanceID, "rm -f /workspace/.horde-exit-code")
+			dp, ok := prov.(*provider.DockerProvider)
+			if !ok {
+				return fmt.Errorf("retry is only supported for the docker provider")
+			}
+			dp.ExecInContainer(ctx, run.InstanceID, "rm -f /workspace/.horde-exit-code")
 
 			ticket := run.Ticket
 			orcCmd := "cd /workspace && orc run " + ticket + " --auto --no-color; echo $? > /workspace/.horde-exit-code"
@@ -344,16 +345,18 @@ result collection.`,
 			if runID == "" {
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
+
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
-			}
-			defer st.Close()
+
 			run, err := st.GetRun(ctx, runID)
 			if err != nil {
 				if errors.Is(err, store.ErrRunNotFound) {
@@ -361,12 +364,15 @@ result collection.`,
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
-			prov := provider.NewDockerProvider()
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-				return err
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
+					return err
+				}
 			}
 			if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
-				run.TotalCostUSD = fetchLiveCost(ctx, prov, run)
+				if dp, ok := prov.(*provider.DockerProvider); ok {
+					run.TotalCostUSD = fetchLiveCost(ctx, dp, run)
+				}
 			}
 			printRunStatus(run)
 			return nil
@@ -394,16 +400,18 @@ removed, falls back to the saved container.log in the results directory.`,
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 			follow := cmd.Bool("follow")
+
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
-			}
-			defer st.Close()
+
 			run, err := st.GetRun(ctx, runID)
 			if err != nil {
 				if errors.Is(err, store.ErrRunNotFound) {
@@ -423,7 +431,6 @@ removed, falls back to the saved container.log in the results directory.`,
 			if run.InstanceID == "" {
 				return fmt.Errorf("logs unavailable: run %s has no container yet", runID)
 			}
-			prov := provider.NewDockerProvider()
 			reader, err := prov.Logs(ctx, run.InstanceID, follow)
 			if err != nil {
 				return fmt.Errorf("reading logs: %w", err)
@@ -450,16 +457,18 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 			if runID == "" {
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
+
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
-			}
-			defer st.Close()
+
 			run, err := st.GetRun(ctx, runID)
 			if err != nil {
 				if errors.Is(err, store.ErrRunNotFound) {
@@ -467,9 +476,10 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
-			prov := provider.NewDockerProvider()
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-				return err
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
+					return err
+				}
 			}
 			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
@@ -539,16 +549,18 @@ information if the result file is missing (e.g., orc crashed early).`,
 			if runID == "" {
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
+
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
-			}
-			defer st.Close()
+
 			run, err := st.GetRun(ctx, runID)
 			if err != nil {
 				if errors.Is(err, store.ErrRunNotFound) {
@@ -556,9 +568,10 @@ information if the result file is missing (e.g., orc crashed early).`,
 				}
 				return fmt.Errorf("reading run: %w", err)
 			}
-			prov := provider.NewDockerProvider()
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-				return err
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
+					return err
+				}
 			}
 			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
 				fmt.Printf("Run %s is still in progress (status: %s)\n", run.ID, run.Status)
@@ -607,6 +620,17 @@ include completed, failed, and killed runs.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			all := cmd.Bool("all")
 
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("getting home directory: %w", err)
+			}
+
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
@@ -617,30 +641,21 @@ include completed, failed, and killed runs.`,
 				return err
 			}
 
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("getting home directory: %w", err)
-			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return err
-			}
-			defer st.Close()
-
 			runs, err := st.ListByRepo(ctx, repo, !all)
 			if err != nil {
 				return fmt.Errorf("listing runs: %w", err)
 			}
 
-			prov := provider.NewDockerProvider()
+			dp, _ := prov.(*provider.DockerProvider)
 			for _, run := range runs {
-				if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
-					continue
-				}
-				if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
-					run.TotalCostUSD = fetchLiveCost(ctx, prov, run)
+				if dp != nil {
+					if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
+						continue
+					}
+					if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
+						run.TotalCostUSD = fetchLiveCost(ctx, dp, run)
+					}
 				}
 			}
 
@@ -694,18 +709,12 @@ func cleanCmd() *cli.Command {
 containers for all terminal runs (success, failed, killed). With a run ID,
 removes only that run's container. Does not affect running or pending runs.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			homeDir, err := os.UserHomeDir()
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
-				return fmt.Errorf("getting home directory: %w", err)
+				return err
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
-			}
-			defer st.Close()
+			defer cleanup()
 
-			prov := provider.NewDockerProvider()
 			runID := cmd.Args().First()
 
 			if runID != "" {
@@ -724,10 +733,12 @@ removes only that run's container. Does not affect running or pending runs.`,
 					fmt.Printf("Run %s has no container\n", runID)
 					return nil
 				}
-				if err := prov.RemoveContainer(ctx, run.InstanceID); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-				} else {
-					fmt.Printf("Removed container for run %s\n", runID)
+				if dp, ok := prov.(*provider.DockerProvider); ok {
+					if err := dp.RemoveContainer(ctx, run.InstanceID); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+					} else {
+						fmt.Printf("Removed container for run %s\n", runID)
+					}
 				}
 				return nil
 			}
@@ -760,8 +771,10 @@ removes only that run's container. Does not affect running or pending runs.`,
 				if activeIDs[r.ID] || r.InstanceID == "" {
 					continue
 				}
-				if err := prov.RemoveContainer(ctx, r.InstanceID); err == nil {
-					cleaned++
+				if dp, ok := prov.(*provider.DockerProvider); ok {
+					if err := dp.RemoveContainer(ctx, r.InstanceID); err == nil {
+						cleaned++
+					}
 				}
 			}
 			fmt.Printf("Removed %d container(s)\n", cleaned)
@@ -783,16 +796,17 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 			if runID == "" {
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
+
+			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-			st, err := store.NewSQLiteStore(dbPath)
-			if err != nil {
-				return fmt.Errorf("opening store: %w", err)
-			}
-			defer st.Close()
 
 			run, err := st.GetRun(ctx, runID)
 			if err != nil {
@@ -802,9 +816,10 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 				return fmt.Errorf("reading run: %w", err)
 			}
 
-			prov := provider.NewDockerProvider()
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
-				return err
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
+					return err
+				}
 			}
 
 			if run.InstanceID == "" {
@@ -819,6 +834,10 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 			}
 			if instStatus.State != "running" {
 				return fmt.Errorf("container for run %s is not running — use 'horde retry' first", runID)
+			}
+
+			if _, ok := prov.(*provider.DockerProvider); !ok {
+				return fmt.Errorf("shell is only supported for the docker provider")
 			}
 
 			// Exec into the running container

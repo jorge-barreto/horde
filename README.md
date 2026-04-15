@@ -40,11 +40,13 @@ Run `horde docs env` for more detail on token setup and security.
 
 ## Usage
 
+All commands require a provider. For local Docker mode, pass `--provider docker`. Omit the flag when the `@horde/cdk` construct is deployed (auto-detects via SSM).
+
 ```bash
 # Launch a run
-horde launch PROJ-123
-horde launch PROJ-123 --branch feature/xyz
-horde launch PROJ-123 --workflow bugfix --timeout 30m
+horde launch --provider docker PROJ-123
+horde launch --provider docker PROJ-123 --branch feature/xyz
+horde launch --provider docker PROJ-123 --workflow bugfix --timeout 30m
 
 # Monitor
 horde status <run-id>

@@ -6,11 +6,11 @@ Cloud launcher for orc workflows. See SPEC.md for design, ORC_CONTRACT_EXPECTATI
 
 ## Language & Dependencies
 
-- Go (latest stable), module: `github.com/jorge-barreto/horde`
+- Go 1.24+, module: `github.com/jorge-barreto/horde`
 - CLI: `github.com/urfave/cli/v3`
-- SQLite: `github.com/mattn/go-sqlite3` (run history)
-- AWS (v0.2): `github.com/aws/aws-sdk-go-v2` (ECS, SSM, S3)
-- CDK construct (v0.2): TypeScript in `cdk/`, separate npm package `@horde/cdk`
+- SQLite: `github.com/mattn/go-sqlite3` (local run history)
+- YAML: `gopkg.in/yaml.v3` (project config)
+- AWS (v0.2): `github.com/aws/aws-sdk-go-v2` (DynamoDB, SSM, STS, CloudWatch Logs, S3, ECS)
 
 ## Commands
 
@@ -32,30 +32,32 @@ go test -v -count=1 -timeout 10m ./test/integration/
 
 - Standard Go conventions. `gofmt` and `go vet` clean.
 - Errors are returned, not panicked. Wrap with context: `fmt.Errorf("loading config: %w", err)`.
-- Interfaces defined in their own files (`store.go`, `provider.go`). Implementations in separate files (`sqlite.go`, `docker.go`, `ecs.go`).
+- Major interfaces in their own files (`store.go`, `provider.go`). Implementations in separate files (`sqlite.go`, `dynamo.go`, `docker.go`, `dockerimage.go`).
 - Tests next to implementation: `foo.go` → `foo_test.go`.
 - Never combine `t.Parallel()` with `t.Setenv`, `t.Chdir`, or `os.Setenv` — `testing.T.Setenv` panics on tests with parallel ancestors. If a test needs env mutation, it cannot be parallel.
 
 ## Architecture
 
-- `internal/provider/` — Provider interface + implementations (docker; ecs in v0.2)
-- `internal/store/` — Store interface + SQLite (v0.1) and DynamoDB (v0.2) implementations
-- `internal/config/` — Config resolution (git remote, .env; SSM in v0.2)
-- `internal/runid/` — Run ID generation
-- `cmd/horde/` — CLI commands
-- `docker/` — Worker Dockerfile + entrypoint
+- `cmd/horde/` — CLI entry point, all commands (launch, retry, status, logs, kill, results, list, clean, shell, docs), factory for provider/store
+- `internal/provider/` — Provider interface (`provider.go`) + Docker implementation (`docker.go`, `dockerimage.go`); ECS provider in v0.2
+- `internal/store/` — Store interface (`store.go`) + SQLite (`sqlite.go`) and DynamoDB (`dynamo.go`, v0.2) implementations. Both pass shared conformance tests.
+- `internal/config/` — Git remote URL resolution, `.env` file validation, `.horde/config.yaml` project config, SSM parameter loading (v0.2)
+- `internal/awscfg/` — AWS SDK config loading, credential diagnostics
+- `internal/docs/` — Built-in documentation system (`horde docs <topic>`)
+- `internal/runid/` — Run ID generation (12-char alphanumeric via crypto/rand)
+- `docker/` — Worker Dockerfile, entrypoint.sh, git-askpass.sh (embedded into binary via `workerfiles.go`)
+- `worker/` — Optional project-specific Dockerfile extending base image
+- `test/integration/` — End-to-end tests against real Docker containers
 
 ## Key Design Decisions
 
 - Git is a hard requirement — repo URL inferred from local git remote
-- v0.1 is zero-config: no config file, repo from git remote, secrets from `.env`, image defaults to `horde-worker:latest`
+- Optional project config in `.horde/config.yaml` (volume mounts); secrets from `.env` file (gitignored) via `docker run --env-file`
+- GIT_TOKEN protected via `GIT_ASKPASS` credential helper — never in process args or `.git/config`
 - SQLite for local run history (`~/.horde/horde.db`); DynamoDB for shared team history (v0.2)
 - Store selection follows provider: docker → SQLite, aws-ecs → DynamoDB
-- ECS provider (v0.2) calls RunTask directly — no Lambda indirection. Infra config discovered via SSM at `/horde/config`
-- EventBridge + status sync Lambda keeps DynamoDB accurate even when CLI disconnects (v0.2)
-- maxConcurrent enforcement at launch time — error, not queue (v0.2)
-- Run timeout (default 24h) enforced by CLI timer (docker) and Fargate stopTimeout + Lambda (ECS)
+- Run timeout (default 24h) enforced lazily — checked on status/list/results calls, not a background timer
 - Provider.Launch returns `*LaunchResult` with `InstanceID` + `Metadata map[string]string` (no provider-specific fields on the generic type)
-- Docker provider secrets loaded from `.env` file (gitignored) via `docker run --env-file`
-- GIT_TOKEN protected via `GIT_ASKPASS` credential helper — never in process args or `.git/config`
-- `--json` flag on status/results/list for programmatic consumption (v0.2)
+- Two-layer Docker image: base (`horde-worker-base:latest`) with orc/claude/tools, project image (`horde-worker:latest`) optionally extends via `worker/Dockerfile`
+- Containers preserved after stop/kill for retry and shell access; workspaces persist at `~/.horde/workspaces/<run-id>/`
+- Status detection is lazy: `handleLazyCheck()` runs on status/list/results to detect completed/timed-out containers and collect artifacts

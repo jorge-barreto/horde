@@ -66,7 +66,20 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("resolving repo root: %v", err)
 	}
 
-	homeDir := t.TempDir()
+	homeDir, err := os.MkdirTemp("", "horde-integ-*")
+	if err != nil {
+		t.Fatalf("creating temp home: %v", err)
+	}
+	t.Cleanup(func() {
+		// Workspace dirs contain root-owned files created by Docker containers.
+		// Use a container to remove them before os.RemoveAll.
+		hordeDir := filepath.Join(homeDir, ".horde")
+		exec.Command("docker", "run", "--rm",
+			"-v", hordeDir+":/cleanup",
+			"horde-worker-base:latest", "rm", "-rf", "/cleanup",
+		).Run()
+		os.RemoveAll(homeDir)
+	})
 
 	// Create project directory with git remote
 	workDir := filepath.Join(homeDir, "project")

@@ -3,8 +3,5 @@ ticket-pattern: 'TEST-\w+'
 phases:
   - name: run
     type: script
-    run: |
-      echo "slow: starting 30s sleep"
-      sleep 30
-      echo "slow: done"
+    run: "echo slow-start && sleep 30 && echo slow-done"
     timeout: 2

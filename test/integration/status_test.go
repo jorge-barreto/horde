@@ -202,33 +202,6 @@ func TestNormalFailure(t *testing.T) {
 	}
 }
 
-// TestSignalInterrupt is a golden path test: a workflow that exits with code 5
-// (orc's signal-interrupted exit) should be detected as "killed".
-func TestSignalInterrupt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
-	h := newHarness(t)
-	runID := h.Launch("TEST-signal", "signal-five", 5*time.Minute)
-
-	h.WaitForOrc(runID, 2*time.Minute)
-
-	out := h.Status(runID)
-
-	if !strings.Contains(out, "killed") {
-		t.Errorf("expected status output to contain 'killed', got:\n%s", out)
-	}
-
-	storeStatus := h.StoreStatus(runID)
-	if storeStatus != "killed" {
-		t.Errorf("store status: got %q, want %q", storeStatus, "killed")
-	}
-
-	exitCode := h.StoreExitCode(runID)
-	if exitCode == nil {
-		t.Errorf("store exit code is nil, want 5")
-	} else if *exitCode != 5 {
-		t.Errorf("store exit code: got %d, want 5", *exitCode)
-	}
-}
+// Note: TestSignalInterrupt was removed. Exit code 5 requires sending SIGTERM
+// to the orc process, not a script that runs `exit 5`. The exit code 5 mapping
+// is covered by the unit test TestMapExitCode in cmd/horde/main_test.go.

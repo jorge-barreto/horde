@@ -1,9 +1,0 @@
-name: horde-test
-ticket-pattern: 'TEST-\w+'
-phases:
-  - name: run
-    type: script
-    run: |
-      echo "signal-five: exiting with code 5"
-      exit 5
-    timeout: 1

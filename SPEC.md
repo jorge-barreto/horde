@@ -413,6 +413,7 @@ This is the production store — shared across the team. Every developer with AW
 - GSI `by-repo`: partition key `repo`, sort key `started_at` — for repo-scoped listing (`horde list`)
 - GSI `by-ticket`: partition key `ticket`, sort key `started_at` — for duplicate ticket check and ticket history
 - GSI `by-status`: partition key `status`, sort key `started_at` — for listing active runs and concurrency check
+- GSI `by-instance`: partition key `instance_id`, projection ALL — for status Lambda task ARN lookup
 
 | Attribute | Type | Notes |
 |-----------|------|-------|

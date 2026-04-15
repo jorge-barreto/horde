@@ -90,6 +90,17 @@ mounts:
 
 Mounts use Docker's `host:container` format. Host paths are relative to the project root. Run `horde docs config` for the full schema.
 
+## Testing
+
+```bash
+go test ./...                                      # unit tests (fast, no Docker)
+go test -v -count=1 -timeout 10m ./test/integration/  # integration tests (requires Docker)
+```
+
+Unit tests use fake Docker shell scripts — no real containers. Integration tests launch real Docker containers running real orc with script-only workflows against a real SQLite store. They exercise the full status detection chain: launch, timeout, kill, and external stop scenarios.
+
+Integration tests take ~1-2 minutes. First run is slower (~3-4 minutes) because it builds the worker Docker image.
+
 ## Run Data
 
 All local data lives under `~/.horde/`:

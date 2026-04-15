@@ -15,10 +15,15 @@ import (
 	"github.com/jorge-barreto/horde/internal/store"
 )
 
-type stubStore struct{}
+type stubStore struct {
+	run    *store.Run
+	runErr error
+}
 
-func (s *stubStore) CreateRun(_ context.Context, _ *store.Run) error                 { return nil }
-func (s *stubStore) GetRun(_ context.Context, _ string) (*store.Run, error)          { return nil, nil }
+func (s *stubStore) CreateRun(_ context.Context, _ *store.Run) error { return nil }
+func (s *stubStore) GetRun(_ context.Context, _ string) (*store.Run, error) {
+	return s.run, s.runErr
+}
 func (s *stubStore) UpdateRun(_ context.Context, _ string, _ *store.RunUpdate) error { return nil }
 func (s *stubStore) ListByRepo(_ context.Context, _ string, _ bool) ([]*store.Run, error) {
 	return nil, nil
@@ -168,4 +173,115 @@ func TestInitProviderAndStore(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewProviderWith(t *testing.T) {
+	t.Parallel()
+
+	t.Run("docker", func(t *testing.T) {
+		t.Parallel()
+		prov, err := newProviderWith(context.Background(), "docker", "", defaultFactoryDeps())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := prov.(*provider.DockerProvider); !ok {
+			t.Errorf("expected *provider.DockerProvider, got %T", prov)
+		}
+	})
+
+	t.Run("unsupported", func(t *testing.T) {
+		t.Parallel()
+		_, err := newProviderWith(context.Background(), "gcp", "", defaultFactoryDeps())
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), `unsupported provider "gcp"`) {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestInitFromRunID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no flag uses stored provider", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{
+					run: &store.Run{ID: "abc123", Provider: "docker"},
+				}, func() {}, nil
+			},
+		}
+		prov, st, run, cleanup, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer cleanup()
+		if _, ok := prov.(*provider.DockerProvider); !ok {
+			t.Errorf("expected *provider.DockerProvider, got %T", prov)
+		}
+		if st == nil {
+			t.Error("expected non-nil store")
+		}
+		if run.ID != "abc123" {
+			t.Errorf("expected run ID abc123, got %s", run.ID)
+		}
+	})
+
+	t.Run("explicit flag overrides stored provider", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{
+					run: &store.Run{ID: "abc123", Provider: "aws-ecs"},
+				}, func() {}, nil
+			},
+		}
+		prov, _, _, cleanup, err := initFromRunIDWith(context.Background(), "docker", "", "abc123", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer cleanup()
+		if _, ok := prov.(*provider.DockerProvider); !ok {
+			t.Errorf("expected *provider.DockerProvider, got %T", prov)
+		}
+	})
+
+	t.Run("run not found", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{
+					runErr: store.ErrRunNotFound,
+				}, func() {}, nil
+			},
+		}
+		_, _, _, _, err := initFromRunIDWith(context.Background(), "", "", "missing", deps)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "run not found") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("empty stored provider defaults to docker", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{
+					run: &store.Run{ID: "abc123", Provider: ""},
+				}, func() {}, nil
+			},
+		}
+		prov, _, _, cleanup, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer cleanup()
+		if _, ok := prov.(*provider.DockerProvider); !ok {
+			t.Errorf("expected *provider.DockerProvider, got %T", prov)
+		}
+	})
 }

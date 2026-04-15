@@ -48,6 +48,64 @@ func openStore(providerName string) (store.Store, func(), error) {
 	}
 }
 
+// newProviderWith creates just the provider, without opening a store.
+func newProviderWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, error) {
+	switch name {
+	case "docker":
+		return provider.NewDockerProvider(), nil
+	case "aws-ecs":
+		awsCfg, err := deps.loadAWSConfig(ctx, profile)
+		if err != nil {
+			return nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
+		}
+		ssmClient := deps.newSSMClient(awsCfg)
+		if _, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath); err != nil {
+			return nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
+		}
+		return nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+	default:
+		return nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
+	}
+}
+
+// initFromRunIDWith opens the store, looks up the run, and creates the provider
+// from the stored run.Provider field (unless provFlag overrides it).
+func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, deps factoryDeps) (provider.Provider, store.Store, *store.Run, func(), error) {
+	if provFlag != "" {
+		prov, st, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		run, err := st.GetRun(ctx, runID)
+		if err != nil {
+			cleanup()
+			return nil, nil, nil, nil, fmt.Errorf("reading run: %w", err)
+		}
+		return prov, st, run, cleanup, nil
+	}
+
+	// No explicit provider — open local store, look up run, use stored provider.
+	st, cleanup, err := deps.openStore("docker")
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	run, err := st.GetRun(ctx, runID)
+	if err != nil {
+		cleanup()
+		return nil, nil, nil, nil, fmt.Errorf("reading run: %w", err)
+	}
+	provName := run.Provider
+	if provName == "" {
+		provName = "docker"
+	}
+	prov, err := newProviderWith(ctx, provName, profile, deps)
+	if err != nil {
+		cleanup()
+		return nil, nil, nil, nil, err
+	}
+	return prov, st, run, cleanup, nil
+}
+
 func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, func(), error) {
 	switch name {
 	case "docker":

@@ -253,7 +253,7 @@ preserved workspace — orc picks up from where it left off. Use
 			}
 			timeout := cmd.Duration("timeout")
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)
 			if err != nil {
 				return err
 			}
@@ -262,14 +262,6 @@ preserved workspace — orc picks up from where it left off. Use
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
-			}
-
-			run, err := st.GetRun(ctx, runID)
-			if err != nil {
-				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", runID)
-				}
-				return fmt.Errorf("reading run: %w", err)
 			}
 
 			if dp, ok := prov.(*provider.DockerProvider); ok {
@@ -400,7 +392,7 @@ result collection.`,
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)
 			if err != nil {
 				return err
 			}
@@ -411,13 +403,6 @@ result collection.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			run, err := st.GetRun(ctx, runID)
-			if err != nil {
-				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", runID)
-				}
-				return fmt.Errorf("reading run: %w", err)
-			}
 			if dp, ok := prov.(*provider.DockerProvider); ok {
 				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
 					return err
@@ -455,7 +440,7 @@ removed, falls back to the saved container.log in the results directory.`,
 			}
 			follow := cmd.Bool("follow")
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, _, run, cleanup, err := initFromRunID(ctx, cmd, runID)
 			if err != nil {
 				return err
 			}
@@ -466,13 +451,6 @@ removed, falls back to the saved container.log in the results directory.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			run, err := st.GetRun(ctx, runID)
-			if err != nil {
-				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", runID)
-				}
-				return fmt.Errorf("reading run: %w", err)
-			}
 			if run.Status == store.StatusSuccess || run.Status == store.StatusFailed || run.Status == store.StatusKilled {
 				// Container is gone — try saved logs
 				logPath := filepath.Join(homeDir, ".horde", "results", runID, "container.log")
@@ -512,7 +490,7 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)
 			if err != nil {
 				return err
 			}
@@ -523,13 +501,6 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			run, err := st.GetRun(ctx, runID)
-			if err != nil {
-				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", runID)
-				}
-				return fmt.Errorf("reading run: %w", err)
-			}
 			if dp, ok := prov.(*provider.DockerProvider); ok {
 				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
 					return err
@@ -608,7 +579,7 @@ information if the result file is missing (e.g., orc crashed early).`,
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)
 			if err != nil {
 				return err
 			}
@@ -619,13 +590,6 @@ information if the result file is missing (e.g., orc crashed early).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			run, err := st.GetRun(ctx, runID)
-			if err != nil {
-				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", runID)
-				}
-				return fmt.Errorf("reading run: %w", err)
-			}
 			if dp, ok := prov.(*provider.DockerProvider); ok {
 				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
 					return err
@@ -678,7 +642,11 @@ include completed, failed, and killed runs.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			all := cmd.Bool("all")
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			provName := cmd.String("provider")
+			if provName == "" {
+				provName = "docker"
+			}
+			prov, st, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -775,7 +743,11 @@ directories (all code changes will be lost).`,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			provName := cmd.String("provider")
+			if provName == "" {
+				provName = "docker"
+			}
+			prov, st, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -879,7 +851,7 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)
 			if err != nil {
 				return err
 			}
@@ -888,14 +860,6 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
-			}
-
-			run, err := st.GetRun(ctx, runID)
-			if err != nil {
-				if errors.Is(err, store.ErrRunNotFound) {
-					return fmt.Errorf("run not found: %s", runID)
-				}
-				return fmt.Errorf("reading run: %w", err)
 			}
 
 			if dp, ok := prov.(*provider.DockerProvider); ok {
@@ -1403,4 +1367,10 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 // Returns a cleanup function that must be deferred to release store resources.
 func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, func(), error) {
 	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+}
+
+// initFromRunID opens the store, looks up the run, and creates the provider
+// from the stored run record. If --provider is set, it overrides the stored value.
+func initFromRunID(ctx context.Context, cmd *cli.Command, runID string) (provider.Provider, store.Store, *store.Run, func(), error) {
+	return initFromRunIDWith(ctx, cmd.String("provider"), cmd.String("profile"), runID, defaultFactoryDeps())
 }

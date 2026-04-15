@@ -65,7 +65,7 @@ func TestECSProvider_InterfaceCompliance(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Launch_Stub(t *testing.T) {
+func TestECSProvider_Launch_NilResponse(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
 	result, err := p.Launch(context.Background(), LaunchOpts{})
@@ -75,8 +75,8 @@ func TestECSProvider_Launch_Stub(t *testing.T) {
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("Launch() error = %q, want it to contain \"not implemented\"", err.Error())
+	if !strings.Contains(err.Error(), "launching ECS task") {
+		t.Errorf("Launch() error = %q, want it to contain \"launching ECS task\"", err.Error())
 	}
 }
 

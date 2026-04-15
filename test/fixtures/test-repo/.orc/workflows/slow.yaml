@@ -1,5 +1,5 @@
 name: horde-test
-ticket-pattern: 'TEST-\w+'
+ticket-pattern: 'TEST-[\w-]+'
 phases:
   - name: run
     type: script

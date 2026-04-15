@@ -86,6 +86,9 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 		"-e", "WORKFLOW=" + opts.Workflow,
 		"-e", "RUN_ID=" + opts.RunID,
 	}
+	if len(opts.OrcArgs) > 0 {
+		args = append(args, "-e", "ORC_EXTRA_ARGS="+strings.Join(opts.OrcArgs, " "))
+	}
 	if opts.EnvFile != "" {
 		args = append(args, "--env-file", opts.EnvFile)
 	}

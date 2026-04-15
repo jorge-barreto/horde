@@ -70,7 +70,7 @@ func launchCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "launch",
 		Usage:     "Launch an orc workflow",
-		ArgsUsage: "<ticket>",
+		ArgsUsage: "<ticket> [-- <orc-args>...]",
 		Description: `Builds the worker Docker image if needed, validates the .env file,
 and launches a container that clones the repo and runs orc. Prints the
 run ID on success. Use --force to launch even if a run with the same
@@ -99,6 +99,7 @@ ticket is already active.`,
 			if ticket == "" {
 				return fmt.Errorf("missing required argument: <ticket>")
 			}
+			orcArgs := cmd.Args().Tail()
 
 			branch := cmd.String("branch")
 			workflow := cmd.String("workflow")
@@ -216,6 +217,7 @@ ticket is already active.`,
 				EnvFile:  envPath,
 				Mounts:   projCfg.ResolveMounts(cwd),
 				HomeDir:  homeDir,
+				OrcArgs:  orcArgs,
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
@@ -245,11 +247,15 @@ func retryCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "retry",
 		Usage:     "Retry a failed or killed run",
-		ArgsUsage: "<run-id>",
+		ArgsUsage: "<run-id> [-- <orc-args>...]",
 		Description: `Retries a failed or killed run. If the container is still alive, exec's
 orc inside it. If the container is gone, launches a new one against the
 preserved workspace — orc picks up from where it left off. Use
-'horde shell' for manual control over the retry.`,
+'horde shell' for manual control over the retry.
+
+Extra orc flags can be passed after --:
+  horde retry abc123 -- --resume
+  horde retry abc123 -- --retry implement`,
 		Flags: []cli.Flag{
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -262,6 +268,7 @@ preserved workspace — orc picks up from where it left off. Use
 			if runID == "" {
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
+			orcArgs := cmd.Args().Tail()
 			timeout := cmd.Duration("timeout")
 
 			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)
@@ -305,9 +312,13 @@ preserved workspace — orc picks up from where it left off. Use
 				dp.ExecInContainer(ctx, run.InstanceID, "rm -f /workspace/.horde-exit-code")
 
 				ticket := run.Ticket
-				orcCmd := "cd /workspace && orc run " + ticket + " --auto --no-color; echo $? > /workspace/.horde-exit-code"
+				extraArgs := ""
+				if len(orcArgs) > 0 {
+					extraArgs = " " + strings.Join(orcArgs, " ")
+				}
+				orcCmd := "cd /workspace && orc run " + ticket + " --auto --no-color" + extraArgs + "; echo $? > /workspace/.horde-exit-code"
 				if run.Workflow != "" {
-					orcCmd = "cd /workspace && orc run -w " + run.Workflow + " " + ticket + " --auto --no-color; echo $? > /workspace/.horde-exit-code"
+					orcCmd = "cd /workspace && orc run -w " + run.Workflow + " " + ticket + " --auto --no-color" + extraArgs + "; echo $? > /workspace/.horde-exit-code"
 				}
 				execCmd := exec.CommandContext(ctx, "docker", "exec", "-d",
 					run.InstanceID, "bash", "-c", orcCmd)
@@ -356,6 +367,7 @@ preserved workspace — orc picks up from where it left off. Use
 					EnvFile:  envPath,
 					Mounts:   projCfg.ResolveMounts(cwd),
 					HomeDir:  homeDir,
+					OrcArgs:  orcArgs,
 				})
 				if err != nil {
 					return fmt.Errorf("relaunching container for retry: %w", err)

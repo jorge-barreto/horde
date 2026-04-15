@@ -85,10 +85,10 @@ horde runs orc as:
 
 ```bash
 # Default workflow
-orc run <ticket> --auto --no-color
+orc run <ticket> --auto --no-color [<extra-args>...]
 
 # Named workflow
-orc run -w <workflow> <ticket> --auto --no-color
+orc run -w <workflow> <ticket> --auto --no-color [<extra-args>...]
 ```
 
-horde does not use any other orc commands or flags.
+`--auto` and `--no-color` are always present. Users can pass additional orc flags through horde using the `--` separator (e.g., `horde launch PROJ-123 -- --resume`). horde does not validate these flags — they are passed through opaquely.

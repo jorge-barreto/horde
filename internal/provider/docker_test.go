@@ -113,6 +113,51 @@ func TestDockerProvider_Launch_NoEnvFile(t *testing.T) {
 	}
 }
 
+func TestDockerProvider_Launch_WithOrcArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	containerID := strings.Repeat("c", 64)
+	dir := t.TempDir()
+	script := fmt.Sprintf("printf '%%s\\n' \"$@\" > %s\necho '%s'\n", argsFile, containerID)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Launch(context.Background(), LaunchOpts{
+		Repo: "r", Ticket: "T", Branch: "b", Workflow: "w", RunID: "id",
+		OrcArgs: []string{"--resume", "--cost-limit", "5.00"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	joined := strings.Join(strings.Split(strings.TrimSpace(string(raw)), "\n"), " ")
+	want := "-e ORC_EXTRA_ARGS=--resume --cost-limit 5.00"
+	if !strings.Contains(joined, want) {
+		t.Errorf("args missing %q; got: %s", want, joined)
+	}
+}
+
+func TestDockerProvider_Launch_NoOrcArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	dir := t.TempDir()
+	script := fmt.Sprintf("printf '%%s\\n' \"$@\" > %s\necho '%s'\n", argsFile, strings.Repeat("d", 64))
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Launch(context.Background(), LaunchOpts{
+		Repo: "r", Ticket: "T", Branch: "b", Workflow: "w", RunID: "id",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, _ := os.ReadFile(argsFile)
+	if strings.Contains(string(raw), "ORC_EXTRA_ARGS") {
+		t.Error("expected ORC_EXTRA_ARGS to be absent when OrcArgs is empty")
+	}
+}
+
 func TestDockerProvider_Launch_DockerNotFound(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // empty dir — no docker binary
 

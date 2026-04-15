@@ -26,6 +26,7 @@ type LaunchOpts struct {
 	EnvFile  string   // path to .env file (docker provider)
 	Mounts   []string // volume mounts in docker format (host:container)
 	HomeDir  string   // home directory for workspace path resolution
+	OrcArgs  []string // extra orc flags passed through via -- (opaque)
 }
 
 // WorkspacePath returns the host path for a run's persistent workspace.

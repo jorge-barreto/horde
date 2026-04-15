@@ -42,9 +42,9 @@ fi
 # Run orc
 ORC_ARGS="--auto --no-color"
 if [ -n "${WORKFLOW:-}" ]; then
-    orc run -w "$WORKFLOW" "$TICKET" $ORC_ARGS
+    orc run -w "$WORKFLOW" "$TICKET" $ORC_ARGS ${ORC_EXTRA_ARGS:-}
 else
-    orc run "$TICKET" $ORC_ARGS
+    orc run "$TICKET" $ORC_ARGS ${ORC_EXTRA_ARGS:-}
 fi
 EXIT_CODE=$?
 

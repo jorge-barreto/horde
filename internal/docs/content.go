@@ -87,6 +87,7 @@ Other useful commands:
 
     horde kill <run-id>      # stop a running run
     horde retry <run-id>     # restart — orc picks up where it left off
+    horde retry <run-id> -- --resume  # pass extra flags through to orc
     horde shell <run-id>     # interactive shell into the container
     horde clean [run-id]     # remove stopped containers
     horde docs <topic>       # read detailed documentation
@@ -269,7 +270,7 @@ retry or shell access still works by launching a new container.
 Retry
 -----
 
-    horde retry <run-id>
+    horde retry <run-id> [-- <orc-args>...]
 
 If the container is still alive (sleeping after orc exited), exec's orc
 directly inside it. If the container is gone, launches a new container
@@ -279,7 +280,11 @@ and picks up from the failed phase automatically.
 The same run ID is reused. The timeout is reset.
 
     horde retry abc123
-    # Output: Retrying horde-k43 (run abc123)
+    horde retry abc123 -- --resume
+    horde retry abc123 -- --retry implement
+
+Extra orc flags after -- are passed through to orc unchanged. horde does
+not validate them.
 
 The run must be in failed or killed status. Successful runs cannot be
 retried.

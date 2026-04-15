@@ -1,0 +1,5 @@
+FROM horde-worker-base:latest
+COPY test-repo/ /test-repo/
+COPY test-entrypoint.sh /test-entrypoint.sh
+RUN chmod +x /test-entrypoint.sh
+ENTRYPOINT ["/test-entrypoint.sh"]

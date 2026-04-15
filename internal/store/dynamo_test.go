@@ -1590,3 +1590,159 @@ func TestDynamoStore_FindActiveByTicket_Pagination(t *testing.T) {
 		t.Errorf("second call ExclusiveStartKey[AttrID] = %v, want S{cursor}", secondInput.ExclusiveStartKey[AttrID])
 	}
 }
+
+func TestDynamoStore_CountActive_Success(t *testing.T) {
+	t.Parallel()
+	var capturedInputs []*dynamodb.QueryInput
+	callCount := 0
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			callCount++
+			capturedInputs = append(capturedInputs, params)
+			count := int32(3)
+			if callCount == 2 {
+				count = 2
+			}
+			return &dynamodb.QueryOutput{Count: count}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	total, err := store.CountActive(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 5 {
+		t.Errorf("expected 5, got %d", total)
+	}
+	if callCount != 2 {
+		t.Fatalf("expected 2 Query calls, got %d", callCount)
+	}
+	for i, input := range capturedInputs {
+		if *input.IndexName != GSIByStatus {
+			t.Errorf("call %d: IndexName = %q, want %q", i+1, *input.IndexName, GSIByStatus)
+		}
+		if input.Select != types.SelectCount {
+			t.Errorf("call %d: Select = %v, want SelectCount", i+1, input.Select)
+		}
+		if *input.TableName != "runs-table" {
+			t.Errorf("call %d: TableName = %q, want %q", i+1, *input.TableName, "runs-table")
+		}
+		if *input.KeyConditionExpression != "#st = :st" {
+			t.Errorf("call %d: KeyConditionExpression = %q, want %q", i+1, *input.KeyConditionExpression, "#st = :st")
+		}
+		if input.ExpressionAttributeNames["#st"] != AttrStatus {
+			t.Errorf("call %d: ExpressionAttributeNames[\"#st\"] = %q, want %q", i+1, input.ExpressionAttributeNames["#st"], AttrStatus)
+		}
+	}
+	statusVal0, ok := capturedInputs[0].ExpressionAttributeValues[":st"].(*types.AttributeValueMemberS)
+	if !ok || statusVal0.Value != "pending" {
+		t.Errorf("call 1: ExpressionAttributeValues[\":st\"] = %v, want S{pending}", capturedInputs[0].ExpressionAttributeValues[":st"])
+	}
+	statusVal1, ok2 := capturedInputs[1].ExpressionAttributeValues[":st"].(*types.AttributeValueMemberS)
+	if !ok2 || statusVal1.Value != "running" {
+		t.Errorf("call 2: ExpressionAttributeValues[\":st\"] = %v, want S{running}", capturedInputs[1].ExpressionAttributeValues[":st"])
+	}
+}
+
+func TestDynamoStore_CountActive_Empty(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			return &dynamodb.QueryOutput{Count: 0}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	total, err := store.CountActive(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected 0, got %d", total)
+	}
+}
+
+func TestDynamoStore_CountActive_QueryError(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			return nil, fmt.Errorf("dynamo down")
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.CountActive(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "counting active runs") {
+		t.Errorf("error %q should contain %q", err.Error(), "counting active runs")
+	}
+	if !strings.Contains(err.Error(), "dynamo down") {
+		t.Errorf("error %q should contain %q", err.Error(), "dynamo down")
+	}
+}
+
+func TestDynamoStore_CountActive_QueryErrorOnSecondStatus(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			callCount++
+			if callCount == 1 {
+				return &dynamodb.QueryOutput{Count: 3}, nil
+			}
+			return nil, fmt.Errorf("second query failed")
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.CountActive(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "counting active runs") {
+		t.Errorf("error %q should contain %q", err.Error(), "counting active runs")
+	}
+	if !strings.Contains(err.Error(), "second query failed") {
+		t.Errorf("error %q should contain %q", err.Error(), "second query failed")
+	}
+}
+
+func TestDynamoStore_CountActive_Pagination(t *testing.T) {
+	t.Parallel()
+	cursor := map[string]types.AttributeValue{
+		AttrID: &types.AttributeValueMemberS{Value: "cursor"},
+	}
+	callCount := 0
+	var secondInput *dynamodb.QueryInput
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				return &dynamodb.QueryOutput{Count: 1, LastEvaluatedKey: cursor}, nil
+			case 2:
+				secondInput = params
+				return &dynamodb.QueryOutput{Count: 2}, nil
+			default:
+				return &dynamodb.QueryOutput{Count: 3}, nil
+			}
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	total, err := store.CountActive(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 6 {
+		t.Errorf("expected 6, got %d", total)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 Query calls, got %d", callCount)
+	}
+	if secondInput == nil {
+		t.Fatal("second Query call was not made")
+	}
+	cursorVal2, ok := secondInput.ExclusiveStartKey[AttrID].(*types.AttributeValueMemberS)
+	if !ok || cursorVal2.Value != "cursor" {
+		t.Errorf("secondInput.ExclusiveStartKey[AttrID] = %v, want S{cursor}", secondInput.ExclusiveStartKey[AttrID])
+	}
+}

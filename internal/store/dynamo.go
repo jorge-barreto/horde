@@ -405,5 +405,31 @@ func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo string, ticke
 }
 
 func (s *DynamoStore) CountActive(ctx context.Context) (int, error) {
-	return 0, fmt.Errorf("DynamoStore.CountActive: not implemented")
+	total := 0
+	for _, status := range []Status{StatusPending, StatusRunning} {
+		input := &dynamodb.QueryInput{
+			TableName:              aws.String(s.tableName),
+			IndexName:              aws.String(GSIByStatus),
+			KeyConditionExpression: aws.String("#st = :st"),
+			ExpressionAttributeNames: map[string]string{
+				"#st": AttrStatus,
+			},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":st": &types.AttributeValueMemberS{Value: string(status)},
+			},
+			Select: types.SelectCount,
+		}
+		for {
+			out, err := s.client.Query(ctx, input)
+			if err != nil {
+				return 0, fmt.Errorf("counting active runs: %w", err)
+			}
+			total += int(out.Count)
+			if out.LastEvaluatedKey == nil {
+				break
+			}
+			input.ExclusiveStartKey = out.LastEvaluatedKey
+		}
+	}
+	return total, nil
 }

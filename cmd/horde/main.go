@@ -1140,6 +1140,13 @@ func printRunStatus(run *store.Run) {
 	}
 	fmt.Printf("Branch:      %s\n", branch)
 	fmt.Printf("Status:      %s\n", run.Status)
+	if run.InstanceID != "" {
+		cid := run.InstanceID
+		if len(cid) > 12 {
+			cid = cid[:12]
+		}
+		fmt.Printf("Container:   %s\n", cid)
+	}
 	if run.ExitCode != nil {
 		fmt.Printf("Exit code:   %d\n", *run.ExitCode)
 	}

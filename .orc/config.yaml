@@ -201,7 +201,11 @@ phases:
   # -- Terminus: open PR -----------------------------------
 
   - name: open-pr
-    type: script
+    type: agent
     description: Push final state and open a pull request
-    run: .orc/scripts/open-pr.sh
-    timeout: 2
+    prompt: .orc/phases/open-pr.md
+    model: sonnet
+    timeout: 5
+    allow-tools:
+      - Bash
+      - Read

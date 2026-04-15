@@ -5,6 +5,11 @@ set -uo pipefail
 # gh CLI uses the same token as git push.
 export GH_TOKEN="${GIT_TOKEN:-}"
 
+# The workspace directory is bind-mounted from the host and may be owned by a
+# different UID. Git ≥ 2.35.2 rejects operations in such directories unless
+# they are explicitly marked safe.
+git config --global --add safe.directory /workspace
+
 if [ -d /workspace/.git ]; then
     # Restart — workspace already exists from a previous run.
     # Skip clone, go straight to running orc.

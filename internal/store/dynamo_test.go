@@ -1421,3 +1421,172 @@ func TestDynamoStore_ListByRepo_Pagination(t *testing.T) {
 		t.Errorf("second call ExclusiveStartKey[AttrID] = %v, want S{cursor}", secondInput.ExclusiveStartKey[AttrID])
 	}
 }
+
+func TestDynamoStore_FindActiveByTicket_Success(t *testing.T) {
+	t.Parallel()
+	var capturedInput *dynamodb.QueryInput
+	item1 := validItem()
+	item2 := validItem()
+	item2[AttrID] = &types.AttributeValueMemberS{Value: "other-run-id"}
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			capturedInput = params
+			return &dynamodb.QueryOutput{Items: []map[string]types.AttributeValue{item1, item2}}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if capturedInput == nil {
+		t.Fatal("queryFunc was not called")
+	}
+	if *capturedInput.IndexName != GSIByTicket {
+		t.Errorf("IndexName = %q, want %q", *capturedInput.IndexName, GSIByTicket)
+	}
+	if *capturedInput.KeyConditionExpression != "#ticket = :ticket" {
+		t.Errorf("KeyConditionExpression = %q, want %q", *capturedInput.KeyConditionExpression, "#ticket = :ticket")
+	}
+	if *capturedInput.FilterExpression != "#repo = :repo AND #st IN (:pending, :running)" {
+		t.Errorf("FilterExpression = %q, want %q", *capturedInput.FilterExpression, "#repo = :repo AND #st IN (:pending, :running)")
+	}
+	if *capturedInput.ScanIndexForward != false {
+		t.Errorf("ScanIndexForward = %v, want false", *capturedInput.ScanIndexForward)
+	}
+	if *capturedInput.TableName != "runs-table" {
+		t.Errorf("TableName = %q, want %q", *capturedInput.TableName, "runs-table")
+	}
+	if capturedInput.ExpressionAttributeNames["#ticket"] != AttrTicket {
+		t.Errorf("ExpressionAttributeNames[#ticket] = %q, want %q", capturedInput.ExpressionAttributeNames["#ticket"], AttrTicket)
+	}
+	if capturedInput.ExpressionAttributeNames["#repo"] != AttrRepo {
+		t.Errorf("ExpressionAttributeNames[#repo] = %q, want %q", capturedInput.ExpressionAttributeNames["#repo"], AttrRepo)
+	}
+	if capturedInput.ExpressionAttributeNames["#st"] != AttrStatus {
+		t.Errorf("ExpressionAttributeNames[#st] = %q, want %q", capturedInput.ExpressionAttributeNames["#st"], AttrStatus)
+	}
+	ticketVal, ok := capturedInput.ExpressionAttributeValues[":ticket"].(*types.AttributeValueMemberS)
+	if !ok || ticketVal.Value != "PROJ-1" {
+		t.Errorf("ExpressionAttributeValues[:ticket] = %v, want S{PROJ-1}", capturedInput.ExpressionAttributeValues[":ticket"])
+	}
+	repoVal, ok := capturedInput.ExpressionAttributeValues[":repo"].(*types.AttributeValueMemberS)
+	if !ok || repoVal.Value != "github.com/org/repo" {
+		t.Errorf("ExpressionAttributeValues[:repo] = %v, want S{github.com/org/repo}", capturedInput.ExpressionAttributeValues[":repo"])
+	}
+	pendingVal, ok := capturedInput.ExpressionAttributeValues[":pending"].(*types.AttributeValueMemberS)
+	if !ok || pendingVal.Value != "pending" {
+		t.Errorf("ExpressionAttributeValues[:pending] = %v, want S{pending}", capturedInput.ExpressionAttributeValues[":pending"])
+	}
+	runningVal, ok := capturedInput.ExpressionAttributeValues[":running"].(*types.AttributeValueMemberS)
+	if !ok || runningVal.Value != "running" {
+		t.Errorf("ExpressionAttributeValues[:running] = %v, want S{running}", capturedInput.ExpressionAttributeValues[":running"])
+	}
+}
+
+func TestDynamoStore_FindActiveByTicket_EmptyResult(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runs == nil {
+		t.Fatal("expected non-nil slice, got nil")
+	}
+	if len(runs) != 0 {
+		t.Errorf("expected 0 runs, got %d", len(runs))
+	}
+}
+
+func TestDynamoStore_FindActiveByTicket_QueryError(t *testing.T) {
+	t.Parallel()
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			return nil, fmt.Errorf("dynamo down")
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "finding active runs by ticket") {
+		t.Errorf("error %q should contain %q", err.Error(), "finding active runs by ticket")
+	}
+	if !strings.Contains(err.Error(), "dynamo down") {
+		t.Errorf("error %q should contain %q", err.Error(), "dynamo down")
+	}
+}
+
+func TestDynamoStore_FindActiveByTicket_ParseError(t *testing.T) {
+	t.Parallel()
+	item := validItem()
+	delete(item, AttrID)
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			return &dynamodb.QueryOutput{Items: []map[string]types.AttributeValue{item}}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	_, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "finding active runs by ticket") {
+		t.Errorf("error %q should contain %q", err.Error(), "finding active runs by ticket")
+	}
+}
+
+func TestDynamoStore_FindActiveByTicket_Pagination(t *testing.T) {
+	t.Parallel()
+	item1 := validItem()
+	item2 := validItem()
+	item2[AttrID] = &types.AttributeValueMemberS{Value: "other-run-id"}
+	cursor := map[string]types.AttributeValue{
+		AttrID: &types.AttributeValueMemberS{Value: "cursor"},
+	}
+	callCount := 0
+	var secondInput *dynamodb.QueryInput
+	mock := &mockDynamoClient{
+		queryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			callCount++
+			if callCount == 1 {
+				return &dynamodb.QueryOutput{
+					Items:            []map[string]types.AttributeValue{item1},
+					LastEvaluatedKey: cursor,
+				}, nil
+			}
+			secondInput = params
+			return &dynamodb.QueryOutput{
+				Items: []map[string]types.AttributeValue{item2},
+			}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 Query calls, got %d", callCount)
+	}
+	if secondInput == nil {
+		t.Fatal("second Query call was not made")
+	}
+	cursorVal, ok := secondInput.ExclusiveStartKey[AttrID].(*types.AttributeValueMemberS)
+	if !ok || cursorVal.Value != "cursor" {
+		t.Errorf("second call ExclusiveStartKey[AttrID] = %v, want S{cursor}", secondInput.ExclusiveStartKey[AttrID])
+	}
+}

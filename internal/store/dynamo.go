@@ -364,7 +364,44 @@ func (s *DynamoStore) ListByRepo(ctx context.Context, repo string, activeOnly bo
 }
 
 func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
-	return nil, fmt.Errorf("DynamoStore.FindActiveByTicket: not implemented")
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String(s.tableName),
+		IndexName:              aws.String(GSIByTicket),
+		KeyConditionExpression: aws.String("#ticket = :ticket"),
+		FilterExpression:       aws.String("#repo = :repo AND #st IN (:pending, :running)"),
+		ExpressionAttributeNames: map[string]string{
+			"#ticket": AttrTicket,
+			"#repo":   AttrRepo,
+			"#st":     AttrStatus,
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":ticket":  &types.AttributeValueMemberS{Value: ticket},
+			":repo":    &types.AttributeValueMemberS{Value: repo},
+			":pending": &types.AttributeValueMemberS{Value: string(StatusPending)},
+			":running": &types.AttributeValueMemberS{Value: string(StatusRunning)},
+		},
+		ScanIndexForward: aws.Bool(false),
+	}
+
+	runs := make([]*Run, 0)
+	for {
+		out, err := s.client.Query(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("finding active runs by ticket: %w", err)
+		}
+		for _, item := range out.Items {
+			run, err := parseRun(item)
+			if err != nil {
+				return nil, fmt.Errorf("finding active runs by ticket: %w", err)
+			}
+			runs = append(runs, run)
+		}
+		if out.LastEvaluatedKey == nil {
+			break
+		}
+		input.ExclusiveStartKey = out.LastEvaluatedKey
+	}
+	return runs, nil
 }
 
 func (s *DynamoStore) CountActive(ctx context.Context) (int, error) {

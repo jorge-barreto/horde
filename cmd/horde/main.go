@@ -252,9 +252,10 @@ func retryCmd() *cli.Command {
 preserved workspace — orc picks up from where it left off. If the old
 container is still alive, it is stopped first.
 
-Extra orc flags can be passed after --:
-  horde retry abc123 -- --resume
-  horde retry abc123 -- --retry implement`,
+By default, --resume is passed to orc so it preserves artifacts and
+resumes any interrupted agent session. Override with explicit orc args:
+  horde retry abc123 -- --retry implement
+  horde retry abc123 -- --from plan`,
 		Flags: []cli.Flag{
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -268,6 +269,10 @@ Extra orc flags can be passed after --:
 				return fmt.Errorf("missing required argument: <run-id>")
 			}
 			orcArgs := cmd.Args().Tail()
+			if len(orcArgs) == 0 {
+				orcArgs = []string{"--resume"}
+				fmt.Fprintln(os.Stderr, "Passing --resume to orc (override with -- <orc-args>)")
+			}
 			timeout := cmd.Duration("timeout")
 
 			prov, st, run, cleanup, err := initFromRunID(ctx, cmd, runID)

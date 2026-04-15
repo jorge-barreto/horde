@@ -18,6 +18,7 @@ type mockDynamoClient struct {
 	putItemFunc       func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	getItemFunc       func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	updateItemFunc    func(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
+	queryFunc         func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
 }
 
 func (m *mockDynamoClient) DescribeTable(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
@@ -46,6 +47,13 @@ func (m *mockDynamoClient) UpdateItem(ctx context.Context, params *dynamodb.Upda
 		return &dynamodb.UpdateItemOutput{}, nil
 	}
 	return m.updateItemFunc(ctx, params, optFns...)
+}
+
+func (m *mockDynamoClient) Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+	if m.queryFunc == nil {
+		return &dynamodb.QueryOutput{}, nil
+	}
+	return m.queryFunc(ctx, params, optFns...)
 }
 
 func newTestDynamoStore(client dynamoAPI, tableName string) *DynamoStore {

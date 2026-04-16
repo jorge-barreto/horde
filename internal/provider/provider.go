@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"path/filepath"
 	"time"
@@ -60,3 +61,15 @@ type StopOpts struct {
 	InstanceID string // container ID or ECS task ARN
 	ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
 }
+
+// FileNotFoundError is returned when a requested file does not exist in the provider's storage.
+type FileNotFoundError struct {
+	Path string
+	Err  error
+}
+
+func (e *FileNotFoundError) Error() string {
+	return fmt.Sprintf("file not found: %s", e.Path)
+}
+
+func (e *FileNotFoundError) Unwrap() error { return e.Err }

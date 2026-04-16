@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/jorge-barreto/horde/internal/config"
 )
 
@@ -329,5 +331,45 @@ func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {
 }
 
 func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
-	return nil, fmt.Errorf("ECSProvider.ReadFile not implemented")
+	if opts.Path == "" {
+		return nil, fmt.Errorf("reading file: path is required")
+	}
+
+	const orcPrefix = ".orc/"
+	if !strings.HasPrefix(opts.Path, orcPrefix) {
+		return nil, fmt.Errorf("reading file: path must start with %q", orcPrefix)
+	}
+	relPath := strings.TrimPrefix(opts.Path, orcPrefix)
+	if relPath == "" {
+		return nil, fmt.Errorf("reading file: path must include a filename after %q", orcPrefix)
+	}
+
+	bucket := ""
+	if opts.Metadata != nil {
+		bucket = opts.Metadata["artifacts_bucket"]
+	}
+	if bucket == "" {
+		return nil, fmt.Errorf("reading file: artifacts_bucket not found in metadata")
+	}
+
+	key := "horde-runs/" + opts.RunID + "/" + relPath
+
+	out, err := p.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var noSuchKey *s3types.NoSuchKey
+		if errors.As(err, &noSuchKey) {
+			return nil, &FileNotFoundError{Path: opts.Path, Err: err}
+		}
+		return nil, fmt.Errorf("reading file from s3: %w", err)
+	}
+	defer out.Body.Close()
+
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading file from s3: %w", err)
+	}
+	return data, nil
 }

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/jorge-barreto/horde/internal/config"
 )
 
@@ -91,9 +93,20 @@ func (f *fakeCloudWatchLogsClient) GetLogEvents(ctx context.Context, params *clo
 	return &cloudwatchlogs.GetLogEventsOutput{}, nil
 }
 
-type fakeS3Client struct{}
+type fakeS3Client struct {
+	getObjectInput  *s3.GetObjectInput
+	getObjectOutput *s3.GetObjectOutput
+	getObjectErr    error
+}
 
 func (f *fakeS3Client) GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	f.getObjectInput = params
+	if f.getObjectErr != nil {
+		return nil, f.getObjectErr
+	}
+	if f.getObjectOutput != nil {
+		return f.getObjectOutput, nil
+	}
 	return nil, nil
 }
 
@@ -1039,17 +1052,186 @@ func TestECSProvider_Stop_IgnoresResultsDir(t *testing.T) {
 	}
 }
 
-func TestECSProvider_ReadFile_Stub(t *testing.T) {
+func TestECSProvider_ReadFile_Success(t *testing.T) {
 	t.Parallel()
-	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	result, err := p.ReadFile(context.Background(), ReadFileOpts{})
-	if result != nil {
-		t.Errorf("ReadFile() result = %v, want nil", result)
+	fake := &fakeS3Client{
+		getObjectOutput: &s3.GetObjectOutput{
+			Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		},
 	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	data, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "k7m2xp4qr9n3",
+		Path:     ".orc/audit/PROJ-123/run-result.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v, want nil", err)
+	}
+	if string(data) != `{"ok":true}` {
+		t.Errorf("ReadFile() data = %q, want %q", data, `{"ok":true}`)
+	}
+	if fake.getObjectInput == nil {
+		t.Fatal("GetObject was not called")
+	}
+	if *fake.getObjectInput.Bucket != "my-horde-artifacts" {
+		t.Errorf("Bucket = %q, want %q", *fake.getObjectInput.Bucket, "my-horde-artifacts")
+	}
+	if *fake.getObjectInput.Key != "horde-runs/k7m2xp4qr9n3/audit/PROJ-123/run-result.json" {
+		t.Errorf("Key = %q", *fake.getObjectInput.Key)
+	}
+}
+
+func TestECSProvider_ReadFile_ArtifactsPath(t *testing.T) {
+	t.Parallel()
+	fake := &fakeS3Client{
+		getObjectOutput: &s3.GetObjectOutput{
+			Body: io.NopCloser(strings.NewReader("hello")),
+		},
+	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-002",
+		Path:     ".orc/artifacts/output.txt",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v, want nil", err)
+	}
+	if fake.getObjectInput == nil {
+		t.Fatal("GetObject was not called")
+	}
+	if *fake.getObjectInput.Key != "horde-runs/run-002/artifacts/output.txt" {
+		t.Errorf("Key = %q, want %q", *fake.getObjectInput.Key, "horde-runs/run-002/artifacts/output.txt")
+	}
+}
+
+func TestECSProvider_ReadFile_NoSuchKey(t *testing.T) {
+	t.Parallel()
+	fake := &fakeS3Client{
+		getObjectErr: &s3types.NoSuchKey{Message: aws.String("key not found")},
+	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
 	if err == nil {
 		t.Fatal("ReadFile() error = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("ReadFile() error = %q, want it to contain \"not implemented\"", err.Error())
+	var notFound *FileNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Errorf("ReadFile() error type = %T, want *FileNotFoundError", err)
+	}
+	if notFound.Path != ".orc/audit/foo.json" {
+		t.Errorf("FileNotFoundError.Path = %q, want %q", notFound.Path, ".orc/audit/foo.json")
+	}
+}
+
+func TestECSProvider_ReadFile_S3Error(t *testing.T) {
+	t.Parallel()
+	fake := &fakeS3Client{
+		getObjectErr: fmt.Errorf("AccessDenied"),
+	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading file from s3") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"reading file from s3\"", err.Error())
+	}
+	var notFound *FileNotFoundError
+	if errors.As(err, &notFound) {
+		t.Errorf("ReadFile() error = %T, should NOT be *FileNotFoundError", err)
+	}
+}
+
+func TestECSProvider_ReadFile_EmptyPath(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{Path: ""})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"path is required\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_InvalidPrefix(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{Path: "some/other/file.txt"})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "path must start with") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"path must start with\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_BareOrcPrefix(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{Path: ".orc/"})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "path must include a filename") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"path must include a filename\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_NilMetadata(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: nil,
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "artifacts_bucket not found in metadata") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"artifacts_bucket not found in metadata\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_MissingBucketInMetadata(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"log_group": "foo"},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "artifacts_bucket not found in metadata") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"artifacts_bucket not found in metadata\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_EmptyBucketInMetadata(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": ""},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "artifacts_bucket not found in metadata") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"artifacts_bucket not found in metadata\"", err.Error())
 	}
 }

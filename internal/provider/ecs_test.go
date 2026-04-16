@@ -1367,3 +1367,46 @@ func TestECSProvider_ReadFile_EmptyRunID(t *testing.T) {
 		t.Errorf("ReadFile() error = %q, want it to contain \"run ID is required\"", err.Error())
 	}
 }
+
+func TestECSProvider_ReadFile_NilResponse(t *testing.T) {
+	t.Parallel()
+	// fakeS3Client with zero fields returns (nil, nil) from GetObject — triggers nil-response guard.
+	fake := &fakeS3Client{}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading file from s3") {
+		t.Errorf("error = %q, want it to contain \"reading file from s3\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil response") {
+		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_NilBody(t *testing.T) {
+	t.Parallel()
+	fake := &fakeS3Client{
+		getObjectOutput: &s3.GetObjectOutput{Body: nil},
+	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading file from s3") {
+		t.Errorf("error = %q, want it to contain \"reading file from s3\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil response") {
+		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
+	}
+}

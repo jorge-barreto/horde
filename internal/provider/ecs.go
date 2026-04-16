@@ -368,6 +368,9 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 		}
 		return nil, fmt.Errorf("reading file from s3: %w", err)
 	}
+	if out == nil || out.Body == nil {
+		return nil, fmt.Errorf("reading file from s3: nil response")
+	}
 	defer out.Body.Close()
 
 	data, err := io.ReadAll(out.Body)

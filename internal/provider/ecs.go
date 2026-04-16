@@ -331,6 +331,9 @@ func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {
 }
 
 func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
+	if opts.RunID == "" {
+		return nil, fmt.Errorf("reading file: run ID is required")
+	}
 	if opts.Path == "" {
 		return nil, fmt.Errorf("reading file: path is required")
 	}

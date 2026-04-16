@@ -1271,7 +1271,7 @@ func TestECSProvider_ReadFile_BodyReadError(t *testing.T) {
 func TestECSProvider_ReadFile_EmptyPath(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.ReadFile(context.Background(), ReadFileOpts{Path: ""})
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ""})
 	if err == nil {
 		t.Fatal("ReadFile() error = nil, want non-nil")
 	}
@@ -1283,7 +1283,7 @@ func TestECSProvider_ReadFile_EmptyPath(t *testing.T) {
 func TestECSProvider_ReadFile_InvalidPrefix(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.ReadFile(context.Background(), ReadFileOpts{Path: "some/other/file.txt"})
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: "some/other/file.txt"})
 	if err == nil {
 		t.Fatal("ReadFile() error = nil, want non-nil")
 	}
@@ -1295,7 +1295,7 @@ func TestECSProvider_ReadFile_InvalidPrefix(t *testing.T) {
 func TestECSProvider_ReadFile_BareOrcPrefix(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.ReadFile(context.Background(), ReadFileOpts{Path: ".orc/"})
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{RunID: "run-001", Path: ".orc/"})
 	if err == nil {
 		t.Fatal("ReadFile() error = nil, want non-nil")
 	}
@@ -1349,5 +1349,21 @@ func TestECSProvider_ReadFile_EmptyBucketInMetadata(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "artifacts_bucket not found in metadata") {
 		t.Errorf("ReadFile() error = %q, want it to contain \"artifacts_bucket not found in metadata\"", err.Error())
+	}
+}
+
+func TestECSProvider_ReadFile_EmptyRunID(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "run ID is required") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"run ID is required\"", err.Error())
 	}
 }

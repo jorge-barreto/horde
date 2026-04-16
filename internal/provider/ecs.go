@@ -325,6 +325,12 @@ func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {
 		Reason:  aws.String("horde kill"),
 	})
 	if err != nil {
+		// StopTask returns InvalidParameterException when the task is already stopped.
+		// Treat as success for idempotency — the desired state (task stopped) is achieved.
+		var ipe *ecstypes.InvalidParameterException
+		if errors.As(err, &ipe) && strings.Contains(strings.ToLower(ipe.ErrorMessage()), "already stopped") {
+			return nil
+		}
 		return fmt.Errorf("stopping ECS task: %w", err)
 	}
 	return nil

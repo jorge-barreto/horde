@@ -1131,8 +1131,22 @@ func TestECSProvider_Stop_AlreadyStopped(t *testing.T) {
 	err := p.Stop(context.Background(), StopOpts{
 		InstanceID: "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123",
 	})
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want nil (already-stopped tasks should be treated as success)", err)
+	}
+}
+
+func TestECSProvider_Stop_OtherInvalidParameterException(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		stopTaskErr: &ecstypes.InvalidParameterException{Message: aws.String("some other parameter error")},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	err := p.Stop(context.Background(), StopOpts{
+		InstanceID: "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123",
+	})
 	if err == nil {
-		t.Fatal("Stop() error = nil, want non-nil")
+		t.Fatal("Stop() error = nil, want non-nil for non-already-stopped InvalidParameterException")
 	}
 	if !strings.Contains(err.Error(), "stopping ECS task") {
 		t.Errorf("error = %q, want it to contain \"stopping ECS task\"", err.Error())

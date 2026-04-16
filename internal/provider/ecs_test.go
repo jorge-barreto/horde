@@ -93,6 +93,10 @@ func (f *fakeCloudWatchLogsClient) GetLogEvents(ctx context.Context, params *clo
 	return &cloudwatchlogs.GetLogEventsOutput{}, nil
 }
 
+type failReader struct{ err error }
+
+func (f *failReader) Read(p []byte) (int, error) { return 0, f.err }
+
 type fakeS3Client struct {
 	getObjectInput  *s3.GetObjectInput
 	getObjectOutput *s3.GetObjectOutput
@@ -1220,6 +1224,31 @@ func TestECSProvider_ReadFile_S3Error(t *testing.T) {
 	t.Parallel()
 	fake := &fakeS3Client{
 		getObjectErr: fmt.Errorf("AccessDenied"),
+	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+	_, err := p.ReadFile(context.Background(), ReadFileOpts{
+		RunID:    "run-001",
+		Path:     ".orc/audit/foo.json",
+		Metadata: map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+	})
+	if err == nil {
+		t.Fatal("ReadFile() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading file from s3") {
+		t.Errorf("ReadFile() error = %q, want it to contain \"reading file from s3\"", err.Error())
+	}
+	var notFound *FileNotFoundError
+	if errors.As(err, &notFound) {
+		t.Errorf("ReadFile() error = %T, should NOT be *FileNotFoundError", err)
+	}
+}
+
+func TestECSProvider_ReadFile_BodyReadError(t *testing.T) {
+	t.Parallel()
+	fake := &fakeS3Client{
+		getObjectOutput: &s3.GetObjectOutput{
+			Body: io.NopCloser(&failReader{err: fmt.Errorf("connection reset")}),
+		},
 	}
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
 	_, err := p.ReadFile(context.Background(), ReadFileOpts{

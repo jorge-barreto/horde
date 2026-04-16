@@ -744,6 +744,24 @@ func TestECSProvider_Logs_APIError(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Logs_NilResponse(t *testing.T) {
+	t.Parallel()
+	fake := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{nil},
+	}
+	p := NewECSProvider(&fakeECSClient{}, fake, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123:task/c/task1", false)
+	if err == nil {
+		t.Fatal("Logs() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading logs") {
+		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil response") {
+		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
+	}
+}
+
 func TestECSProvider_Logs_LogStreamNotCreated(t *testing.T) {
 	t.Parallel()
 	fake := &fakeCloudWatchLogsClient{
@@ -923,6 +941,32 @@ func TestECSProvider_Logs_Follow_GetLogEventsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reading logs") {
 		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
+	}
+}
+
+func TestECSProvider_Logs_Follow_NilResponse(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{nil},
+	}
+	p := NewECSProvider(&fakeECSClient{}, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	_, err = io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("ReadAll() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading logs") {
+		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil response") {
+		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
 	}
 }
 

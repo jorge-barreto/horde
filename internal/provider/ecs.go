@@ -236,6 +236,9 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 			if err != nil {
 				return nil, fmt.Errorf("reading logs: %w", err)
 			}
+			if out == nil {
+				return nil, fmt.Errorf("reading logs: nil response")
+			}
 
 			for _, event := range out.Events {
 				if event.Message != nil {
@@ -282,6 +285,10 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 			out, err := p.logs.GetLogEvents(followCtx, input)
 			if err != nil {
 				pw.CloseWithError(fmt.Errorf("reading logs: %w", err))
+				return
+			}
+			if out == nil {
+				pw.CloseWithError(fmt.Errorf("reading logs: nil response"))
 				return
 			}
 

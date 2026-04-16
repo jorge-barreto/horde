@@ -817,8 +817,8 @@ func TestECSProvider_Logs_Follow_LogStreamNotCreated(t *testing.T) {
 	if !strings.Contains(string(data), "hello from container") {
 		t.Errorf("output = %q, want it to contain \"hello from container\"", string(data))
 	}
-	if len(fakeLogs.getLogEventsInputs) != 3 {
-		t.Errorf("GetLogEvents called %d times, want 3", len(fakeLogs.getLogEventsInputs))
+	if len(fakeLogs.getLogEventsInputs) != 4 {
+		t.Errorf("GetLogEvents called %d times, want 4 (3 poll + 1 drain)", len(fakeLogs.getLogEventsInputs))
 	}
 }
 
@@ -848,8 +848,8 @@ func TestECSProvider_Logs_Follow_LogStreamNotCreatedTaskStopped(t *testing.T) {
 	if len(data) != 0 {
 		t.Errorf("output = %q, want empty (no log stream was ever created)", string(data))
 	}
-	if len(fakeLogs.getLogEventsInputs) != 1 {
-		t.Errorf("GetLogEvents called %d times, want 1", len(fakeLogs.getLogEventsInputs))
+	if len(fakeLogs.getLogEventsInputs) != 2 {
+		t.Errorf("GetLogEvents called %d times, want 2 (1 poll + 1 drain)", len(fakeLogs.getLogEventsInputs))
 	}
 	if len(fakeECS.describeTasksInputs) != 1 {
 		t.Errorf("DescribeTasks called %d times, want 1", len(fakeECS.describeTasksInputs))
@@ -961,6 +961,63 @@ func TestECSProvider_Logs_Follow_TaskStops(t *testing.T) {
 	}
 	if *in.LogStreamName != "ecs/horde-worker/abc123" {
 		t.Errorf("LogStreamName = %q, want %q", *in.LogStreamName, "ecs/horde-worker/abc123")
+	}
+}
+
+func TestECSProvider_Logs_Follow_DrainAfterStopped(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			// Call 0 (main loop): one line, token advances
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line before stop\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// Call 1 (main loop): no new data yet, same token
+			{
+				Events:           []cwltypes.OutputLogEvent{},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// Call 2 (drain, 1st): late-arriving line, token advances
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("late line 1\n")}},
+				NextForwardToken: aws.String("tok2"),
+			},
+			// Call 3 (drain, 2nd): another late line, same token → drain exits
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("late line 2\n")}},
+				NextForwardToken: aws.String("tok2"),
+			},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	want := "line before stop\nlate line 1\nlate line 2\n"
+	if string(data) != want {
+		t.Errorf("Logs output = %q, want %q", string(data), want)
+	}
+	if len(fakeLogs.getLogEventsInputs) != 4 {
+		t.Errorf("GetLogEvents called %d times, want 4 (2 poll + 2 drain)", len(fakeLogs.getLogEventsInputs))
+	}
+	if len(fakeECS.describeTasksInputs) != 2 {
+		t.Errorf("DescribeTasks called %d times, want 2", len(fakeECS.describeTasksInputs))
 	}
 }
 

@@ -338,7 +338,41 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 				}
 				if taskOut != nil && len(taskOut.Tasks) > 0 {
 					if taskOut.Tasks[0].LastStatus != nil && *taskOut.Tasks[0].LastStatus == "STOPPED" {
-						return
+						// Final drain: CloudWatch ingestion can lag task
+						// termination by several seconds. Fetch remaining
+						// events until NextForwardToken stops changing.
+						for {
+							drainInput := &cloudwatchlogs.GetLogEventsInput{
+								LogGroupName:  aws.String(p.config.LogGroup),
+								LogStreamName: aws.String(logStream),
+								StartFromHead: aws.Bool(true),
+							}
+							if nextToken != nil {
+								drainInput.NextToken = nextToken
+							}
+							drainOut, drainErr := p.logs.GetLogEvents(followCtx, drainInput)
+							if drainErr != nil {
+								return
+							}
+							if drainOut == nil {
+								return
+							}
+							for _, event := range drainOut.Events {
+								if event.Message != nil {
+									msg := *event.Message
+									if !strings.HasSuffix(msg, "\n") {
+										msg += "\n"
+									}
+									if _, err := io.WriteString(pw, msg); err != nil {
+										return
+									}
+								}
+							}
+							if drainOut.NextForwardToken == nil || (nextToken != nil && *drainOut.NextForwardToken == *nextToken) {
+								return
+							}
+							nextToken = drainOut.NextForwardToken
+						}
 					}
 				}
 			}

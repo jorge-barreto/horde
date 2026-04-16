@@ -926,6 +926,41 @@ func TestECSProvider_Logs_Follow_GetLogEventsError(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Logs_FollowDescribeTasksError(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		// No outputs configured — GetLogEvents returns empty output on every call,
+		// keeping the goroutine looping without producing log events.
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksErr: fmt.Errorf("ExpiredTokenException: security token has expired"),
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil (goroutine should close pipe normally)", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "unable to determine task completion") {
+		t.Errorf("output = %q, want it to contain \"unable to determine task completion\"", got)
+	}
+	if !strings.Contains(got, "stopping follow") {
+		t.Errorf("output = %q, want it to contain \"stopping follow\"", got)
+	}
+	// Verify DescribeTasks was called exactly maxConsecutiveDescribeFailures times (5).
+	if len(fakeECS.describeTasksInputs) != 5 {
+		t.Errorf("DescribeTasks called %d times, want %d", len(fakeECS.describeTasksInputs), 5)
+	}
+}
+
 func TestECSProvider_Logs_Follow_EmptyTaskID(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())

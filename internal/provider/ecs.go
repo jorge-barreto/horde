@@ -22,6 +22,10 @@ import (
 // Must match the name set by the @horde/cdk construct.
 const containerName = "horde-worker"
 
+// maxConsecutiveDescribeFailures is the number of consecutive DescribeTasks
+// errors tolerated in follow mode before stopping the log poll loop.
+const maxConsecutiveDescribeFailures = 5
+
 // ECSClient is the subset of the ECS API used by ECSProvider.
 type ECSClient interface {
 	RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error)
@@ -264,6 +268,7 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 		}
 
 		var nextToken *string
+		var describeFailures int
 		for {
 			input := &cloudwatchlogs.GetLogEventsInput{
 				LogGroupName:  aws.String(p.config.LogGroup),
@@ -301,9 +306,18 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 				Cluster: aws.String(p.config.ClusterARN),
 				Tasks:   []string{instanceID},
 			})
-			if err == nil && taskOut != nil && len(taskOut.Tasks) > 0 {
-				if taskOut.Tasks[0].LastStatus != nil && *taskOut.Tasks[0].LastStatus == "STOPPED" {
+			if err != nil {
+				describeFailures++
+				if describeFailures >= maxConsecutiveDescribeFailures {
+					fmt.Fprintf(pw, "WARNING: unable to determine task completion after %d consecutive failures, stopping follow\n", describeFailures)
 					return
+				}
+			} else {
+				describeFailures = 0
+				if taskOut != nil && len(taskOut.Tasks) > 0 {
+					if taskOut.Tasks[0].LastStatus != nil && *taskOut.Tasks[0].LastStatus == "STOPPED" {
+						return
+					}
 				}
 			}
 

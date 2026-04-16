@@ -796,6 +796,8 @@ func TestECSProvider_Logs_Follow_LogStreamNotCreated(t *testing.T) {
 	}
 	fakeECS := &fakeECSClient{
 		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
 			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
 		},
 	}
@@ -818,6 +820,74 @@ func TestECSProvider_Logs_Follow_LogStreamNotCreated(t *testing.T) {
 	if len(fakeLogs.getLogEventsInputs) != 3 {
 		t.Errorf("GetLogEvents called %d times, want 3", len(fakeLogs.getLogEventsInputs))
 	}
+}
+
+func TestECSProvider_Logs_Follow_LogStreamNotCreatedTaskStopped(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsErr: &cwltypes.ResourceNotFoundException{Message: aws.String("The specified log stream does not exist.")},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil (goroutine must exit cleanly when task stops during RNF)", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("output = %q, want empty (no log stream was ever created)", string(data))
+	}
+	if len(fakeLogs.getLogEventsInputs) != 1 {
+		t.Errorf("GetLogEvents called %d times, want 1", len(fakeLogs.getLogEventsInputs))
+	}
+	if len(fakeECS.describeTasksInputs) != 1 {
+		t.Errorf("DescribeTasks called %d times, want 1", len(fakeECS.describeTasksInputs))
+	}
+}
+
+func TestECSProvider_Logs_Follow_LogStreamNotCreatedContextCancel(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsErr: &cwltypes.ResourceNotFoundException{Message: aws.String("The specified log stream does not exist.")},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(ctx, "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+
+	// Let the goroutine make a few RNF + DescribeTasks iterations, then cancel.
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	// ReadAll must complete (goroutine must not hang).
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Logf("ReadAll() error = %v (acceptable — context cancelled)", err)
+	}
+	_ = data
+
+	// reader.Close() must complete without hanging.
+	reader.Close()
 }
 
 func TestECSProvider_Logs_Follow_LogStreamNotCreatedOtherErrorStillFatal(t *testing.T) {

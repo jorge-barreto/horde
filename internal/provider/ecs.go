@@ -286,38 +286,32 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 			out, err := p.logs.GetLogEvents(followCtx, input)
 			if err != nil {
 				var rnf *cwltypes.ResourceNotFoundException
-				if errors.As(err, &rnf) {
-					// Log stream not created yet — container hasn't started writing output.
-					// Wait and retry instead of treating as fatal.
-					select {
-					case <-followCtx.Done():
-						return
-					case <-time.After(interval):
-						continue
-					}
+				if !errors.As(err, &rnf) {
+					pw.CloseWithError(fmt.Errorf("reading logs: %w", err))
+					return
 				}
-				pw.CloseWithError(fmt.Errorf("reading logs: %w", err))
-				return
-			}
-			if out == nil {
+				// ResourceNotFoundException: log stream not created yet — container
+				// hasn't started writing output. Fall through to DescribeTasks check
+				// so we detect task termination even when no log stream is ever created.
+			} else if out == nil {
 				pw.CloseWithError(fmt.Errorf("reading logs: nil response"))
 				return
-			}
-
-			for _, event := range out.Events {
-				if event.Message != nil {
-					msg := *event.Message
-					if !strings.HasSuffix(msg, "\n") {
-						msg += "\n"
-					}
-					if _, err := io.WriteString(pw, msg); err != nil {
-						return
+			} else {
+				for _, event := range out.Events {
+					if event.Message != nil {
+						msg := *event.Message
+						if !strings.HasSuffix(msg, "\n") {
+							msg += "\n"
+						}
+						if _, err := io.WriteString(pw, msg); err != nil {
+							return
+						}
 					}
 				}
-			}
 
-			if out.NextForwardToken != nil {
-				nextToken = out.NextForwardToken
+				if out.NextForwardToken != nil {
+					nextToken = out.NextForwardToken
+				}
 			}
 
 			// Check if task has stopped.

@@ -1850,6 +1850,37 @@ func TestECSProvider_ReadFile_EmptyRunID(t *testing.T) {
 	}
 }
 
+func TestECSProvider_ReadFile_RunIDTraversal(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+
+	cases := []struct {
+		name  string
+		runID string
+	}{
+		{"dot-dot", "../../other-user/secret"},
+		{"forward-slash", "foo/bar"},
+		{"backslash", "foo\\bar"},
+		{"dot-dot-only", ".."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := p.ReadFile(context.Background(), ReadFileOpts{
+				RunID:    tc.runID,
+				Path:     ".orc/audit/foo.json",
+				Metadata: map[string]string{"artifacts_bucket": "my-bucket"},
+			})
+			if err == nil {
+				t.Fatal("ReadFile() error = nil, want non-nil")
+			}
+			if !strings.Contains(err.Error(), "invalid run ID") {
+				t.Errorf("ReadFile() error = %q, want it to contain \"invalid run ID\"", err.Error())
+			}
+		})
+	}
+}
+
 func TestECSProvider_ReadFile_NilResponse(t *testing.T) {
 	t.Parallel()
 	// fakeS3Client with zero fields returns (nil, nil) from GetObject — triggers nil-response guard.

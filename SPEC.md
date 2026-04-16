@@ -465,7 +465,7 @@ The format is chosen to be:
 ### v0.2 — Baseline
 
 - **Scoped IAM for tasks**: Task role can only write to the artifacts S3 bucket and read specific secrets. No EC2, no other AWS services.
-- **Scoped IAM for CLI users**: The CDK construct outputs a managed policy ARN. Developers need: `ecs:RunTask`, `ecs:DescribeTasks`, `ecs:StopTask`, `ecs:TagResource` on the cluster; `ssm:GetParameter` on `/horde/config`; `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:Query` on `horde-runs` table; `logs:GetLogEvents` on the log group; `s3:GetObject` on the artifacts bucket.
+- **Scoped IAM for CLI users**: The CDK construct outputs a managed policy ARN. Developers need: `ecs:RunTask`, `ecs:DescribeTasks`, `ecs:StopTask`, `ecs:TagResource` on the cluster; `iam:PassRole` on the horde task role and execution role (e.g., `arn:aws:iam::*:role/horde-*`); `ssm:GetParameter` on `/horde/config`; `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:Query` on `horde-runs` table; `logs:GetLogEvents` on the log group; `s3:GetObject` on the artifacts bucket.
 - **Scoped git token**: Fine-grained GitHub PAT — read + push to `horde/*` branches only. Cannot push to main, cannot delete branches.
 - **API key limits**: Anthropic API key with usage limits set at the key level.
 - **Ephemeral**: Instance is destroyed after the run. No persistent state, no attack surface.

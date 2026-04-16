@@ -22,9 +22,11 @@ type fakeECSClient struct {
 	runTaskOutput *ecs.RunTaskOutput
 	runTaskErr    error
 
-	describeTasksInput  *ecs.DescribeTasksInput
-	describeTasksOutput *ecs.DescribeTasksOutput
-	describeTasksErr    error
+	describeTasksInput   *ecs.DescribeTasksInput
+	describeTasksOutput  *ecs.DescribeTasksOutput
+	describeTasksErr     error
+	describeTasksInputs  []*ecs.DescribeTasksInput
+	describeTasksOutputs []*ecs.DescribeTasksOutput
 }
 
 func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
@@ -39,7 +41,18 @@ func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, o
 }
 func (f *fakeECSClient) DescribeTasks(ctx context.Context, params *ecs.DescribeTasksInput, optFns ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 	f.describeTasksInput = params
-	return f.describeTasksOutput, f.describeTasksErr
+	f.describeTasksInputs = append(f.describeTasksInputs, params)
+	if f.describeTasksErr != nil {
+		return nil, f.describeTasksErr
+	}
+	if len(f.describeTasksOutputs) > 0 {
+		idx := len(f.describeTasksInputs) - 1
+		if idx < len(f.describeTasksOutputs) {
+			return f.describeTasksOutputs[idx], nil
+		}
+		return f.describeTasksOutputs[len(f.describeTasksOutputs)-1], nil
+	}
+	return f.describeTasksOutput, nil
 }
 func (f *fakeECSClient) StopTask(ctx context.Context, params *ecs.StopTaskInput, optFns ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
 	return nil, nil
@@ -49,14 +62,18 @@ type fakeCloudWatchLogsClient struct {
 	getLogEventsInputs  []*cloudwatchlogs.GetLogEventsInput
 	getLogEventsOutputs []*cloudwatchlogs.GetLogEventsOutput
 	getLogEventsErr     error
+	getLogEventsErrs    []error
 }
 
 func (f *fakeCloudWatchLogsClient) GetLogEvents(ctx context.Context, params *cloudwatchlogs.GetLogEventsInput, optFns ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetLogEventsOutput, error) {
 	f.getLogEventsInputs = append(f.getLogEventsInputs, params)
+	idx := len(f.getLogEventsInputs) - 1
+	if idx < len(f.getLogEventsErrs) && f.getLogEventsErrs[idx] != nil {
+		return nil, f.getLogEventsErrs[idx]
+	}
 	if f.getLogEventsErr != nil {
 		return nil, f.getLogEventsErr
 	}
-	idx := len(f.getLogEventsInputs) - 1
 	if idx < len(f.getLogEventsOutputs) {
 		return f.getLogEventsOutputs[idx], nil
 	}
@@ -680,19 +697,212 @@ func TestECSProvider_Logs_APIError(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Logs_FollowNotImplemented(t *testing.T) {
+func TestECSProvider_Logs_Follow_TaskStops(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("follow line 1\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			{
+				// Same token — follow mode does NOT stop on same token
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("follow line 2\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	want := "follow line 1\nfollow line 2\n"
+	if string(data) != want {
+		t.Errorf("Logs output = %q, want %q", string(data), want)
+	}
+
+	if len(fakeLogs.getLogEventsInputs) < 1 {
+		t.Fatal("GetLogEvents was not called")
+	}
+	in := fakeLogs.getLogEventsInputs[0]
+	if *in.LogGroupName != "/ecs/horde-worker" {
+		t.Errorf("LogGroupName = %q, want %q", *in.LogGroupName, "/ecs/horde-worker")
+	}
+	if *in.LogStreamName != "ecs/horde-worker/abc123" {
+		t.Errorf("LogStreamName = %q, want %q", *in.LogStreamName, "ecs/horde-worker/abc123")
+	}
+}
+
+func TestECSProvider_Logs_Follow_ContextCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line 1\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// remaining calls return empty (default)
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(ctx, "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+
+	buf := make([]byte, 64)
+	n, err := reader.Read(buf)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if string(buf[:n]) != "line 1\n" {
+		t.Errorf("Read() = %q, want %q", string(buf[:n]), "line 1\n")
+	}
+
+	cancel()
+
+	_, err = io.ReadAll(reader)
+	if err != nil {
+		t.Errorf("ReadAll() after cancel error = %v, want nil", err)
+	}
+
+	// reader.Close() must complete without hanging
+	reader.Close()
+}
+
+func TestECSProvider_Logs_Follow_GetLogEventsError(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line 1\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+		},
+		getLogEventsErrs: []error{nil, fmt.Errorf("throttling")},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("ReadAll() error = nil, want non-nil")
+	}
+	if !strings.Contains(string(data), "line 1") {
+		t.Errorf("data = %q, want it to contain \"line 1\"", string(data))
+	}
+	if !strings.Contains(err.Error(), "reading logs") {
+		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
+	}
+}
+
+func TestECSProvider_Logs_Follow_EmptyTaskID(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	result, err := p.Logs(context.Background(), "task-arn", true)
+	p.pollInterval = time.Millisecond
+
+	result, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123:task/horde/", true)
 	if result != nil {
 		t.Errorf("Logs() result = %v, want nil", result)
 	}
 	if err == nil {
 		t.Fatal("Logs() error = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "follow mode not implemented") {
-		t.Errorf("error = %q, want it to contain \"follow mode not implemented\"", err.Error())
+	if !strings.Contains(err.Error(), "empty task ID") {
+		t.Errorf("error = %q, want it to contain \"empty task ID\"", err.Error())
 	}
+}
+
+func TestECSProvider_Logs_Follow_NewlineHandling(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events: []cwltypes.OutputLogEvent{
+					{Message: aws.String("no newline")},
+					{Message: aws.String("has newline\n")},
+				},
+				// nil NextForwardToken
+			},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	want := "no newline\nhas newline\n"
+	if string(data) != want {
+		t.Errorf("Logs output = %q, want %q", string(data), want)
+	}
+}
+
+func TestECSProvider_Logs_Follow_CloseStopsGoroutine(t *testing.T) {
+	t.Parallel()
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+
+	// Close must return without hanging — confirms goroutine exits
+	reader.Close()
 }
 
 func TestECSProvider_Logs_BareTaskID(t *testing.T) {

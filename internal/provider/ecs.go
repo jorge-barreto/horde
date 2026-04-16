@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -38,10 +39,11 @@ type S3Client interface {
 
 // ECSProvider implements Provider using AWS ECS Fargate.
 type ECSProvider struct {
-	ecs    ECSClient
-	logs   CloudWatchLogsClient
-	s3     S3Client
-	config *config.HordeConfig
+	ecs          ECSClient
+	logs         CloudWatchLogsClient
+	s3           S3Client
+	config       *config.HordeConfig
+	pollInterval time.Duration
 }
 
 // NewECSProvider constructs an ECSProvider with the given AWS clients and config.
@@ -55,6 +57,21 @@ func NewECSProvider(ecsClient ECSClient, logsClient CloudWatchLogsClient, s3Clie
 }
 
 var _ Provider = (*ECSProvider)(nil)
+
+// ecsLogFollower wraps a pipe reader for CloudWatch follow mode.
+// Closing cancels the polling goroutine and waits for it to exit.
+type ecsLogFollower struct {
+	*io.PipeReader
+	cancel context.CancelFunc
+	done   <-chan struct{}
+}
+
+func (f *ecsLogFollower) Close() error {
+	f.cancel()
+	err := f.PipeReader.Close()
+	<-f.done
+	return err
+}
 
 func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error) {
 	env := []ecstypes.KeyValuePair{
@@ -186,10 +203,6 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 }
 
 func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error) {
-	if follow {
-		return nil, fmt.Errorf("ECSProvider.Logs follow mode not implemented")
-	}
-
 	taskID := instanceID
 	if i := strings.LastIndex(instanceID, "/"); i >= 0 {
 		taskID = instanceID[i+1:]
@@ -200,39 +213,107 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 
 	logStream := p.config.LogStreamPrefix + "/" + containerName + "/" + taskID
 
-	var buf bytes.Buffer
-	var nextToken *string
-	for {
-		input := &cloudwatchlogs.GetLogEventsInput{
-			LogGroupName:  aws.String(p.config.LogGroup),
-			LogStreamName: aws.String(logStream),
-			StartFromHead: aws.Bool(true),
-		}
-		if nextToken != nil {
-			input.NextToken = nextToken
-		}
+	if !follow {
+		var buf bytes.Buffer
+		var nextToken *string
+		for {
+			input := &cloudwatchlogs.GetLogEventsInput{
+				LogGroupName:  aws.String(p.config.LogGroup),
+				LogStreamName: aws.String(logStream),
+				StartFromHead: aws.Bool(true),
+			}
+			if nextToken != nil {
+				input.NextToken = nextToken
+			}
 
-		out, err := p.logs.GetLogEvents(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("reading logs: %w", err)
-		}
+			out, err := p.logs.GetLogEvents(ctx, input)
+			if err != nil {
+				return nil, fmt.Errorf("reading logs: %w", err)
+			}
 
-		for _, event := range out.Events {
-			if event.Message != nil {
-				buf.WriteString(*event.Message)
-				if !strings.HasSuffix(*event.Message, "\n") {
-					buf.WriteByte('\n')
+			for _, event := range out.Events {
+				if event.Message != nil {
+					buf.WriteString(*event.Message)
+					if !strings.HasSuffix(*event.Message, "\n") {
+						buf.WriteByte('\n')
+					}
 				}
 			}
-		}
 
-		if out.NextForwardToken == nil || (nextToken != nil && *out.NextForwardToken == *nextToken) {
-			break
+			if out.NextForwardToken == nil || (nextToken != nil && *out.NextForwardToken == *nextToken) {
+				break
+			}
+			nextToken = out.NextForwardToken
 		}
-		nextToken = out.NextForwardToken
+		return io.NopCloser(&buf), nil
 	}
 
-	return io.NopCloser(&buf), nil
+	pr, pw := io.Pipe()
+	followCtx, cancel := context.WithCancel(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer pw.Close()
+
+		interval := p.pollInterval
+		if interval == 0 {
+			interval = time.Second
+		}
+
+		var nextToken *string
+		for {
+			input := &cloudwatchlogs.GetLogEventsInput{
+				LogGroupName:  aws.String(p.config.LogGroup),
+				LogStreamName: aws.String(logStream),
+				StartFromHead: aws.Bool(true),
+			}
+			if nextToken != nil {
+				input.NextToken = nextToken
+			}
+
+			out, err := p.logs.GetLogEvents(followCtx, input)
+			if err != nil {
+				pw.CloseWithError(fmt.Errorf("reading logs: %w", err))
+				return
+			}
+
+			for _, event := range out.Events {
+				if event.Message != nil {
+					msg := *event.Message
+					if !strings.HasSuffix(msg, "\n") {
+						msg += "\n"
+					}
+					if _, err := io.WriteString(pw, msg); err != nil {
+						return
+					}
+				}
+			}
+
+			if out.NextForwardToken != nil {
+				nextToken = out.NextForwardToken
+			}
+
+			// Check if task has stopped.
+			taskOut, err := p.ecs.DescribeTasks(followCtx, &ecs.DescribeTasksInput{
+				Cluster: aws.String(p.config.ClusterARN),
+				Tasks:   []string{instanceID},
+			})
+			if err == nil && taskOut != nil && len(taskOut.Tasks) > 0 {
+				if taskOut.Tasks[0].LastStatus != nil && *taskOut.Tasks[0].LastStatus == "STOPPED" {
+					return
+				}
+			}
+
+			select {
+			case <-followCtx.Done():
+				return
+			case <-time.After(interval):
+			}
+		}
+	}()
+
+	return &ecsLogFollower{PipeReader: pr, cancel: cancel, done: done}, nil
 }
 
 func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {

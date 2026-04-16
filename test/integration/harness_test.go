@@ -1,8 +1,10 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -51,6 +53,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+const testImage = "horde-worker-test:latest"
+
 type harness struct {
 	t        *testing.T
 	homeDir  string // unique temp HOME for this test
@@ -79,6 +83,8 @@ func newHarness(t *testing.T) *harness {
 			"horde-worker-base:latest", "rm", "-rf", "/cleanup",
 		).Run()
 		os.RemoveAll(homeDir)
+		// Remove the test-specific worker image so it doesn't linger.
+		exec.Command("docker", "rmi", testImage).Run()
 	})
 
 	// Create project directory with git remote
@@ -179,15 +185,16 @@ func copyFile(t *testing.T, src, dst string) {
 // env returns the environment for horde subprocess calls.
 func (h *harness) env() []string {
 	env := os.Environ()
-	// Override HOME so horde uses our temp store/workspace
+	// Override HOME so horde uses our temp store/workspace.
+	// Override HORDE_DOCKER_IMAGE so tests don't clobber the real project image.
 	filtered := env[:0]
 	for _, e := range env {
-		if strings.HasPrefix(e, "HOME=") {
+		if strings.HasPrefix(e, "HOME=") || strings.HasPrefix(e, "HORDE_DOCKER_IMAGE=") {
 			continue
 		}
 		filtered = append(filtered, e)
 	}
-	return append(filtered, "HOME="+h.homeDir)
+	return append(filtered, "HOME="+h.homeDir, "HORDE_DOCKER_IMAGE="+testImage)
 }
 
 // runHorde executes the horde binary with args, returning stdout and any error.
@@ -274,20 +281,23 @@ func (h *harness) List() string {
 	return out
 }
 
-// WaitForOrc polls the host-side workspace for .horde-exit-code until it appears
-// or the timeout expires. This detects orc completion WITHOUT going through horde's
-// status detection — critical for testing what horde reports independently.
+// WaitForOrc polls the container until it exits or the timeout expires.
+// Detects orc completion by checking if the container has stopped.
 func (h *harness) WaitForOrc(runID string, timeout time.Duration) {
 	h.t.Helper()
-	markerPath := filepath.Join(h.homeDir, ".horde", "workspaces", runID, ".horde-exit-code")
+	cid := h.ContainerID(runID)
+	if cid == "" {
+		h.t.Fatalf("WaitForOrc: no container ID found for run %s", runID)
+	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(markerPath); err == nil {
+		out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", cid).Output()
+		if err == nil && strings.TrimSpace(string(out)) == "false" {
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	h.t.Fatalf("WaitForOrc: marker file not found after %v at %s", timeout, markerPath)
+	h.t.Fatalf("WaitForOrc: container %s still running after %v", cid, timeout)
 }
 
 // ContainerID reads the instance_id from the SQLite store for the given run.
@@ -307,6 +317,13 @@ func (h *harness) ContainerID(runID string) string {
 	return instanceID
 }
 
+// DockerLogs returns the container's Docker logs.
+func (h *harness) DockerLogs(containerID string) (string, error) {
+	h.t.Helper()
+	out, err := exec.Command("docker", "logs", containerID).CombinedOutput()
+	return string(out), err
+}
+
 // StoreStatus reads the status from the SQLite store for the given run.
 func (h *harness) StoreStatus(runID string) string {
 	h.t.Helper()
@@ -322,6 +339,72 @@ func (h *harness) StoreStatus(runID string) string {
 		h.t.Fatalf("reading status from store: %v", err)
 	}
 	return status
+}
+
+// Retry runs horde retry and returns stdout and any error.
+func (h *harness) Retry(runID string, orcArgs ...string) (string, error) {
+	h.t.Helper()
+	args := []string{"--provider", "docker", "retry", runID}
+	if len(orcArgs) > 0 {
+		args = append(args, "--")
+		args = append(args, orcArgs...)
+	}
+	return h.runHorde(args...)
+}
+
+// WaitForFile polls for a file inside the workspace until it appears or timeout expires.
+func (h *harness) WaitForFile(runID, relPath string, timeout time.Duration) {
+	h.t.Helper()
+	fullPath := filepath.Join(h.homeDir, ".horde", "workspaces", runID, relPath)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(fullPath); err == nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	h.t.Fatalf("WaitForFile: %s not found after %v", relPath, timeout)
+}
+
+// ReadWorkspaceFile reads a file from the workspace, returning its contents.
+func (h *harness) ReadWorkspaceFile(runID, relPath string) (string, error) {
+	h.t.Helper()
+	fullPath := filepath.Join(h.homeDir, ".horde", "workspaces", runID, relPath)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// OrcStatePath returns the path to orc's state.json on the host for a given run.
+// When workflow is non-empty, orc namespaces artifacts under .orc/artifacts/<workflow>/<ticket>/.
+func (h *harness) OrcStatePath(runID, workflow, ticket string) string {
+	h.t.Helper()
+	if workflow != "" {
+		return filepath.Join(h.homeDir, ".horde", "workspaces", runID, ".orc", "artifacts", workflow, ticket, "state.json")
+	}
+	return filepath.Join(h.homeDir, ".horde", "workspaces", runID, ".orc", "artifacts", ticket, "state.json")
+}
+
+// WaitForPhaseIndex polls orc's state.json in the workspace until phase_index >= minIndex.
+func (h *harness) WaitForPhaseIndex(runID, workflow, ticket string, minIndex int, timeout time.Duration) {
+	h.t.Helper()
+	statePath := h.OrcStatePath(runID, workflow, ticket)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(statePath)
+		if err == nil {
+			var state struct {
+				PhaseIndex int `json:"phase_index"`
+			}
+			if json.Unmarshal(data, &state) == nil && state.PhaseIndex >= minIndex {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	h.t.Fatalf("WaitForPhaseIndex: phase_index never reached %d after %v at %s", minIndex, timeout, statePath)
 }
 
 // StoreExitCode reads the exit_code from the SQLite store. Returns nil if NULL.
@@ -343,4 +426,134 @@ func (h *harness) StoreExitCode(runID string) *int {
 	}
 	v := int(code.Int64)
 	return &v
+}
+
+// runHordeFull executes horde and returns stdout, stderr, and any error separately.
+func (h *harness) runHordeFull(args ...string) (string, string, error) {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, hordeBin, args...)
+	cmd.Dir = h.workDir
+	cmd.Env = h.env()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+}
+
+// Logs runs horde logs and returns stdout.
+func (h *harness) Logs(runID string) string {
+	h.t.Helper()
+	out, err := h.runHorde("--provider", "docker", "logs", runID)
+	if err != nil {
+		var exitErr *exec.ExitError
+		stderr := ""
+		if errors.As(err, &exitErr) {
+			stderr = string(exitErr.Stderr)
+		}
+		h.t.Fatalf("horde logs failed: %v\nstdout: %s\nstderr: %s", err, out, stderr)
+	}
+	return out
+}
+
+// Results runs horde results and returns stdout.
+func (h *harness) Results(runID string) string {
+	h.t.Helper()
+	out, err := h.runHorde("--provider", "docker", "results", runID)
+	if err != nil {
+		var exitErr *exec.ExitError
+		stderr := ""
+		if errors.As(err, &exitErr) {
+			stderr = string(exitErr.Stderr)
+		}
+		h.t.Fatalf("horde results failed: %v\nstdout: %s\nstderr: %s", err, out, stderr)
+	}
+	return out
+}
+
+// Clean runs horde clean on a specific run. Returns stdout and any error.
+func (h *harness) Clean(runID string, purge bool) (string, error) {
+	h.t.Helper()
+	args := []string{"--provider", "docker", "clean"}
+	if purge {
+		args = append(args, "--purge")
+	}
+	args = append(args, runID)
+	return h.runHorde(args...)
+}
+
+// CleanAll runs horde clean (all terminal runs) and returns stdout.
+func (h *harness) CleanAll(purge bool) string {
+	h.t.Helper()
+	args := []string{"--provider", "docker", "clean"}
+	if purge {
+		args = append(args, "--purge")
+	}
+	out, err := h.runHorde(args...)
+	if err != nil {
+		var exitErr *exec.ExitError
+		stderr := ""
+		if errors.As(err, &exitErr) {
+			stderr = string(exitErr.Stderr)
+		}
+		h.t.Fatalf("horde clean failed: %v\nstdout: %s\nstderr: %s", err, out, stderr)
+	}
+	return out
+}
+
+// ListActive runs horde list (active only, no --all) and returns stdout.
+func (h *harness) ListActive() string {
+	h.t.Helper()
+	out, err := h.runHorde("--provider", "docker", "list")
+	if err != nil {
+		var exitErr *exec.ExitError
+		stderr := ""
+		if errors.As(err, &exitErr) {
+			stderr = string(exitErr.Stderr)
+		}
+		h.t.Fatalf("horde list failed: %v\nstdout: %s\nstderr: %s", err, out, stderr)
+	}
+	return out
+}
+
+// WorkspaceDir returns the host path to a run's workspace.
+func (h *harness) WorkspaceDir(runID string) string {
+	return filepath.Join(h.homeDir, ".horde", "workspaces", runID)
+}
+
+// WorkspaceExists checks whether the workspace directory exists.
+func (h *harness) WorkspaceExists(runID string) bool {
+	_, err := os.Stat(h.WorkspaceDir(runID))
+	return err == nil
+}
+
+// ResultsDir returns the host path to a run's results directory.
+func (h *harness) ResultsDir(runID string) string {
+	return filepath.Join(h.homeDir, ".horde", "results", runID)
+}
+
+// SavedLogsExist checks whether container.log was saved in the results dir.
+func (h *harness) SavedLogsExist(runID string) bool {
+	_, err := os.Stat(filepath.Join(h.ResultsDir(runID), "container.log"))
+	return err == nil
+}
+
+// ContainerRunning checks if a container is currently running via docker inspect.
+func (h *harness) ContainerRunning(containerID string) bool {
+	h.t.Helper()
+	out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", containerID).Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+// ContainerExists checks if a Docker container exists (running or stopped).
+func (h *harness) ContainerExists(containerID string) bool {
+	return exec.Command("docker", "inspect", containerID).Run() == nil
+}
+
+// RemoveContainerExternally removes a container via docker rm -f (not through horde).
+func (h *harness) RemoveContainerExternally(containerID string) {
+	h.t.Helper()
+	exec.Command("docker", "rm", "-f", containerID).Run()
 }

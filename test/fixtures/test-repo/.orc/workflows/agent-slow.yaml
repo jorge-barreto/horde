@@ -1,0 +1,12 @@
+name: agent-slow-test
+ticket-pattern: 'TEST-[\w-]+'
+phases:
+  - name: setup
+    type: script
+    run: echo "setup-done" > "$ORC_ARTIFACTS_DIR/setup-done.txt"
+    timeout: 1
+  - name: work
+    type: agent
+    prompt: .orc/prompts/slow-work.md
+    model: haiku
+    timeout: 10

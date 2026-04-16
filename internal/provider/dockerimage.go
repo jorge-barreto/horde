@@ -40,11 +40,11 @@ func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, pro
 	// --- Project image ---
 	projectDockerfile := filepath.Join(projectDir, "worker", "Dockerfile")
 	if _, err := os.Stat(projectDockerfile); err == nil {
-		return ensureProjectImage(ctx, filepath.Join(projectDir, "worker"), out)
+		return ensureProjectImage(ctx, p.Image, filepath.Join(projectDir, "worker"), out)
 	}
 
 	// No project Dockerfile — tag base as the run image
-	return tagImage(ctx, baseImage, DockerImage)
+	return tagImage(ctx, baseImage, p.Image)
 }
 
 func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error {
@@ -71,16 +71,16 @@ func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error
 	return nil
 }
 
-func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Writer) error {
-	projectTime, projectExists, err := inspectImageTimeOf(ctx, DockerImage)
+func ensureProjectImage(ctx context.Context, image, projectWorkerDir string, out io.Writer) error {
+	projectTime, projectExists, err := inspectImageTimeOf(ctx, image)
 	if err != nil {
 		return err
 	}
 
 	// Rebuild if project image is missing
 	if !projectExists {
-		fmt.Fprintf(out, "Project image %s not found. Building...\n", DockerImage)
-		return buildImageAs(ctx, DockerImage, projectWorkerDir, out)
+		fmt.Fprintf(out, "Project image %s not found. Building...\n", image)
+		return buildImageAs(ctx, image, projectWorkerDir, out)
 	}
 
 	// Rebuild if base is newer than project image
@@ -90,7 +90,7 @@ func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Wri
 	}
 	if baseExists && baseTime.After(projectTime) {
 		fmt.Fprintf(out, "Project image outdated (base rebuilt). Rebuilding...\n")
-		return buildImageAs(ctx, DockerImage, projectWorkerDir, out)
+		return buildImageAs(ctx, image, projectWorkerDir, out)
 	}
 
 	// Rebuild if project sources are newer than project image
@@ -100,7 +100,7 @@ func ensureProjectImage(ctx context.Context, projectWorkerDir string, out io.Wri
 	}
 	if srcTime.After(projectTime) {
 		fmt.Fprintf(out, "Project image outdated (worker/ changed). Rebuilding...\n")
-		return buildImageAs(ctx, DockerImage, projectWorkerDir, out)
+		return buildImageAs(ctx, image, projectWorkerDir, out)
 	}
 
 	return nil

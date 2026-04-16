@@ -342,7 +342,7 @@ resumes any interrupted agent session. Override with explicit orc args:
 				}
 			}
 
-			// Clear stale exit code marker from workspace
+			// Remove stale exit code marker if present (legacy containers)
 			os.Remove(filepath.Join(workspaceDir, ".horde-exit-code"))
 
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
@@ -789,7 +789,7 @@ directories (all code changes will be lost).`,
 				if homeDir != "" {
 					workspaceDir := provider.WorkspacePath(homeDir, runID)
 					if purge {
-						if err := os.RemoveAll(workspaceDir); err != nil {
+						if err := removeWorkspace(ctx, workspaceDir); err != nil {
 							fmt.Fprintf(os.Stderr, "warning: removing workspace: %v\n", err)
 						} else {
 							fmt.Printf("Removed workspace for run %s\n", runID)
@@ -835,7 +835,7 @@ directories (all code changes will be lost).`,
 					}
 				}
 				if purge && homeDir != "" {
-					os.RemoveAll(provider.WorkspacePath(homeDir, r.ID))
+					removeWorkspace(ctx, provider.WorkspacePath(homeDir, r.ID))
 				}
 			}
 			fmt.Printf("Removed %d container(s)\n", cleaned)
@@ -925,7 +925,11 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 					dockerArgs = append(dockerArgs, "-v", m)
 				}
 			}
-			dockerArgs = append(dockerArgs, provider.DockerImage, "bash")
+			shellImage := provider.DockerImage
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				shellImage = dp.Image
+			}
+			dockerArgs = append(dockerArgs, shellImage, "bash")
 
 			shellExec := exec.CommandContext(ctx, "docker", dockerArgs...)
 			shellExec.Stdin = os.Stdin
@@ -1031,6 +1035,24 @@ type phaseResult struct {
 	CostUSD  float64 `json:"cost_usd"`
 	Duration string  `json:"duration"`
 	Status   string  `json:"status"`
+}
+
+// removeWorkspace deletes a workspace directory, using a Docker container
+// to handle root-owned files created inside containers.
+func removeWorkspace(ctx context.Context, dir string) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	// Delete contents as root via Docker (can't rm the mount point itself).
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--entrypoint", "",
+		"-v", dir+":/cleanup",
+		"horde-worker-base:latest", "sh", "-c", "rm -rf /cleanup/*  /cleanup/.[!.]* /cleanup/..?*")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker rm: %w", err)
+	}
+	// Now the host can remove the empty directory.
+	return os.Remove(dir)
 }
 
 func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st store.Store, run *store.Run, homeDir string) error {

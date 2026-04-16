@@ -23,10 +23,16 @@ type dockerInspectState struct {
 	FinishedAt string `json:"FinishedAt"`
 }
 
-type DockerProvider struct{}
+type DockerProvider struct {
+	Image string // run image tag; defaults to DockerImage
+}
 
 func NewDockerProvider() *DockerProvider {
-	return &DockerProvider{}
+	img := DockerImage
+	if v := os.Getenv("HORDE_DOCKER_IMAGE"); v != "" {
+		img = v
+	}
+	return &DockerProvider{Image: img}
 }
 
 var _ Provider = (*DockerProvider)(nil)
@@ -79,7 +85,7 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	allMounts = append(allMounts, opts.Mounts...)
 
 	args := []string{
-		"run", "-d",
+		"run", "-d", "--init",
 		"-e", "REPO_URL=" + opts.Repo,
 		"-e", "TICKET=" + opts.Ticket,
 		"-e", "BRANCH=" + opts.Branch,
@@ -95,7 +101,7 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	for _, mount := range allMounts {
 		args = append(args, "-v", mount)
 	}
-	args = append(args, DockerImage)
+	args = append(args, p.Image)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.Output()

@@ -39,27 +39,28 @@ else
     fi
 fi
 
-# Run orc
+# Build orc command
 ORC_ARGS="--auto --no-color"
 if [ -n "${WORKFLOW:-}" ]; then
-    orc run -w "$WORKFLOW" "$TICKET" $ORC_ARGS ${ORC_EXTRA_ARGS:-}
+    ORC_CMD="orc run -w $WORKFLOW $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
 else
-    orc run "$TICKET" $ORC_ARGS ${ORC_EXTRA_ARGS:-}
+    ORC_CMD="orc run $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
 fi
-EXIT_CODE=$?
 
 # Upload artifacts to S3 (ECS only — env vars are absent in docker mode)
 if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
+    eval $ORC_CMD
+    EXIT_CODE=$?
     if [ -d .orc/artifacts/ ]; then
         aws s3 cp .orc/artifacts/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/artifacts/" --recursive || echo "WARNING: artifact upload failed" >&2
     fi
     if [ -d .orc/audit/ ]; then
         aws s3 cp .orc/audit/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/audit/" --recursive || echo "WARNING: audit upload failed" >&2
     fi
-    # ECS: exit normally so the task stops (billed per second)
     exit $EXIT_CODE
 fi
 
-# Docker: write exit code marker and keep container alive for shell/retry
-echo "$EXIT_CODE" > /workspace/.horde-exit-code
-exec sleep infinity
+# Docker: exec orc directly so it receives signals from docker stop.
+# With --init on docker run, tini reaps zombies and forwards signals.
+# horde reads the exit code from docker inspect, not a marker file.
+exec $ORC_CMD

@@ -322,7 +322,7 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("reading file: %s not found in results for run %s", opts.Path, opts.RunID)
+			return nil, &FileNotFoundError{Path: opts.Path, Err: err}
 		}
 		return nil, fmt.Errorf("reading file: %w", err)
 	}

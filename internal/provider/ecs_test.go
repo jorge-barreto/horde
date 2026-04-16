@@ -585,6 +585,25 @@ func TestECSProvider_Status_NilResponse(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Status_DescribeTasksTypedError(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksErr: &ecstypes.ClusterNotFoundException{Message: aws.String("cluster not found")},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Status(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/nonexistent")
+	if err == nil {
+		t.Fatal("Status() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "describing ECS task") {
+		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
+	}
+	var cnf *ecstypes.ClusterNotFoundException
+	if !errors.As(err, &cnf) {
+		t.Errorf("error type = %T, want *ecstypes.ClusterNotFoundException", err)
+	}
+}
+
 func TestECSProvider_Logs_Success(t *testing.T) {
 	t.Parallel()
 	token := "token-1"
@@ -1049,6 +1068,27 @@ func TestECSProvider_Stop_IgnoresResultsDir(t *testing.T) {
 	}
 	if *fake.stopTaskInput.Task != "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123" {
 		t.Errorf("Task = %q", *fake.stopTaskInput.Task)
+	}
+}
+
+func TestECSProvider_Stop_AlreadyStopped(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		stopTaskErr: &ecstypes.InvalidParameterException{Message: aws.String("The referenced task was already stopped.")},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	err := p.Stop(context.Background(), StopOpts{
+		InstanceID: "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123",
+	})
+	if err == nil {
+		t.Fatal("Stop() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "stopping ECS task") {
+		t.Errorf("error = %q, want it to contain \"stopping ECS task\"", err.Error())
+	}
+	var ipe *ecstypes.InvalidParameterException
+	if !errors.As(err, &ipe) {
+		t.Errorf("error type = %T, want *ecstypes.InvalidParameterException", err)
 	}
 }
 

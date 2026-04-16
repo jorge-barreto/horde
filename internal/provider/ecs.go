@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	cwltypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -284,6 +285,17 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 
 			out, err := p.logs.GetLogEvents(followCtx, input)
 			if err != nil {
+				var rnf *cwltypes.ResourceNotFoundException
+				if errors.As(err, &rnf) {
+					// Log stream not created yet — container hasn't started writing output.
+					// Wait and retry instead of treating as fatal.
+					select {
+					case <-followCtx.Done():
+						return
+					case <-time.After(interval):
+						continue
+					}
+				}
 				pw.CloseWithError(fmt.Errorf("reading logs: %w", err))
 				return
 			}

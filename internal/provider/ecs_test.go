@@ -783,8 +783,47 @@ func TestECSProvider_Logs_LogStreamNotCreated(t *testing.T) {
 
 func TestECSProvider_Logs_Follow_LogStreamNotCreated(t *testing.T) {
 	t.Parallel()
+	rnf := &cwltypes.ResourceNotFoundException{Message: aws.String("The specified log stream does not exist.")}
 	fakeLogs := &fakeCloudWatchLogsClient{
-		getLogEventsErr: &cwltypes.ResourceNotFoundException{Message: aws.String("The specified log stream does not exist.")},
+		getLogEventsErrs: []error{rnf, rnf, nil},
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			nil, // ignored — error takes precedence
+			nil, // ignored — error takes precedence
+			{
+				Events: []cwltypes.OutputLogEvent{{Message: aws.String("hello from container\n")}},
+			},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil", err)
+	}
+	if !strings.Contains(string(data), "hello from container") {
+		t.Errorf("output = %q, want it to contain \"hello from container\"", string(data))
+	}
+	if len(fakeLogs.getLogEventsInputs) != 3 {
+		t.Errorf("GetLogEvents called %d times, want 3", len(fakeLogs.getLogEventsInputs))
+	}
+}
+
+func TestECSProvider_Logs_Follow_LogStreamNotCreatedOtherErrorStillFatal(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsErr: fmt.Errorf("ThrottlingException: rate exceeded"),
 	}
 	p := NewECSProvider(&fakeECSClient{}, fakeLogs, &fakeS3Client{}, testHordeConfig())
 	p.pollInterval = time.Millisecond
@@ -795,17 +834,12 @@ func TestECSProvider_Logs_Follow_LogStreamNotCreated(t *testing.T) {
 	}
 	defer reader.Close()
 
-	data, err := io.ReadAll(reader)
+	_, err = io.ReadAll(reader)
 	if err == nil {
 		t.Fatal("ReadAll() error = nil, want non-nil")
 	}
-	_ = data
 	if !strings.Contains(err.Error(), "reading logs") {
 		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
-	}
-	var rnf *cwltypes.ResourceNotFoundException
-	if !errors.As(err, &rnf) {
-		t.Errorf("error type = %T, want *cwltypes.ResourceNotFoundException", err)
 	}
 }
 

@@ -127,7 +127,60 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 }
 
 func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceStatus, error) {
-	return nil, fmt.Errorf("ECSProvider.Status not implemented")
+	out, err := p.ecs.DescribeTasks(ctx, &ecs.DescribeTasksInput{
+		Cluster: aws.String(p.config.ClusterARN),
+		Tasks:   []string{instanceID},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describing ECS task: %w", err)
+	}
+	if out == nil {
+		return nil, fmt.Errorf("describing ECS task: nil response")
+	}
+
+	if len(out.Failures) > 0 {
+		f := out.Failures[0]
+		reason := ""
+		if f.Reason != nil {
+			reason = *f.Reason
+		}
+		return nil, fmt.Errorf("describing ECS task: %s", reason)
+	}
+
+	if len(out.Tasks) == 0 {
+		return nil, fmt.Errorf("describing ECS task: task not found")
+	}
+
+	task := out.Tasks[0]
+
+	state := "unknown"
+	if task.LastStatus != nil {
+		switch *task.LastStatus {
+		case "RUNNING":
+			state = "running"
+		case "STOPPED":
+			state = "stopped"
+		}
+	}
+
+	status := &InstanceStatus{
+		State: state,
+	}
+
+	if task.StartedAt != nil {
+		status.StartedAt = *task.StartedAt
+	}
+
+	if task.StoppedAt != nil {
+		status.FinishedAt = task.StoppedAt
+	}
+
+	if len(task.Containers) > 0 && task.Containers[0].ExitCode != nil {
+		exitCode := int(*task.Containers[0].ExitCode)
+		status.ExitCode = &exitCode
+	}
+
+	return status, nil
 }
 
 func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	cloudwatchlogs "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -18,6 +19,10 @@ type fakeECSClient struct {
 	runTaskInput  *ecs.RunTaskInput
 	runTaskOutput *ecs.RunTaskOutput
 	runTaskErr    error
+
+	describeTasksInput  *ecs.DescribeTasksInput
+	describeTasksOutput *ecs.DescribeTasksOutput
+	describeTasksErr    error
 }
 
 func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
@@ -31,7 +36,8 @@ func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, o
 	return &ecs.RunTaskOutput{}, nil
 }
 func (f *fakeECSClient) DescribeTasks(ctx context.Context, params *ecs.DescribeTasksInput, optFns ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
-	return nil, nil
+	f.describeTasksInput = params
+	return f.describeTasksOutput, f.describeTasksErr
 }
 func (f *fakeECSClient) StopTask(ctx context.Context, params *ecs.StopTaskInput, optFns ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
 	return nil, nil
@@ -275,18 +281,251 @@ func TestECSProvider_Launch_EmptyOpts(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Status_Stub(t *testing.T) {
+func TestECSProvider_Status_Running(t *testing.T) {
 	t.Parallel()
-	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	result, err := p.Status(context.Background(), "")
-	if result != nil {
-		t.Errorf("Status() result = %v, want nil", result)
+	started := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	instanceID := "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123"
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{
+					LastStatus: aws.String("RUNNING"),
+					StartedAt:  &started,
+				},
+			},
+		},
 	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), instanceID)
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "running" {
+		t.Errorf("State = %q, want \"running\"", result.State)
+	}
+	if result.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil", result.ExitCode)
+	}
+	if result.StartedAt != started {
+		t.Errorf("StartedAt = %v, want %v", result.StartedAt, started)
+	}
+	if result.FinishedAt != nil {
+		t.Errorf("FinishedAt = %v, want nil", result.FinishedAt)
+	}
+	// Verify DescribeTasksInput
+	if fake.describeTasksInput == nil {
+		t.Fatal("DescribeTasks was not called")
+	}
+	if *fake.describeTasksInput.Cluster != testHordeConfig().ClusterARN {
+		t.Errorf("Cluster = %q, want %q", *fake.describeTasksInput.Cluster, testHordeConfig().ClusterARN)
+	}
+	if len(fake.describeTasksInput.Tasks) != 1 || fake.describeTasksInput.Tasks[0] != instanceID {
+		t.Errorf("Tasks = %v, want [%q]", fake.describeTasksInput.Tasks, instanceID)
+	}
+}
+
+func TestECSProvider_Status_Stopped(t *testing.T) {
+	t.Parallel()
+	started := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	stopped := time.Date(2025, 1, 15, 11, 0, 0, 0, time.UTC)
+	exitCode := int32(0)
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{
+					LastStatus: aws.String("STOPPED"),
+					StartedAt:  &started,
+					StoppedAt:  &stopped,
+					Containers: []ecstypes.Container{
+						{ExitCode: &exitCode},
+					},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "stopped" {
+		t.Errorf("State = %q, want \"stopped\"", result.State)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Errorf("ExitCode = %v, want 0", result.ExitCode)
+	}
+	if result.FinishedAt == nil || *result.FinishedAt != stopped {
+		t.Errorf("FinishedAt = %v, want %v", result.FinishedAt, stopped)
+	}
+}
+
+func TestECSProvider_Status_StoppedNonZeroExit(t *testing.T) {
+	t.Parallel()
+	exitCode := int32(1)
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{
+					LastStatus: aws.String("STOPPED"),
+					Containers: []ecstypes.Container{
+						{ExitCode: &exitCode},
+					},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 1 {
+		t.Errorf("ExitCode = %v, want 1", result.ExitCode)
+	}
+}
+
+func TestECSProvider_Status_UnknownStatus(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: aws.String("PROVISIONING")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "unknown" {
+		t.Errorf("State = %q, want \"unknown\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_NilLastStatus(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: nil},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "unknown" {
+		t.Errorf("State = %q, want \"unknown\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_NoContainers(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{
+					LastStatus: aws.String("STOPPED"),
+					Containers: []ecstypes.Container{},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil", result.ExitCode)
+	}
+}
+
+func TestECSProvider_Status_DescribeTasksError(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{describeTasksErr: fmt.Errorf("AccessDeniedException: not authorized")}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Status(context.Background(), "task-arn")
 	if err == nil {
 		t.Fatal("Status() error = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("Status() error = %q, want it to contain \"not implemented\"", err.Error())
+	if !strings.Contains(err.Error(), "describing ECS task") {
+		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
+	}
+}
+
+func TestECSProvider_Status_Failure(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Failures: []ecstypes.Failure{{Reason: aws.String("MISSING")}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Status(context.Background(), "task-arn")
+	if err == nil {
+		t.Fatal("Status() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "describing ECS task") {
+		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "MISSING") {
+		t.Errorf("error = %q, want it to contain \"MISSING\"", err.Error())
+	}
+}
+
+func TestECSProvider_Status_FailureNilReason(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Failures: []ecstypes.Failure{{}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Status(context.Background(), "task-arn")
+	if err == nil {
+		t.Fatal("Status() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "describing ECS task") {
+		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
+	}
+}
+
+func TestECSProvider_Status_NoTasks(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks:    []ecstypes.Task{},
+			Failures: []ecstypes.Failure{},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Status(context.Background(), "task-arn")
+	if err == nil {
+		t.Fatal("Status() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "task not found") {
+		t.Errorf("error = %q, want it to contain \"task not found\"", err.Error())
+	}
+}
+
+func TestECSProvider_Status_NilResponse(t *testing.T) {
+	t.Parallel()
+	// Both describeTasksOutput and describeTasksErr are zero (nil) — tests nil response guard.
+	fake := &fakeECSClient{}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Status(context.Background(), "task-arn")
+	if err == nil {
+		t.Fatal("Status() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "describing ECS task") {
+		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil response") {
+		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
 	}
 }
 

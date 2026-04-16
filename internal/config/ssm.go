@@ -113,6 +113,7 @@ type HordeConfig struct {
 	Subnets               []string `json:"subnets"`
 	SecurityGroup         string   `json:"security_group"`
 	LogGroup              string   `json:"log_group"`
+	LogStreamPrefix       string   `json:"log_stream_prefix"`
 	ArtifactsBucket       string   `json:"artifacts_bucket"`
 	RunsTable             string   `json:"runs_table"`
 	MaxConcurrent         int      `json:"max_concurrent"`
@@ -136,6 +137,9 @@ func (c *HordeConfig) Validate() error {
 	}
 	if c.LogGroup == "" {
 		missing = append(missing, "log_group")
+	}
+	if c.LogStreamPrefix == "" {
+		missing = append(missing, "log_stream_prefix")
 	}
 	if c.ArtifactsBucket == "" {
 		missing = append(missing, "artifacts_bucket")

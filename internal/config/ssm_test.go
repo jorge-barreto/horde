@@ -21,6 +21,7 @@ func validHordeFields() map[string]interface{} {
 		"subnets":                 []string{"subnet-abc", "subnet-def"},
 		"security_group":          "sg-123",
 		"log_group":               "/ecs/horde-worker",
+		"log_stream_prefix":       "ecs",
 		"artifacts_bucket":        "my-horde-artifacts",
 		"runs_table":              "horde-runs",
 		"max_concurrent":          5,
@@ -223,6 +224,9 @@ func TestParseHordeConfig_Valid(t *testing.T) {
 	if cfg.LogGroup != "/ecs/horde-worker" {
 		t.Errorf("LogGroup = %q, want %q", cfg.LogGroup, "/ecs/horde-worker")
 	}
+	if cfg.LogStreamPrefix != "ecs" {
+		t.Errorf("LogStreamPrefix = %q, want %q", cfg.LogStreamPrefix, "ecs")
+	}
 	if cfg.ArtifactsBucket != "my-horde-artifacts" {
 		t.Errorf("ArtifactsBucket = %q, want %q", cfg.ArtifactsBucket, "my-horde-artifacts")
 	}
@@ -245,6 +249,7 @@ func TestParseHordeConfig_JSONRoundTrip(t *testing.T) {
 		Subnets:               []string{"subnet-abc", "subnet-def"},
 		SecurityGroup:         "sg-123",
 		LogGroup:              "/ecs/horde-worker",
+		LogStreamPrefix:       "ecs",
 		ArtifactsBucket:       "my-horde-artifacts",
 		RunsTable:             "horde-runs",
 		MaxConcurrent:         5,
@@ -260,8 +265,8 @@ func TestParseHordeConfig_JSONRoundTrip(t *testing.T) {
 	}
 	wantKeys := []string{
 		"cluster_arn", "task_definition_arn", "subnets", "security_group",
-		"log_group", "artifacts_bucket", "runs_table", "max_concurrent",
-		"default_timeout_minutes",
+		"log_group", "log_stream_prefix", "artifacts_bucket", "runs_table",
+		"max_concurrent", "default_timeout_minutes",
 	}
 	for _, key := range wantKeys {
 		if _, ok := m[key]; !ok {
@@ -306,6 +311,11 @@ func TestParseHordeConfig_MissingFields(t *testing.T) {
 			name:    "missing log_group",
 			mutate:  func(m map[string]interface{}) { delete(m, "log_group") },
 			wantErr: []string{"missing required fields: log_group"},
+		},
+		{
+			name:    "missing log_stream_prefix",
+			mutate:  func(m map[string]interface{}) { delete(m, "log_stream_prefix") },
+			wantErr: []string{"missing required fields: log_stream_prefix"},
 		},
 		{
 			name:    "missing artifacts_bucket",
@@ -472,6 +482,7 @@ func TestHordeConfig_Validate_AllFieldsPresent(t *testing.T) {
 		Subnets:               []string{"subnet-abc"},
 		SecurityGroup:         "sg-123",
 		LogGroup:              "/ecs/horde-worker",
+		LogStreamPrefix:       "ecs",
 		ArtifactsBucket:       "my-bucket",
 		RunsTable:             "horde-runs",
 		MaxConcurrent:         1,

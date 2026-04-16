@@ -1105,6 +1105,154 @@ func TestECSProvider_Logs_Follow_GetLogEventsError(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Logs_Follow_DrainTransientErrorRetrySucceeds(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			// Call 0 (poll): line delivered, token advances
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line before stop\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// Call 1 (drain, first attempt): output ignored — error takes precedence
+			{},
+			// Call 2 (drain, retry): late line delivered, token advances
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("late line\n")}},
+				NextForwardToken: aws.String("tok2"),
+			},
+			// Call 3 (drain, next iteration): empty + same token → drain exits
+			{
+				Events:           []cwltypes.OutputLogEvent{},
+				NextForwardToken: aws.String("tok2"),
+			},
+		},
+		getLogEventsErrs: []error{nil, fmt.Errorf("ThrottlingException: rate exceeded")},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil", err)
+	}
+	if !strings.Contains(string(data), "line before stop") {
+		t.Errorf("data = %q, want it to contain \"line before stop\"", string(data))
+	}
+	if !strings.Contains(string(data), "late line") {
+		t.Errorf("data = %q, want it to contain \"late line\"", string(data))
+	}
+	if strings.Contains(string(data), "WARNING") {
+		t.Errorf("data = %q, want no WARNING", string(data))
+	}
+	if len(fakeLogs.getLogEventsInputs) != 4 {
+		t.Errorf("GetLogEvents called %d times, want 4 (1 poll + 1 failed drain + 1 retry + 1 drain-exit)", len(fakeLogs.getLogEventsInputs))
+	}
+}
+
+func TestECSProvider_Logs_Follow_DrainTransientErrorRetryFails(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			// Call 0 (poll): line delivered, token advances
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line before stop\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+		},
+		getLogEventsErrs: []error{
+			nil,
+			fmt.Errorf("ThrottlingException: rate exceeded"),
+			fmt.Errorf("ThrottlingException: rate exceeded"),
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("ReadAll() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "reading logs") {
+		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
+	}
+	if !strings.Contains(string(data), "line before stop") {
+		t.Errorf("data = %q, want it to contain \"line before stop\"", string(data))
+	}
+	if !strings.Contains(string(data), "WARNING: output may be incomplete") {
+		t.Errorf("data = %q, want it to contain \"WARNING: output may be incomplete\"", string(data))
+	}
+	if len(fakeLogs.getLogEventsInputs) != 3 {
+		t.Errorf("GetLogEvents called %d times, want 3 (1 poll + 1 failed drain + 1 failed retry)", len(fakeLogs.getLogEventsInputs))
+	}
+}
+
+func TestECSProvider_Logs_Follow_DrainRNFBreaksCleanly(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			// Call 0 (poll): line delivered, token advances
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line before stop\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+		},
+		getLogEventsErrs: []error{
+			nil,
+			&cwltypes.ResourceNotFoundException{Message: aws.String("log stream not found")},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil", err)
+	}
+	if !strings.Contains(string(data), "line before stop") {
+		t.Errorf("data = %q, want it to contain \"line before stop\"", string(data))
+	}
+	if strings.Contains(string(data), "WARNING") {
+		t.Errorf("data = %q, want no WARNING", string(data))
+	}
+	if len(fakeLogs.getLogEventsInputs) != 2 {
+		t.Errorf("GetLogEvents called %d times, want 2 (1 poll + 1 drain with RNF)", len(fakeLogs.getLogEventsInputs))
+	}
+}
+
 func TestECSProvider_Logs_Follow_NilResponse(t *testing.T) {
 	t.Parallel()
 	fakeLogs := &fakeCloudWatchLogsClient{

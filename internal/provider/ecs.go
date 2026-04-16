@@ -352,7 +352,22 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 							}
 							drainOut, drainErr := p.logs.GetLogEvents(followCtx, drainInput)
 							if drainErr != nil {
-								return
+								var rnf *cwltypes.ResourceNotFoundException
+								if errors.As(drainErr, &rnf) {
+									return // stream gone — nothing more to drain
+								}
+								// Transient error — retry once after a short backoff.
+								select {
+								case <-followCtx.Done():
+									return
+								case <-time.After(interval):
+								}
+								drainOut, drainErr = p.logs.GetLogEvents(followCtx, drainInput)
+								if drainErr != nil {
+									fmt.Fprintf(pw, "WARNING: output may be incomplete: %v\n", drainErr)
+									pw.CloseWithError(fmt.Errorf("reading logs: %w", drainErr))
+									return
+								}
 							}
 							if drainOut == nil {
 								return

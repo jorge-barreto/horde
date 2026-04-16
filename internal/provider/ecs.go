@@ -314,6 +314,15 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 				}
 			} else {
 				describeFailures = 0
+				if taskOut != nil && len(taskOut.Failures) > 0 {
+					reason := ""
+					f := taskOut.Failures[0]
+					if f.Reason != nil {
+						reason = *f.Reason
+					}
+					fmt.Fprintf(pw, "WARNING: task no longer available: %s\n", reason)
+					return
+				}
 				if taskOut != nil && len(taskOut.Tasks) > 0 {
 					if taskOut.Tasks[0].LastStatus != nil && *taskOut.Tasks[0].LastStatus == "STOPPED" {
 						return

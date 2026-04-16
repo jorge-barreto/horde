@@ -961,6 +961,86 @@ func TestECSProvider_Logs_FollowDescribeTasksError(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Logs_Follow_DescribeTasksFailures(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("follow line 1\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Failures: []ecstypes.Failure{{Reason: aws.String("MISSING")}}, Tasks: []ecstypes.Task{}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil (pipe must close cleanly)", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "follow line 1") {
+		t.Errorf("output = %q, want it to contain \"follow line 1\"", got)
+	}
+	if !strings.Contains(got, "task no longer available") {
+		t.Errorf("output = %q, want it to contain \"task no longer available\"", got)
+	}
+	if !strings.Contains(got, "MISSING") {
+		t.Errorf("output = %q, want it to contain \"MISSING\"", got)
+	}
+	if len(fakeECS.describeTasksInputs) != 1 {
+		t.Errorf("DescribeTasks called %d times, want 1", len(fakeECS.describeTasksInputs))
+	}
+}
+
+func TestECSProvider_Logs_Follow_DescribeTasksFailuresNilReason(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("follow line 1\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Failures: []ecstypes.Failure{{}}, Tasks: []ecstypes.Task{}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want nil (pipe must close cleanly)", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "task no longer available") {
+		t.Errorf("output = %q, want it to contain \"task no longer available\"", got)
+	}
+	if len(fakeECS.describeTasksInputs) != 1 {
+		t.Errorf("DescribeTasks called %d times, want 1", len(fakeECS.describeTasksInputs))
+	}
+}
+
 func TestECSProvider_Logs_Follow_EmptyTaskID(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())

@@ -317,7 +317,15 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 }
 
 func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {
-	return fmt.Errorf("ECSProvider.Stop not implemented")
+	_, err := p.ecs.StopTask(ctx, &ecs.StopTaskInput{
+		Cluster: aws.String(p.config.ClusterARN),
+		Task:    aws.String(opts.InstanceID),
+		Reason:  aws.String("horde kill"),
+	})
+	if err != nil {
+		return fmt.Errorf("stopping ECS task: %w", err)
+	}
+	return nil
 }
 
 func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {

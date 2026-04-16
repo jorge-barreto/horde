@@ -27,6 +27,10 @@ type fakeECSClient struct {
 	describeTasksErr     error
 	describeTasksInputs  []*ecs.DescribeTasksInput
 	describeTasksOutputs []*ecs.DescribeTasksOutput
+
+	stopTaskInput  *ecs.StopTaskInput
+	stopTaskOutput *ecs.StopTaskOutput
+	stopTaskErr    error
 }
 
 func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
@@ -55,7 +59,14 @@ func (f *fakeECSClient) DescribeTasks(ctx context.Context, params *ecs.DescribeT
 	return f.describeTasksOutput, nil
 }
 func (f *fakeECSClient) StopTask(ctx context.Context, params *ecs.StopTaskInput, optFns ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
-	return nil, nil
+	f.stopTaskInput = params
+	if f.stopTaskErr != nil {
+		return nil, f.stopTaskErr
+	}
+	if f.stopTaskOutput != nil {
+		return f.stopTaskOutput, nil
+	}
+	return &ecs.StopTaskOutput{}, nil
 }
 
 type fakeCloudWatchLogsClient struct {
@@ -967,15 +978,64 @@ func TestECSProvider_Logs_NewlineHandling(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Stop_Stub(t *testing.T) {
+func TestECSProvider_Stop_Success(t *testing.T) {
 	t.Parallel()
-	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	err := p.Stop(context.Background(), StopOpts{})
+	fake := &fakeECSClient{}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	instanceID := "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123"
+	err := p.Stop(context.Background(), StopOpts{
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want nil", err)
+	}
+	if fake.stopTaskInput == nil {
+		t.Fatal("StopTask was not called")
+	}
+	if *fake.stopTaskInput.Cluster != testHordeConfig().ClusterARN {
+		t.Errorf("Cluster = %q, want %q", *fake.stopTaskInput.Cluster, testHordeConfig().ClusterARN)
+	}
+	if *fake.stopTaskInput.Task != instanceID {
+		t.Errorf("Task = %q, want %q", *fake.stopTaskInput.Task, instanceID)
+	}
+	if *fake.stopTaskInput.Reason != "horde kill" {
+		t.Errorf("Reason = %q, want %q", *fake.stopTaskInput.Reason, "horde kill")
+	}
+}
+
+func TestECSProvider_Stop_Error(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		stopTaskErr: fmt.Errorf("AccessDeniedException: not authorized"),
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	err := p.Stop(context.Background(), StopOpts{
+		InstanceID: "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123",
+	})
 	if err == nil {
 		t.Fatal("Stop() error = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("Stop() error = %q, want it to contain \"not implemented\"", err.Error())
+	if !strings.Contains(err.Error(), "stopping ECS task") {
+		t.Errorf("error = %q, want it to contain \"stopping ECS task\"", err.Error())
+	}
+}
+
+func TestECSProvider_Stop_IgnoresResultsDir(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	err := p.Stop(context.Background(), StopOpts{
+		InstanceID: "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123",
+		ResultsDir: "/some/path/that/should/be/ignored",
+	})
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want nil", err)
+	}
+	if fake.stopTaskInput == nil {
+		t.Fatal("StopTask was not called")
+	}
+	if *fake.stopTaskInput.Task != "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123" {
+		t.Errorf("Task = %q", *fake.stopTaskInput.Task)
 	}
 }
 

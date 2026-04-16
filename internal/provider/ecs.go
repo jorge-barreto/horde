@@ -1,9 +1,11 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -184,7 +186,53 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 }
 
 func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("ECSProvider.Logs not implemented")
+	if follow {
+		return nil, fmt.Errorf("ECSProvider.Logs follow mode not implemented")
+	}
+
+	taskID := instanceID
+	if i := strings.LastIndex(instanceID, "/"); i >= 0 {
+		taskID = instanceID[i+1:]
+	}
+	if taskID == "" {
+		return nil, fmt.Errorf("reading logs: empty task ID from instance %q", instanceID)
+	}
+
+	logStream := p.config.LogStreamPrefix + "/" + containerName + "/" + taskID
+
+	var buf bytes.Buffer
+	var nextToken *string
+	for {
+		input := &cloudwatchlogs.GetLogEventsInput{
+			LogGroupName:  aws.String(p.config.LogGroup),
+			LogStreamName: aws.String(logStream),
+			StartFromHead: aws.Bool(true),
+		}
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		out, err := p.logs.GetLogEvents(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("reading logs: %w", err)
+		}
+
+		for _, event := range out.Events {
+			if event.Message != nil {
+				buf.WriteString(*event.Message)
+				if !strings.HasSuffix(*event.Message, "\n") {
+					buf.WriteByte('\n')
+				}
+			}
+		}
+
+		if out.NextForwardToken == nil || (nextToken != nil && *out.NextForwardToken == *nextToken) {
+			break
+		}
+		nextToken = out.NextForwardToken
+	}
+
+	return io.NopCloser(&buf), nil
 }
 
 func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {

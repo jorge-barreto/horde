@@ -338,6 +338,7 @@ For the `aws-ecs` provider, all config is discovered from a single SSM parameter
   "subnets": ["subnet-abc", "subnet-def"],
   "security_group": "sg-123",
   "log_group": "/ecs/horde-worker",
+  "log_stream_prefix": "ecs",
   "artifacts_bucket": "my-horde-artifacts",
   "runs_table": "horde-runs",
   "max_concurrent": 5,

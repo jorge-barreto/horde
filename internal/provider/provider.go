@@ -6,6 +6,8 @@ import (
 	"io"
 	"path/filepath"
 	"time"
+
+	"github.com/jorge-barreto/horde/internal/store"
 )
 
 // Provider abstracts container/task lifecycle operations.
@@ -15,6 +17,12 @@ type Provider interface {
 	Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
 	Stop(ctx context.Context, opts StopOpts) error
 	ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
+	// Finalize checks whether a pending/running instance has completed or
+	// timed out. For completed instances, it collects artifacts and populates
+	// the run's terminal fields (Status, ExitCode, CompletedAt, TotalCostUSD)
+	// in-place. If the instance is still running (and not timed out), the run
+	// is left unchanged. Returns nil on success or when no finalization was needed.
+	Finalize(ctx context.Context, run *store.Run, homeDir string) error
 }
 
 // LaunchOpts contains parameters for launching a worker instance.

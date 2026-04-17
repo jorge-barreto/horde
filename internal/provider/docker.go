@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jorge-barreto/horde/internal/store"
 )
 
 const DockerImage = "horde-worker:latest"
@@ -345,4 +347,11 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 		return nil, fmt.Errorf("reading file: %w", err)
 	}
 	return data, nil
+}
+
+// Finalize checks whether a pending/running Docker container has completed
+// or timed out. Full implementation is in bead i2c.4.2; this stub satisfies
+// the Provider interface so the build compiles.
+func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir string) error {
+	return nil
 }

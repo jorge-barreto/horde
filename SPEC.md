@@ -499,6 +499,7 @@ type Provider interface {
     Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
     Kill(ctx context.Context, opts KillOpts) error
     ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
+    Finalize(ctx context.Context, run *store.Run, homeDir string) error
 }
 
 type LaunchOpts struct {

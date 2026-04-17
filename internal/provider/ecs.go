@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/jorge-barreto/horde/internal/config"
+	"github.com/jorge-barreto/horde/internal/store"
 )
 
 // containerName is the container name in the ECS task definition.
@@ -476,4 +477,10 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 		return nil, fmt.Errorf("reading file from s3: %w", err)
 	}
 	return data, nil
+}
+
+// Finalize is a no-op for ECS. The status Lambda handles finalization
+// (updating DynamoDB on task completion via EventBridge).
+func (p *ECSProvider) Finalize(ctx context.Context, run *store.Run, homeDir string) error {
+	return nil
 }

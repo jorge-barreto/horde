@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/jorge-barreto/horde/internal/config"
+	"github.com/jorge-barreto/horde/internal/store"
 )
 
 type fakeECSClient struct {
@@ -2016,5 +2017,25 @@ func TestECSProvider_ReadFile_NilBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nil response") {
 		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
+	}
+}
+
+func TestECSProvider_Finalize_NoOp(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	run := &store.Run{
+		ID:         "abc123def456",
+		InstanceID: "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123",
+		Status:     store.StatusRunning,
+	}
+	err := p.Finalize(context.Background(), run, "/home/testuser")
+	if err != nil {
+		t.Fatalf("Finalize() error = %v, want nil", err)
+	}
+	if run.Status != store.StatusRunning {
+		t.Errorf("run.Status = %q, want %q (Finalize must not mutate run for ECS)", run.Status, store.StatusRunning)
+	}
+	if run.CompletedAt != nil {
+		t.Errorf("run.CompletedAt = %v, want nil", run.CompletedAt)
 	}
 }

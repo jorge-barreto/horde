@@ -160,7 +160,7 @@ func TestInitProviderAndStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			prov, st, maxConcurrent, _, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
+			prov, st, maxConcurrent, gotProvName, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
 
 			if tc.wantErr {
 				if err == nil {
@@ -190,6 +190,9 @@ func TestInitProviderAndStore(t *testing.T) {
 				}
 				if maxConcurrent != 100 {
 					t.Errorf("maxConcurrent: got %d, want 100", maxConcurrent)
+				}
+				if gotProvName != "docker" {
+					t.Errorf("provName: got %q, want %q", gotProvName, "docker")
 				}
 				cleanup()
 			}
@@ -299,6 +302,28 @@ func TestInitFromRunID(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "run not found") {
 			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("docker flag with empty stored provider", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{
+					run: &store.Run{ID: "abc123", Provider: ""},
+				}, func() {}, nil
+			},
+		}
+		prov, _, run, cleanup, err := initFromRunIDWith(context.Background(), "docker", "", "abc123", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer cleanup()
+		if _, ok := prov.(*provider.DockerProvider); !ok {
+			t.Errorf("expected *provider.DockerProvider, got %T", prov)
+		}
+		if run.Provider != "" {
+			t.Errorf("expected empty stored provider, got %q", run.Provider)
 		}
 	})
 

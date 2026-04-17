@@ -3182,13 +3182,14 @@ func TestProvider_AutoDetect_Error(t *testing.T) {
 	_ = setupLaunchEnv(t)
 	ctx := context.Background()
 
-	// With --provider defaulting to "docker" and the Before hook in place,
-	// this may succeed. After d69.4.2 removes the Before hook and changes
-	// the default to "", it will fail with the auto-detect error.
+	// With no --provider flag, auto-detect tries aws-ecs via SSM.
+	// Fake AWS creds are set but no real SSM → must fail with diagnostic.
 	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
-	if err != nil && !strings.Contains(err.Error(), "auto-detecting") &&
-		!strings.Contains(err.Error(), "--provider docker") {
-		t.Errorf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected auto-detect error, got nil")
+	}
+	if !strings.Contains(err.Error(), "auto-detecting") {
+		t.Errorf("error %q does not contain %q", err.Error(), "auto-detecting")
 	}
 }
 

@@ -365,10 +365,13 @@ type dockerRunResult struct {
 	ExitCode     *int     `json:"exit_code"`
 }
 
-func copyDir(src, dst string) {
-	filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			if path == src {
+				return err // propagate root errors (e.g. nonexistent source)
+			}
+			return nil // skip inaccessible entries but continue walking
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
@@ -418,7 +421,9 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		exitData, err := os.ReadFile(markerPath)
 		if err == nil {
 			exitCode := 1 // default to failure
-			fmt.Sscanf(strings.TrimSpace(string(exitData)), "%d", &exitCode)
+			if n, _ := fmt.Sscanf(strings.TrimSpace(string(exitData)), "%d", &exitCode); n == 0 {
+				fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", run.ID)
+			}
 
 			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 			p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
@@ -522,7 +527,9 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		markerPath := filepath.Join(WorkspacePath(homeDir, run.ID), ".horde-exit-code")
 		if data, err := os.ReadFile(markerPath); err == nil {
 			code := 1
-			fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code)
+			if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code); n == 0 {
+				fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", run.ID)
+			}
 			exitCode = &code
 			newStatus = mapExitCode(code)
 		} else if instanceStatus.ExitCode != nil {
@@ -549,10 +556,14 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			auditSrc := filepath.Join(workspaceDir, ".orc", "audit")
 			artifactsSrc := filepath.Join(workspaceDir, ".orc", "artifacts")
 			if _, err := os.Stat(auditSrc); err == nil {
-				copyDir(auditSrc, filepath.Join(resultsDir, "audit"))
+				if err := copyDir(auditSrc, filepath.Join(resultsDir, "audit")); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: copying audit artifacts for run %s: %v\n", run.ID, err)
+				}
 			}
 			if _, err := os.Stat(artifactsSrc); err == nil {
-				copyDir(artifactsSrc, filepath.Join(resultsDir, "artifacts"))
+				if err := copyDir(artifactsSrc, filepath.Join(resultsDir, "artifacts")); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: copying artifacts for run %s: %v\n", run.ID, err)
+				}
 			}
 
 			var resultPath string
@@ -571,6 +582,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 		now := time.Now()
 		run.Status = store.StatusFailed
+		run.ExitCode = nil
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
 	}

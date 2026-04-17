@@ -1587,3 +1587,96 @@ func TestDockerProvider_Finalize_UnknownWithWorkspace(t *testing.T) {
 		t.Errorf("TotalCostUSD = %v, want %v", *run.TotalCostUSD, wantCost)
 	}
 }
+
+func TestMapExitCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		code int
+		want store.Status
+	}{
+		{0, store.StatusSuccess},
+		{5, store.StatusKilled},
+		{1, store.StatusFailed},
+		{2, store.StatusFailed},
+		{137, store.StatusFailed},
+	}
+	for _, tt := range tests {
+		got := mapExitCode(tt.code)
+		if got != tt.want {
+			t.Errorf("mapExitCode(%d) = %q, want %q", tt.code, got, tt.want)
+		}
+	}
+}
+
+func TestCopyDir(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nonexistent source returns error", func(t *testing.T) {
+		t.Parallel()
+		err := copyDir(filepath.Join(t.TempDir(), "does-not-exist"), t.TempDir())
+		if err == nil {
+			t.Fatal("expected error for nonexistent source, got nil")
+		}
+	})
+
+	t.Run("copies files", func(t *testing.T) {
+		t.Parallel()
+		src := t.TempDir()
+		dst := filepath.Join(t.TempDir(), "dest")
+
+		if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+			t.Fatalf("creating subdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(src, "sub", "file.txt"), []byte("hello"), 0o644); err != nil {
+			t.Fatalf("writing file: %v", err)
+		}
+
+		err := copyDir(src, dst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got, err := os.ReadFile(filepath.Join(dst, "sub", "file.txt"))
+		if err != nil {
+			t.Fatalf("reading copied file: %v", err)
+		}
+		if string(got) != "hello" {
+			t.Errorf("content = %q, want %q", string(got), "hello")
+		}
+	})
+}
+
+func TestDockerProvider_Finalize_RunningWithGarbageMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, runningDockerScript())
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	homeDir := t.TempDir()
+	wsDir := WorkspacePath(homeDir, "r-garbage")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, ".horde-exit-code"), []byte("not-a-number"), 0o644); err != nil {
+		t.Fatalf("writing marker: %v", err)
+	}
+
+	run := &store.Run{
+		ID:         "r-garbage",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	if err := NewDockerProvider().Finalize(context.Background(), run, homeDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != store.StatusFailed {
+		t.Errorf("Status = %v, want %v", run.Status, store.StatusFailed)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 1 {
+		t.Errorf("ExitCode = %v, want &1", run.ExitCode)
+	}
+	if run.CompletedAt == nil {
+		t.Error("CompletedAt = nil, want non-nil")
+	}
+}

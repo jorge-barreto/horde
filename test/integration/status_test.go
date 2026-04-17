@@ -204,4 +204,4 @@ func TestNormalFailure(t *testing.T) {
 
 // Note: TestSignalInterrupt was removed. Exit code 5 requires sending SIGTERM
 // to the orc process, not a script that runs `exit 5`. The exit code 5 mapping
-// is covered by the unit test TestMapExitCode in cmd/horde/main_test.go.
+// is covered by the unit test TestMapExitCode in internal/provider/docker_test.go.

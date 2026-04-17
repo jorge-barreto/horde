@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -177,16 +176,14 @@ ticket is already active.`,
 				return fmt.Errorf("checking active runs: %w", err)
 			}
 			// Reconcile stale records: container may have died since last check.
-			if dp, ok := prov.(*provider.DockerProvider); ok {
-				stillActive := active[:0]
-				for _, r := range active {
-					_ = handleLazyCheck(ctx, dp, st, r, homeDir)
-					if r.Status == store.StatusPending || r.Status == store.StatusRunning {
-						stillActive = append(stillActive, r)
-					}
+			stillActive := active[:0]
+			for _, r := range active {
+				_ = handleLazyCheck(ctx, prov, st, r, homeDir)
+				if r.Status == store.StatusPending || r.Status == store.StatusRunning {
+					stillActive = append(stillActive, r)
 				}
-				active = stillActive
 			}
+			active = stillActive
 			if len(active) > 0 && !force {
 				fmt.Fprintf(os.Stderr, "ticket %s already has an active run (%s)\n", ticket, active[0].ID)
 				return fmt.Errorf("duplicate active ticket (use --force to override)")
@@ -307,10 +304,8 @@ resumes any interrupted agent session. Override with explicit orc args:
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if dp, ok := prov.(*provider.DockerProvider); ok {
-				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
-					return err
-				}
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
 			}
 
 			if run.Status == store.StatusPending {
@@ -432,10 +427,8 @@ result collection.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if dp, ok := prov.(*provider.DockerProvider); ok {
-				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
-					return err
-				}
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
 			}
 			if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
 				if dp, ok := prov.(*provider.DockerProvider); ok {
@@ -533,10 +526,8 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if dp, ok := prov.(*provider.DockerProvider); ok {
-				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
-					return err
-				}
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
 			}
 			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
@@ -622,10 +613,8 @@ information if the result file is missing (e.g., orc crashed early).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if dp, ok := prov.(*provider.DockerProvider); ok {
-				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
-					return err
-				}
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
 			}
 			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
 				if cmd.Bool("json") {
@@ -716,13 +705,12 @@ include completed, failed, and killed runs.`,
 				return fmt.Errorf("listing runs: %w", err)
 			}
 
-			dp, _ := prov.(*provider.DockerProvider)
 			for _, run := range runs {
-				if dp != nil {
-					if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
-						fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
-						continue
-					}
+				if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
+					continue
+				}
+				if dp, ok := prov.(*provider.DockerProvider); ok {
 					if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
 						run.TotalCostUSD = fetchLiveCost(ctx, dp, run)
 					}
@@ -755,17 +743,6 @@ include completed, failed, and killed runs.`,
 			printRunTable(runs)
 			return nil
 		},
-	}
-}
-
-func mapExitCode(code int) store.Status {
-	switch code {
-	case 0:
-		return store.StatusSuccess
-	case 5:
-		return store.StatusKilled
-	default:
-		return store.StatusFailed
 	}
 }
 
@@ -915,10 +892,8 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if dp, ok := prov.(*provider.DockerProvider); ok {
-				if err := handleLazyCheck(ctx, dp, st, run, homeDir); err != nil {
-					return err
-				}
+			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				return err
 			}
 
 			if run.InstanceID == "" {
@@ -1039,32 +1014,6 @@ func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *stor
 	return &lc.TotalCostUSD
 }
 
-// copyDir copies a directory tree from src to dst on the host filesystem.
-// Best-effort — individual file errors are silently skipped.
-func copyDir(src, dst string) {
-	filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return nil
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			os.MkdirAll(target, 0o755)
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		os.MkdirAll(filepath.Dir(target), 0o755)
-		os.WriteFile(target, data, 0o644)
-		return nil
-	})
-}
-
 type fullRunResult struct {
 	ExitCode      int           `json:"exit_code"`
 	Status        string        `json:"status"`
@@ -1100,222 +1049,22 @@ func removeWorkspace(ctx context.Context, dir string) error {
 	return os.Remove(dir)
 }
 
-func handleLazyCheck(ctx context.Context, prov *provider.DockerProvider, st store.Store, run *store.Run, homeDir string) error {
-	if run.Status != store.StatusPending && run.Status != store.StatusRunning {
-		return nil
+func handleLazyCheck(ctx context.Context, prov provider.Provider, st store.Store, run *store.Run, homeDir string) error {
+	origStatus := run.Status
+	if err := prov.Finalize(ctx, run, homeDir); err != nil {
+		return err
 	}
-	if run.InstanceID == "" {
-		return nil
-	}
-
-	instanceStatus, err := prov.Status(ctx, run.InstanceID)
-	if err != nil {
-		return fmt.Errorf("checking instance status: %w", err)
-	}
-
-	switch instanceStatus.State {
-	case "running":
-		// Check if orc finished first (marker file on host workspace — container stays alive
-		// via sleep infinity). This must come before the timeout check: if orc completed, its
-		// exit code is authoritative regardless of whether the timeout window has passed.
-		markerPath := filepath.Join(provider.WorkspacePath(homeDir, run.ID), ".horde-exit-code")
-		exitData, err := os.ReadFile(markerPath)
-		if err == nil {
-			exitCode := 1 // default to failure
-			fmt.Sscanf(strings.TrimSpace(string(exitData)), "%d", &exitCode)
-
-			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-			prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
-			prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
-
-			if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
-				if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-					os.MkdirAll(resultsDir, 0o755)
-					os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
-				}
-				logs.Close()
-			}
-
-			var resultPath string
-			if run.Workflow != "" {
-				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-			}
-			var cost *float64
-			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr runResult
-				if json.Unmarshal(data, &rr) == nil {
-					cost = rr.TotalCostUSD
-				}
-			}
-
-			newStatus := mapExitCode(exitCode)
-			now := time.Now()
-			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-				Status:       &newStatus,
-				ExitCode:     &exitCode,
-				CompletedAt:  &now,
-				TotalCostUSD: cost,
-			}); err != nil {
-				return fmt.Errorf("updating run after completion: %w", err)
-			}
-			run.Status = newStatus
-			run.ExitCode = &exitCode
-			run.CompletedAt = &now
-			run.TotalCostUSD = cost
-			return nil
-		}
-
-		// Orc still running — check timeout
-		if time.Now().After(run.TimeoutAt) {
-			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-			if err := prov.Stop(ctx, provider.StopOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: stopping timed-out container: %v\n", err)
-				return nil
-			}
-
-			var cost *float64
-			var exitCode *int
-			var resultPath string
-			if run.Workflow != "" {
-				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-			}
-			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr runResult
-				if json.Unmarshal(data, &rr) == nil {
-					cost = rr.TotalCostUSD
-					exitCode = rr.ExitCode
-				}
-			}
-
-			killedStatus := store.StatusKilled
-			now := time.Now()
-			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-				Status:       &killedStatus,
-				CompletedAt:  &now,
-				TotalCostUSD: cost,
-				ExitCode:     exitCode,
-			}); err != nil {
-				return fmt.Errorf("updating run after timeout: %w", err)
-			}
-			run.Status = store.StatusKilled
-			run.CompletedAt = &now
-			run.TotalCostUSD = cost
-			run.ExitCode = exitCode
-			return nil
-		}
-
-		return nil // orc still running, nothing to do
-
-	case "stopped":
-		// Fallback for containers that were killed or crashed
-		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
-		prov.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
-
-		if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
-			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-				os.MkdirAll(resultsDir, 0o755)
-				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
-			}
-			logs.Close()
-		}
-
-		var resultPath string
-		if run.Workflow != "" {
-			resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-		} else {
-			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-		}
-		var cost *float64
-		if data, err := os.ReadFile(resultPath); err == nil {
-			var rr runResult
-			if json.Unmarshal(data, &rr) == nil {
-				cost = rr.TotalCostUSD
-			}
-		}
-
-		// Check orc's exit marker on host workspace first — docker's exit code
-		// reflects how the container process (sleep infinity) died, not orc's result.
-		var newStatus store.Status
-		var exitCode *int
-		markerPath := filepath.Join(provider.WorkspacePath(homeDir, run.ID), ".horde-exit-code")
-		if data, err := os.ReadFile(markerPath); err == nil {
-			code := 1
-			fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code)
-			exitCode = &code
-			newStatus = mapExitCode(code)
-		} else if instanceStatus.ExitCode != nil {
-			exitCode = instanceStatus.ExitCode
-			newStatus = mapExitCode(*instanceStatus.ExitCode)
-		} else {
-			newStatus = store.StatusFailed
-		}
-		completedNow := time.Now()
+	// If Finalize transitioned the run to a terminal state, persist to store.
+	if run.Status != origStatus {
 		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-			Status:       &newStatus,
-			ExitCode:     exitCode,
-			CompletedAt:  &completedNow,
-			TotalCostUSD: cost,
+			Status:       &run.Status,
+			ExitCode:     run.ExitCode,
+			CompletedAt:  run.CompletedAt,
+			TotalCostUSD: run.TotalCostUSD,
 		}); err != nil {
-			return fmt.Errorf("updating run after completion: %w", err)
+			return fmt.Errorf("updating run: %w", err)
 		}
-		run.Status = newStatus
-		run.ExitCode = exitCode
-		run.CompletedAt = &completedNow
-		run.TotalCostUSD = cost
-
-	case "unknown":
-		// Container vanished — check if workspace persists on host
-		var cost *float64
-		workspaceDir := provider.WorkspacePath(homeDir, run.ID)
-		if _, err := os.Stat(workspaceDir); err == nil {
-			fmt.Fprintf(os.Stderr, "warning: container for run %s vanished — workspace preserved at %s\n", run.ID, workspaceDir)
-			fmt.Fprintf(os.Stderr, "  use 'horde retry %s' to resume or 'horde shell %s' to inspect\n", run.ID, run.ID)
-
-			// Copy audit/artifacts from host workspace to results dir
-			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-			auditSrc := filepath.Join(workspaceDir, ".orc", "audit")
-			artifactsSrc := filepath.Join(workspaceDir, ".orc", "artifacts")
-			if _, err := os.Stat(auditSrc); err == nil {
-				copyDir(auditSrc, filepath.Join(resultsDir, "audit"))
-			}
-			if _, err := os.Stat(artifactsSrc); err == nil {
-				copyDir(artifactsSrc, filepath.Join(resultsDir, "artifacts"))
-			}
-
-			// Read cost from workspace run-result.json
-			var resultPath string
-			if run.Workflow != "" {
-				resultPath = filepath.Join(workspaceDir, ".orc", "audit", run.Workflow, run.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(workspaceDir, ".orc", "audit", run.Ticket, "run-result.json")
-			}
-			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr runResult
-				if json.Unmarshal(data, &rr) == nil {
-					cost = rr.TotalCostUSD
-				}
-			}
-		}
-
-		failedStatus := store.StatusFailed
-		now := time.Now()
-		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-			Status:       &failedStatus,
-			CompletedAt:  &now,
-			TotalCostUSD: cost,
-		}); err != nil {
-			return fmt.Errorf("updating run after unknown container: %w", err)
-		}
-		run.Status = store.StatusFailed
-		run.CompletedAt = &now
-		run.TotalCostUSD = cost
 	}
-
 	return nil
 }
 

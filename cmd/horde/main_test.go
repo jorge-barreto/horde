@@ -1229,25 +1229,6 @@ esac
 	}
 }
 
-func TestMapExitCode(t *testing.T) {
-	tests := []struct {
-		code int
-		want store.Status
-	}{
-		{0, store.StatusSuccess},
-		{5, store.StatusKilled},
-		{1, store.StatusFailed},
-		{2, store.StatusFailed},
-		{137, store.StatusFailed},
-	}
-	for _, tt := range tests {
-		got := mapExitCode(tt.code)
-		if got != tt.want {
-			t.Errorf("mapExitCode(%d) = %q, want %q", tt.code, got, tt.want)
-		}
-	}
-}
-
 func TestStatus_LazyCompletion_WithWorkflow(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

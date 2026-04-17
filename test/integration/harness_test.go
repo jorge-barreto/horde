@@ -21,6 +21,12 @@ import (
 var hordeBin string // set by TestMain
 
 func TestMain(m *testing.M) {
+	// Skip all integration tests if Docker is not available in PATH.
+	if _, err := exec.LookPath("docker"); err != nil {
+		fmt.Fprintln(os.Stderr, "SKIP: docker not found in PATH; skipping integration tests")
+		os.Exit(0)
+	}
+
 	// Build horde binary
 	tmp, err := os.MkdirTemp("", "horde-integration-*")
 	if err != nil {

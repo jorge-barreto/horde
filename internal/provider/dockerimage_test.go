@@ -345,7 +345,7 @@ func TestEnsureImage_BuildFailure(t *testing.T) {
 func TestEnsureImage_WithProjectDockerfile(t *testing.T) {
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	setupFakeDocker(t, fakeDockerScript, map[string]string{
-		baseImage:    future,
+		baseImage:   future,
 		DockerImage: future,
 	})
 

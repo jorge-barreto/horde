@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -3116,5 +3117,407 @@ func TestProvider_AutoDetect_Error(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "auto-detecting") &&
 		!strings.Contains(err.Error(), "--provider docker") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- JSON output tests ---
+
+func TestStatus_JSON_CompletedRun(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-5 * time.Minute)
+	exitCode := 0
+	cost := 4.52
+	runID := "jsonstatusrun001"
+	err = st.CreateRun(ctx, &store.Run{
+		ID:           runID,
+		Repo:         "github.com/test/repo.git",
+		Ticket:       "TICKET-1",
+		Status:       store.StatusSuccess,
+		Provider:     "docker",
+		LaunchedBy:   "testuser",
+		StartedAt:    now.Add(-10 * time.Minute),
+		TimeoutAt:    now.Add(50 * time.Minute),
+		ExitCode:     &exitCode,
+		CompletedAt:  &completedAt,
+		TotalCostUSD: &cost,
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v StatusV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if v.ID != runID {
+		t.Errorf("ID = %q, want %q", v.ID, runID)
+	}
+	if v.Ticket != "TICKET-1" {
+		t.Errorf("Ticket = %q, want TICKET-1", v.Ticket)
+	}
+	if v.Status != "success" {
+		t.Errorf("Status = %q, want success", v.Status)
+	}
+	if v.ExitCode == nil || *v.ExitCode != 0 {
+		t.Errorf("ExitCode = %v, want 0", v.ExitCode)
+	}
+	if v.TotalCostUSD == nil || *v.TotalCostUSD != 4.52 {
+		t.Errorf("TotalCostUSD = %v, want 4.52", v.TotalCostUSD)
+	}
+	if v.LaunchedBy != "testuser" {
+		t.Errorf("LaunchedBy = %q, want testuser", v.LaunchedBy)
+	}
+	if v.DurationSecs <= 0 {
+		t.Errorf("DurationSecs = %f, want > 0", v.DurationSecs)
+	}
+	if v.StartedAt == "" {
+		t.Errorf("StartedAt is empty")
+	}
+	if v.CompletedAt == "" {
+		t.Errorf("CompletedAt is empty")
+	}
+}
+
+func TestStatus_JSON_RunningRun(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	runID := "jsonstatusrun002"
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-2",
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  now.Add(-5 * time.Minute),
+		TimeoutAt:  now.Add(55 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v StatusV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if v.Status != "running" {
+		t.Errorf("Status = %q, want running", v.Status)
+	}
+	if v.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil", v.ExitCode)
+	}
+	if v.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD = %v, want nil", v.TotalCostUSD)
+	}
+	if v.CompletedAt != "" {
+		t.Errorf("CompletedAt = %q, want empty", v.CompletedAt)
+	}
+}
+
+func TestList_JSON_ActiveOnly(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-10 * time.Minute)
+	runs := []*store.Run{
+		{ID: "listjson001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listjson002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
+		{ID: "listjson003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
+	}
+	for _, r := range runs {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "list"})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v ListV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if len(v.Runs) != 2 {
+		t.Errorf("len(Runs) = %d, want 2", len(v.Runs))
+	}
+	ids := make([]string, len(v.Runs))
+	for i, r := range v.Runs {
+		ids[i] = r.ID
+	}
+	for _, want := range []string{"listjson001", "listjson002"} {
+		found := false
+		for _, id := range ids {
+			if id == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("runs missing %q, got %v", want, ids)
+		}
+	}
+	for _, bad := range ids {
+		if bad == "listjson003" {
+			t.Errorf("runs should not contain listjson003")
+		}
+	}
+}
+
+func TestList_JSON_Empty(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "list"})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v ListV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if v.Runs == nil || len(v.Runs) != 0 {
+		t.Errorf("Runs = %v, want empty non-nil slice", v.Runs)
+	}
+}
+
+func TestResults_JSON_CompletedWithResults(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	runID := "jsonresults001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
+		Status: store.StatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+	resultDir := filepath.Join(env.tmpHome, ".horde", "results", runID, "audit", "TICKET-1")
+	if err := os.MkdirAll(resultDir, 0o755); err != nil {
+		t.Fatalf("creating result dir: %v", err)
+	}
+	resultJSON := `{"exit_code":0,"status":"completed","ticket":"TICKET-1","workflow":"","total_cost_usd":4.52,"total_duration":"12m 34s","phases":[{"name":"plan","status":"completed","cost_usd":1.23,"duration":"3m 0s"},{"name":"execute","status":"completed","cost_usd":3.29,"duration":"9m 34s"}]}`
+	if err := os.WriteFile(filepath.Join(resultDir, "run-result.json"), []byte(resultJSON), 0o644); err != nil {
+		t.Fatalf("writing run-result.json: %v", err)
+	}
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v ResultsV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if v.Partial {
+		t.Errorf("Partial = true, want false")
+	}
+	if v.Status != "completed" {
+		t.Errorf("Status = %q, want completed", v.Status)
+	}
+	if v.TotalCostUSD == nil || *v.TotalCostUSD != 4.52 {
+		t.Errorf("TotalCostUSD = %v, want 4.52", v.TotalCostUSD)
+	}
+	if len(v.Phases) != 2 {
+		t.Errorf("len(Phases) = %d, want 2", len(v.Phases))
+	} else {
+		if v.Phases[0].Name != "plan" {
+			t.Errorf("Phases[0].Name = %q, want plan", v.Phases[0].Name)
+		}
+		if v.Phases[0].CostUSD != 1.23 {
+			t.Errorf("Phases[0].CostUSD = %f, want 1.23", v.Phases[0].CostUSD)
+		}
+	}
+}
+
+func TestResults_JSON_StillRunning(t *testing.T) {
+	dockerScript := "#!/bin/sh\ncase \"$1\" in\n  inspect) printf '{\"Running\":true,\"ExitCode\":0,\"StartedAt\":\"2024-06-15T10:30:00Z\",\"FinishedAt\":\"0001-01-01T00:00:00Z\"}' ;;\n  exec) exit 1 ;;\nesac\n"
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+	runID := "jsonresults002"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
+		Status: store.StatusRunning, InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v ResultsV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if !v.Partial {
+		t.Errorf("Partial = false, want true")
+	}
+	if v.Status != "running" {
+		t.Errorf("Status = %q, want running", v.Status)
+	}
+	if v.Phases != nil {
+		t.Errorf("Phases = %v, want nil", v.Phases)
+	}
+}
+
+func TestResults_JSON_MissingRunResult(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	runID := "jsonresults003"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	exitCode := 1
+	cost := 2.50
+	err = st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
+		Status: store.StatusFailed, ExitCode: &exitCode, TotalCostUSD: &cost,
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	var v ResultsV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if !v.Partial {
+		t.Errorf("Partial = false, want true")
+	}
+	if v.Status != "failed" {
+		t.Errorf("Status = %q, want failed", v.Status)
+	}
+	if v.ExitCode == nil || *v.ExitCode != 1 {
+		t.Errorf("ExitCode = %v, want 1", v.ExitCode)
 	}
 }

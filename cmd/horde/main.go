@@ -50,6 +50,10 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 				Name:  "profile",
 				Usage: "AWS named profile (passed through to AWS SDK)",
 			},
+			&cli.BoolFlag{
+				Name:  "json",
+				Usage: "Machine-readable JSON output (status, results, list)",
+			},
 		},
 		Commands: []*cli.Command{
 			launchCmd(),
@@ -421,6 +425,9 @@ result collection.`,
 					run.TotalCostUSD = fetchLiveCost(ctx, dp, run)
 				}
 			}
+			if cmd.Bool("json") {
+				return writeJSON(statusToV1(run))
+			}
 			printRunStatus(run)
 			return nil
 		},
@@ -604,6 +611,9 @@ information if the result file is missing (e.g., orc crashed early).`,
 				}
 			}
 			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
+				if cmd.Bool("json") {
+					return writeJSON(partialResultsToV1(run))
+				}
 				fmt.Printf("Run %s is still in progress (status: %s)\n", run.ID, run.Status)
 				return nil
 			}
@@ -620,13 +630,22 @@ information if the result file is missing (e.g., orc crashed early).`,
 				Metadata:   run.Metadata,
 			})
 			if err != nil {
+				if cmd.Bool("json") {
+					return writeJSON(partialResultsToV1(run))
+				}
 				printPartialResults(run)
 				return nil
 			}
 			var result fullRunResult
 			if err := json.Unmarshal(data, &result); err != nil {
+				if cmd.Bool("json") {
+					return writeJSON(partialResultsToV1(run))
+				}
 				printPartialResults(run)
 				return nil
+			}
+			if cmd.Bool("json") {
+				return writeJSON(fullResultsToV1(run, &result))
 			}
 			printFullResults(run, &result)
 			return nil
@@ -701,6 +720,10 @@ include completed, failed, and killed runs.`,
 					}
 				}
 				runs = filtered
+			}
+
+			if cmd.Bool("json") {
+				return writeJSON(listToV1(runs))
 			}
 
 			if len(runs) == 0 {

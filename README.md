@@ -53,6 +53,8 @@ horde status <run-id>
 horde logs <run-id> --follow
 horde list                        # active runs
 horde list --all                  # include completed/failed/killed
+horde status <run-id> --json      # machine-readable JSON output
+horde list --all --json           # JSON output for scripting
 
 # Results
 horde results <run-id>

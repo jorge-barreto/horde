@@ -200,6 +200,58 @@ func TestLaunch_WithFlags(t *testing.T) {
 	}
 }
 
+func TestLaunch_TimeoutAt_Regression(t *testing.T) {
+	t.Parallel()
+
+	providers := []string{"docker", "aws-ecs"}
+	for _, provName := range providers {
+		t.Run(provName, func(t *testing.T) {
+			t.Parallel()
+
+			dbPath := filepath.Join(t.TempDir(), "horde.db")
+			st, err := store.NewSQLiteStore(dbPath)
+			if err != nil {
+				t.Fatalf("opening store: %v", err)
+			}
+			defer st.Close()
+
+			ctx := context.Background()
+			now := time.Now()
+			timeout := 24 * time.Hour
+			id := fmt.Sprintf("timeout%s", provName)
+
+			// Mirrors launchCmd lines 192-204 in cmd/horde/main.go
+			run := &store.Run{
+				ID:         id,
+				Repo:       "github.com/test/repo.git",
+				Ticket:     "TICKET-1",
+				Branch:     "",
+				Workflow:   "",
+				Provider:   provName,
+				Status:     store.StatusPending,
+				LaunchedBy: "testuser",
+				StartedAt:  now,
+				TimeoutAt:  now.Add(timeout),
+			}
+			if err := st.CreateRun(ctx, run); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+
+			got, err := st.GetRun(ctx, id)
+			if err != nil {
+				t.Fatalf("GetRun: %v", err)
+			}
+			if got.TimeoutAt.IsZero() {
+				t.Fatalf("TimeoutAt is zero for provider %q — must be populated on every launch path", provName)
+			}
+			expectedTimeout := got.StartedAt.Add(timeout)
+			if diff := got.TimeoutAt.Sub(expectedTimeout); diff < -time.Second || diff > time.Second {
+				t.Errorf("TimeoutAt %v not within 1s of StartedAt+24h %v (provider %q)", got.TimeoutAt, expectedTimeout, provName)
+			}
+		})
+	}
+}
+
 func TestLaunch_MissingTicket(t *testing.T) {
 	_ = setupLaunchEnv(t)
 	ctx := context.Background()

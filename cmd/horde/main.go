@@ -154,9 +154,12 @@ ticket is already active.`,
 				return err
 			}
 
-			envPath, err := config.ValidateEnvFile(cwd)
-			if err != nil {
-				return err
+			var envPath string
+			if provName == "docker" {
+				envPath, err = config.ValidateEnvFile(cwd)
+				if err != nil {
+					return err
+				}
 			}
 
 			id, err := runid.Generate()
@@ -206,22 +209,19 @@ ticket is already active.`,
 				return fmt.Errorf("recording run: %w", err)
 			}
 
-			dp, ok := prov.(*provider.DockerProvider)
-			if !ok {
-				return fmt.Errorf("image build is only supported for the docker provider")
-			}
-
-			workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
-			if err != nil {
-				return fmt.Errorf("accessing worker files: %w", err)
-			}
-			if err := dp.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
-				failedStatus := store.StatusFailed
-				now := time.Now()
-				if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: failed to mark run as failed: %v\n", updateErr)
+			if dp, ok := prov.(*provider.DockerProvider); ok {
+				workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
+				if err != nil {
+					return fmt.Errorf("accessing worker files: %w", err)
 				}
-				return fmt.Errorf("preparing worker image: %w", err)
+				if err := dp.EnsureImage(ctx, workerFS, cwd, os.Stderr); err != nil {
+					failedStatus := store.StatusFailed
+					now := time.Now()
+					if updateErr := st.UpdateRun(ctx, id, &store.RunUpdate{Status: &failedStatus, CompletedAt: &now}); updateErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: failed to mark run as failed: %v\n", updateErr)
+					}
+					return fmt.Errorf("preparing worker image: %w", err)
+				}
 			}
 
 			projCfg, err := config.LoadProjectConfig(cwd)

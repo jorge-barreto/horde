@@ -182,8 +182,12 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 	state := "unknown"
 	if task.LastStatus != nil {
 		switch *task.LastStatus {
+		case "PROVISIONING", "PENDING", "ACTIVATING":
+			state = "pending"
 		case "RUNNING":
 			state = "running"
+		case "DEPROVISIONING", "STOPPING":
+			state = "stopping"
 		case "STOPPED":
 			state = "stopped"
 		}

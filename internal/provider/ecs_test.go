@@ -444,12 +444,107 @@ func TestECSProvider_Status_StoppedNonZeroExit(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Status_UnknownStatus(t *testing.T) {
+func TestECSProvider_Status_Provisioning(t *testing.T) {
 	t.Parallel()
 	fake := &fakeECSClient{
 		describeTasksOutput: &ecs.DescribeTasksOutput{
 			Tasks: []ecstypes.Task{
 				{LastStatus: aws.String("PROVISIONING")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "pending" {
+		t.Errorf("State = %q, want \"pending\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_Pending(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: aws.String("PENDING")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "pending" {
+		t.Errorf("State = %q, want \"pending\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_Activating(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: aws.String("ACTIVATING")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "pending" {
+		t.Errorf("State = %q, want \"pending\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_Deprovisioning(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: aws.String("DEPROVISIONING")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "stopping" {
+		t.Errorf("State = %q, want \"stopping\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_Stopping(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: aws.String("STOPPING")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.State != "stopping" {
+		t.Errorf("State = %q, want \"stopping\"", result.State)
+	}
+}
+
+func TestECSProvider_Status_UnrecognizedStatus(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{LastStatus: aws.String("SOME_FUTURE_STATE")},
 			},
 		},
 	}

@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const baseImage = "horde-worker-base:latest"
+const (
+	baseImage    = "horde-worker-base:latest"
+	builtAtLabel = "horde.built_at"
+)
 
 // EnsureImage ensures the worker image is ready. It manages two layers:
 //
@@ -48,13 +51,13 @@ func (p *DockerProvider) EnsureImage(ctx context.Context, workerFiles fs.FS, pro
 }
 
 func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error {
-	imageTime, exists, err := inspectImageTimeOf(ctx, baseImage)
+	builtAt, fresh, err := imageBuiltAt(ctx, baseImage)
 	if err != nil {
 		return err
 	}
 
-	if !exists {
-		fmt.Fprintf(out, "Base image %s not found. Building...\n", baseImage)
+	if !fresh {
+		fmt.Fprintf(out, "Base image %s not found or unlabeled. Building...\n", baseImage)
 		return buildImageAs(ctx, baseImage, workerDir, out)
 	}
 
@@ -63,7 +66,7 @@ func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error
 		return fmt.Errorf("checking worker file timestamps: %w", err)
 	}
 
-	if srcTime.After(imageTime) {
+	if srcTime.After(builtAt) {
 		fmt.Fprintf(out, "Base image outdated. Rebuilding...\n")
 		return buildImageAs(ctx, baseImage, workerDir, out)
 	}
@@ -72,23 +75,23 @@ func ensureBaseImage(ctx context.Context, workerDir string, out io.Writer) error
 }
 
 func ensureProjectImage(ctx context.Context, image, projectWorkerDir string, out io.Writer) error {
-	projectTime, projectExists, err := inspectImageTimeOf(ctx, image)
+	projectTime, projectFresh, err := imageBuiltAt(ctx, image)
 	if err != nil {
 		return err
 	}
 
-	// Rebuild if project image is missing
-	if !projectExists {
-		fmt.Fprintf(out, "Project image %s not found. Building...\n", image)
+	// Rebuild if project image is missing or unlabeled
+	if !projectFresh {
+		fmt.Fprintf(out, "Project image %s not found or unlabeled. Building...\n", image)
 		return buildImageAs(ctx, image, projectWorkerDir, out)
 	}
 
 	// Rebuild if base is newer than project image
-	baseTime, baseExists, err := inspectImageTimeOf(ctx, baseImage)
+	baseTime, baseFresh, err := imageBuiltAt(ctx, baseImage)
 	if err != nil {
 		return err
 	}
-	if baseExists && baseTime.After(projectTime) {
+	if baseFresh && baseTime.After(projectTime) {
 		fmt.Fprintf(out, "Project image outdated (base rebuilt). Rebuilding...\n")
 		return buildImageAs(ctx, image, projectWorkerDir, out)
 	}
@@ -143,8 +146,14 @@ func syncWorkerFiles(embedded fs.FS, dst string) error {
 	return nil
 }
 
-func inspectImageTimeOf(ctx context.Context, image string) (time.Time, bool, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image, "--format", "{{.Created}}")
+// imageBuiltAt reads the horde.built_at label from an image. Returns
+// (builtAt, true, nil) when the image exists and has a parseable label;
+// (_, false, nil) when the image is missing or the label is absent/empty
+// (both cases trigger a rebuild). This replaces comparing against the
+// image's Created time, which does not advance on cache-hit builds.
+func imageBuiltAt(ctx context.Context, image string) (time.Time, bool, error) {
+	format := fmt.Sprintf(`{{index .Config.Labels "%s"}}`, builtAtLabel)
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image, "--format", format)
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -155,11 +164,14 @@ func inspectImageTimeOf(ctx context.Context, image string) (time.Time, bool, err
 	}
 
 	ts := strings.TrimSpace(string(out))
+	if ts == "" {
+		return time.Time{}, false, nil
+	}
 	t, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
 		t, err = time.Parse(time.RFC3339, ts)
 		if err != nil {
-			return time.Time{}, false, fmt.Errorf("parsing image timestamp %q: %w", ts, err)
+			return time.Time{}, false, fmt.Errorf("parsing %s label %q: %w", builtAtLabel, ts, err)
 		}
 	}
 	return t, true, nil
@@ -186,8 +198,13 @@ func newestFileMtime(dir string) (time.Time, error) {
 	return newest, nil
 }
 
+// buildImageAs builds `contextDir` and tags the result as `tag`. It stamps
+// the image with a horde.built_at label set to the current time — even a
+// full cache-hit build produces a new image (the label is part of the
+// config), so the staleness check round-trips correctly.
 func buildImageAs(ctx context.Context, tag, contextDir string, out io.Writer) error {
-	cmd := exec.CommandContext(ctx, "docker", "build", "-t", tag, contextDir)
+	label := fmt.Sprintf("%s=%s", builtAtLabel, time.Now().UTC().Format(time.RFC3339Nano))
+	cmd := exec.CommandContext(ctx, "docker", "build", "--label", label, "-t", tag, contextDir)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Run(); err != nil {

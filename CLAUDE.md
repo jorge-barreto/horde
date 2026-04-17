@@ -60,4 +60,4 @@ go test -v -count=1 -timeout 10m ./test/integration/
 - Provider.Launch returns `*LaunchResult` with `InstanceID` + `Metadata map[string]string` (no provider-specific fields on the generic type)
 - Two-layer Docker image: base (`horde-worker-base:latest`) with orc/claude/tools, project image (`horde-worker:latest`) optionally extends via `worker/Dockerfile`
 - Containers preserved after stop/kill for retry and shell access; workspaces persist at `~/.horde/workspaces/<run-id>/`
-- Status detection is lazy: `handleLazyCheck()` runs on status/list/results to detect completed/timed-out containers and collect artifacts
+- Status detection is lazy: `prov.Finalize()` runs on status/list/results to detect completed/timed-out containers and collect artifacts

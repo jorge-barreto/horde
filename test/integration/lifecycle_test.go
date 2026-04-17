@@ -35,7 +35,7 @@ func TestLogsAfterKill(t *testing.T) {
 
 // TestResultsAfterSuccess verifies that `horde results` displays run results
 // for a successfully completed workflow. Orc writes run-result.json which
-// handleLazyCheck copies to the results directory.
+// prov.Finalize copies to the results directory.
 func TestResultsAfterSuccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -45,7 +45,7 @@ func TestResultsAfterSuccess(t *testing.T) {
 	runID := h.Launch("TEST-results-ok", "quick-success", 5*time.Minute)
 	h.WaitForOrc(runID, 2*time.Minute)
 
-	// The results command internally calls handleLazyCheck which detects
+	// The results command internally calls prov.Finalize which detects
 	// the stopped container, copies artifacts, and updates status.
 	out := h.Results(runID)
 
@@ -81,7 +81,7 @@ func TestCleanRemovesContainer(t *testing.T) {
 	h := newHarness(t)
 	runID := h.Launch("TEST-clean", "quick-success", 5*time.Minute)
 	h.WaitForOrc(runID, 2*time.Minute)
-	h.Status(runID) // trigger handleLazyCheck → marks success
+	h.Status(runID) // trigger prov.Finalize → marks success
 
 	cid := h.ContainerID(runID)
 	if cid == "" {
@@ -191,7 +191,7 @@ func TestContainerVanishedBeforeDetection(t *testing.T) {
 	}
 	h.RemoveContainerExternally(cid)
 
-	// Status triggers handleLazyCheck which sees "unknown" state
+	// Status triggers prov.Finalize which sees "unknown" state
 	out := h.Status(runID)
 
 	if !strings.Contains(out, "failed") {

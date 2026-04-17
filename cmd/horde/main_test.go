@@ -1091,7 +1091,7 @@ esac
 }
 
 func TestStatus_Timeout(t *testing.T) {
-	// handleLazyCheck calls Status() (inspect) then Kill() (stop+cp+rm) — script is intentionally stateless
+	// prov.Finalize calls Status() (inspect) then Kill() (stop+cp+rm) — script is intentionally stateless
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
@@ -2189,7 +2189,7 @@ func TestKill_AlreadyCompleted(t *testing.T) {
 	}
 }
 
-func TestHandleLazyCheck_TimeoutKillFailure(t *testing.T) {
+func TestFinalize_TimeoutKillFailure(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
@@ -2262,7 +2262,7 @@ esac
 	}
 }
 
-func TestHandleLazyCheck_TimeoutKillSuccess(t *testing.T) {
+func TestFinalize_TimeoutKillSuccess(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
@@ -2323,7 +2323,7 @@ esac
 	}
 }
 
-func TestHandleLazyCheck_TimeoutKillCapturesCostAndExitCode(t *testing.T) {
+func TestFinalize_TimeoutKillCapturesCostAndExitCode(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
@@ -2389,7 +2389,7 @@ esac
 	}
 }
 
-func TestHandleLazyCheck_TimeoutKillCapturesCostAndExitCode_WithWorkflow(t *testing.T) {
+func TestFinalize_TimeoutKillCapturesCostAndExitCode_WithWorkflow(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in
   inspect) printf '{"Running":true,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;

@@ -4,7 +4,7 @@
 
 Runs `4t7qe3q38a75` and `sk8cgp9yog3l` both completed successfully (created PRs) but show as "killed" in `horde list`. Investigation revealed three bugs in horde's status detection chain:
 
-1. **Timeout trumps completion** (`handleLazyCheck` line 1080): The timeout check runs before the `.horde-exit-code` marker file check (line 1120). If orc completes but the container stays alive (via `sleep infinity`) past the timeout, the next lazy check marks it "killed" without reading the marker. This is the primary bug — both runs used the default 60m timeout while orc worked for 8+ and 14+ hours.
+1. **Timeout trumps completion** (`prov.Finalize` line 1080): The timeout check runs before the `.horde-exit-code` marker file check (line 1120). If orc completes but the container stays alive (via `sleep infinity`) past the timeout, the next lazy check marks it "killed" without reading the marker. This is the primary bug — both runs used the default 60m timeout while orc worked for 8+ and 14+ hours.
 
 2. **`killCmd` ignores exit code** (line 577): `killCmd` unconditionally sets status to "killed" regardless of the exit code in `run-result.json`. Even exit code 0 results in "killed".
 
@@ -228,6 +228,6 @@ Tests require Docker to be running. Each test creates and cleans up its own cont
 ## Verification Plan
 
 1. **Red phase**: Run the test suite WITHOUT fixing the bugs. Tests 2, 3, 4 should fail. Tests 1, 5, 6, 7 should pass. This confirms the harness correctly detects the bugs.
-2. **Fix phase**: Implement the fixes to `handleLazyCheck` and `killCmd`.
+2. **Fix phase**: Implement the fixes to `prov.Finalize` and `killCmd`.
 3. **Green phase**: Run the test suite again. All 7 tests should pass.
 4. **Regression check**: Run `go test ./...` to verify existing unit tests still pass.

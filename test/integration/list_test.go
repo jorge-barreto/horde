@@ -7,7 +7,7 @@ import (
 )
 
 // TestListShowsActiveRuns verifies that `list` (without --all) shows only
-// active runs. A completed run should be filtered out after handleLazyCheck
+// active runs. A completed run should be filtered out after prov.Finalize
 // detects its container has stopped.
 func TestListShowsActiveRuns(t *testing.T) {
 	if testing.Short() {

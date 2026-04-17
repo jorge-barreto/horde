@@ -38,7 +38,7 @@ func TestNormalSuccess(t *testing.T) {
 	}
 }
 
-// TestTimeoutMasksSuccess reproduces Bug #1: handleLazyCheck checks timeout
+// TestTimeoutMasksSuccess reproduces Bug #1: prov.Finalize checks timeout
 // before the .horde-exit-code marker file. When orc completes successfully but
 // the container is past its timeout, horde reports "killed" instead of "success".
 func TestTimeoutMasksSuccess(t *testing.T) {
@@ -62,7 +62,7 @@ func TestTimeoutMasksSuccess(t *testing.T) {
 	out := h.Status(runID)
 
 	// The correct behavior is "success" because orc finished before timeout.
-	// BUG #1: horde currently reports "killed" because handleLazyCheck checks
+	// BUG #1: horde currently reports "killed" because prov.Finalize checks
 	// timeout before the marker file.
 	if !strings.Contains(out, "success") {
 		t.Errorf("BUG #1: timeout masks success — orc completed (exit 0) but horde "+
@@ -108,7 +108,7 @@ func TestKillAfterSuccess(t *testing.T) {
 
 // TestExternalStop reproduces Bug #3: when a container is stopped externally
 // (docker stop), the docker exit code is 143 (SIGTERM on sleep infinity).
-// handleLazyCheck's stopped case uses the docker exit code, not orc's marker.
+// prov.Finalize's stopped case uses the docker exit code, not orc's marker.
 func TestExternalStop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

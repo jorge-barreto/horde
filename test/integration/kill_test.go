@@ -63,7 +63,7 @@ func TestKillAlreadyKilled(t *testing.T) {
 }
 
 // TestKillAlreadyFailed verifies that killing an already-failed run
-// returns an error. handleLazyCheck detects the failure first.
+// returns an error. prov.Finalize detects the failure first.
 func TestKillAlreadyFailed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -73,7 +73,7 @@ func TestKillAlreadyFailed(t *testing.T) {
 	runID := h.Launch("TEST-kill-failed", "quick-fail", 5*time.Minute)
 	h.WaitForOrc(runID, 2*time.Minute)
 
-	// Kill triggers handleLazyCheck which detects the stopped container
+	// Kill triggers prov.Finalize which detects the stopped container
 	// and marks it "failed" before kill checks the status.
 	err := h.Kill(runID)
 	if err == nil {

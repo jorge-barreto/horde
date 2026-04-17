@@ -11,7 +11,7 @@
 **Spec:** `docs/2026-04-15-status-detection-test-harness-design.md`
 
 **Key files:**
-- `cmd/horde/main.go:1064-1260` — `handleLazyCheck` (the buggy function)
+- `cmd/horde/main.go:1064-1260` — `prov.Finalize` (the buggy function)
 - `cmd/horde/main.go:502-594` — `killCmd` (bug #2)
 - `cmd/horde/main.go:745-753` — `mapExitCode`
 - `internal/provider/docker.go:114-152` — `DockerProvider.Status`
@@ -768,7 +768,7 @@ cd /home/jb/work/horde && go vet ./test/integration/
 cd /home/jb/work/horde && go test -v -count=1 -timeout 5m -run "TestTimeoutMasksSuccess|TestKillAfterSuccess|TestExternalStop" ./test/integration/
 ```
 
-Expected: Tests 2 and 4 (TimeoutMasksSuccess, ExternalStop) FAIL. Test 3 (KillAfterSuccess) may pass if `handleLazyCheck` already updates status to "success" before `killCmd` checks `run.Status != running`. This confirms the harness correctly detects the bugs.
+Expected: Tests 2 and 4 (TimeoutMasksSuccess, ExternalStop) FAIL. Test 3 (KillAfterSuccess) may pass if `prov.Finalize` already updates status to "success" before `killCmd` checks `run.Status != running`. This confirms the harness correctly detects the bugs.
 
 - [ ] **Step 6: Commit**
 

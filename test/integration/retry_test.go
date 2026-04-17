@@ -117,7 +117,7 @@ func TestRetryFailedRun(t *testing.T) {
 	h.WaitForOrc(runID, 2*time.Minute)
 
 	// Confirm the run failed
-	h.Status(runID) // trigger handleLazyCheck
+	h.Status(runID) // trigger prov.Finalize
 	storeStatus := h.StoreStatus(runID)
 	if storeStatus != "failed" {
 		t.Fatalf("precondition: expected status 'failed' before retry, got %q", storeStatus)

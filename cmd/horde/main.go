@@ -178,7 +178,16 @@ ticket is already active.`,
 			// Reconcile stale records: container may have died since last check.
 			stillActive := active[:0]
 			for _, r := range active {
-				_ = handleLazyCheck(ctx, prov, st, r, homeDir)
+				origStatus := r.Status
+				_ = prov.Finalize(ctx, r, homeDir)
+				if r.Status != origStatus {
+					_ = st.UpdateRun(ctx, r.ID, &store.RunUpdate{
+						Status:       &r.Status,
+						ExitCode:     r.ExitCode,
+						CompletedAt:  r.CompletedAt,
+						TotalCostUSD: r.TotalCostUSD,
+					})
+				}
 				if r.Status == store.StatusPending || r.Status == store.StatusRunning {
 					stillActive = append(stillActive, r)
 				}
@@ -304,8 +313,19 @@ resumes any interrupted agent session. Override with explicit orc args:
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+			origStatus := run.Status
+			if err := prov.Finalize(ctx, run, homeDir); err != nil {
 				return err
+			}
+			if run.Status != origStatus {
+				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+					Status:       &run.Status,
+					ExitCode:     run.ExitCode,
+					CompletedAt:  run.CompletedAt,
+					TotalCostUSD: run.TotalCostUSD,
+				}); err != nil {
+					return fmt.Errorf("updating run: %w", err)
+				}
 			}
 
 			if run.Status == store.StatusPending {
@@ -427,8 +447,19 @@ result collection.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+			origStatus := run.Status
+			if err := prov.Finalize(ctx, run, homeDir); err != nil {
 				return err
+			}
+			if run.Status != origStatus {
+				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+					Status:       &run.Status,
+					ExitCode:     run.ExitCode,
+					CompletedAt:  run.CompletedAt,
+					TotalCostUSD: run.TotalCostUSD,
+				}); err != nil {
+					return fmt.Errorf("updating run: %w", err)
+				}
 			}
 			if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
 				if dp, ok := prov.(*provider.DockerProvider); ok {
@@ -526,8 +557,19 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+			origStatus := run.Status
+			if err := prov.Finalize(ctx, run, homeDir); err != nil {
 				return err
+			}
+			if run.Status != origStatus {
+				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+					Status:       &run.Status,
+					ExitCode:     run.ExitCode,
+					CompletedAt:  run.CompletedAt,
+					TotalCostUSD: run.TotalCostUSD,
+				}); err != nil {
+					return fmt.Errorf("updating run: %w", err)
+				}
 			}
 			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
@@ -613,8 +655,19 @@ information if the result file is missing (e.g., orc crashed early).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+			origStatus := run.Status
+			if err := prov.Finalize(ctx, run, homeDir); err != nil {
 				return err
+			}
+			if run.Status != origStatus {
+				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+					Status:       &run.Status,
+					ExitCode:     run.ExitCode,
+					CompletedAt:  run.CompletedAt,
+					TotalCostUSD: run.TotalCostUSD,
+				}); err != nil {
+					return fmt.Errorf("updating run: %w", err)
+				}
 			}
 			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
 				if cmd.Bool("json") {
@@ -706,9 +759,20 @@ include completed, failed, and killed runs.`,
 			}
 
 			for _, run := range runs {
-				if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+				origStatus := run.Status
+				if err := prov.Finalize(ctx, run, homeDir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
 					continue
+				}
+				if run.Status != origStatus {
+					if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+						Status:       &run.Status,
+						ExitCode:     run.ExitCode,
+						CompletedAt:  run.CompletedAt,
+						TotalCostUSD: run.TotalCostUSD,
+					}); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: updating run %s: %v\n", run.ID, err)
+					}
 				}
 				if dp, ok := prov.(*provider.DockerProvider); ok {
 					if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
@@ -892,8 +956,19 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if err := handleLazyCheck(ctx, prov, st, run, homeDir); err != nil {
+			origStatus := run.Status
+			if err := prov.Finalize(ctx, run, homeDir); err != nil {
 				return err
+			}
+			if run.Status != origStatus {
+				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+					Status:       &run.Status,
+					ExitCode:     run.ExitCode,
+					CompletedAt:  run.CompletedAt,
+					TotalCostUSD: run.TotalCostUSD,
+				}); err != nil {
+					return fmt.Errorf("updating run: %w", err)
+				}
 			}
 
 			if run.InstanceID == "" {
@@ -1047,25 +1122,6 @@ func removeWorkspace(ctx context.Context, dir string) error {
 	}
 	// Now the host can remove the empty directory.
 	return os.Remove(dir)
-}
-
-func handleLazyCheck(ctx context.Context, prov provider.Provider, st store.Store, run *store.Run, homeDir string) error {
-	origStatus := run.Status
-	if err := prov.Finalize(ctx, run, homeDir); err != nil {
-		return err
-	}
-	// If Finalize transitioned the run to a terminal state, persist to store.
-	if run.Status != origStatus {
-		if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-			Status:       &run.Status,
-			ExitCode:     run.ExitCode,
-			CompletedAt:  run.CompletedAt,
-			TotalCostUSD: run.TotalCostUSD,
-		}); err != nil {
-			return fmt.Errorf("updating run: %w", err)
-		}
-	}
-	return nil
 }
 
 func printRunTable(runs []*store.Run) {

@@ -110,11 +110,28 @@ ticket is already active.`,
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
 
-			prov, st, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, maxConcurrent, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
 			defer cleanup()
+
+			// Concurrency check: reject launch if at capacity.
+			activeCount, err := st.CountActive(ctx)
+			if err != nil {
+				return fmt.Errorf("checking concurrency: %w", err)
+			}
+			if activeCount >= maxConcurrent {
+				activeRuns, listErr := st.ListActive(ctx)
+				if listErr != nil {
+					return fmt.Errorf("at capacity (%d/%d active runs) but failed to list them: %w", activeCount, maxConcurrent, listErr)
+				}
+				fmt.Fprintf(os.Stderr, "at capacity: %d/%d active runs\n", activeCount, maxConcurrent)
+				for _, r := range activeRuns {
+					fmt.Fprintf(os.Stderr, "  %s  %s\n", r.ID, r.Ticket)
+				}
+				return fmt.Errorf("max concurrent runs reached (%d/%d)", activeCount, maxConcurrent)
+			}
 
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
@@ -673,7 +690,7 @@ include completed, failed, and killed runs.`,
 			if provName == "" {
 				provName = "docker"
 			}
-			prov, st, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -778,7 +795,7 @@ directories (all code changes will be lost).`,
 			if provName == "" {
 				provName = "docker"
 			}
-			prov, st, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -1438,7 +1455,7 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 // Selection rule: "docker" → DockerProvider + SQLite; "aws-ecs" → ECS + DynamoDB
 // (not yet implemented); "" → auto-detect via SSM.
 // Returns a cleanup function that must be deferred to release store resources.
-func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, func(), error) {
+func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, func(), error) {
 	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 }
 

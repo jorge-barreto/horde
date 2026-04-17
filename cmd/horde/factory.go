@@ -72,7 +72,7 @@ func newProviderWith(ctx context.Context, name, profile string, deps factoryDeps
 // from the stored run.Provider field (unless provFlag overrides it).
 func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, deps factoryDeps) (provider.Provider, store.Store, *store.Run, func(), error) {
 	if provFlag != "" {
-		prov, st, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
+		prov, st, _, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -106,36 +106,38 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 	return prov, st, run, cleanup, nil
 }
 
-func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, func(), error) {
+func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, int, func(), error) {
 	switch name {
 	case "docker":
 		prov := provider.NewDockerProvider()
 		st, cleanup, err := deps.openStore("docker")
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, 0, nil, err
 		}
-		return prov, st, cleanup, nil
+		return prov, st, 100, cleanup, nil
 	case "aws-ecs":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
+			return nil, nil, 0, nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		if _, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath); err != nil {
-			return nil, nil, nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
+		if err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
-		return nil, nil, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+		return nil, nil, hordeCfg.MaxConcurrent, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
 	case "":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("auto-detecting provider: %w\nhint: use --provider docker for local mode", err)
+			return nil, nil, 0, nil, fmt.Errorf("auto-detecting provider: %w\nhint: use --provider docker for local mode", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		if _, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath); err != nil {
-			return nil, nil, nil, fmt.Errorf("auto-detecting provider: %s\nhint: use --provider docker for local mode", config.Diagnostic(err))
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
+		if err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("auto-detecting provider: %s\nhint: use --provider docker for local mode", config.Diagnostic(err))
 		}
-		return nil, nil, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+		return nil, nil, hordeCfg.MaxConcurrent, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
 	default:
-		return nil, nil, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
+		return nil, nil, 0, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
 	}
 }

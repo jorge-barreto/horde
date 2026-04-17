@@ -142,7 +142,7 @@ func TestInitProviderAndStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			prov, st, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
+			prov, st, maxConcurrent, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
 
 			if tc.wantErr {
 				if err == nil {
@@ -169,6 +169,9 @@ func TestInitProviderAndStore(t *testing.T) {
 				}
 				if cleanup == nil {
 					t.Error("expected non-nil cleanup")
+				}
+				if maxConcurrent != 100 {
+					t.Errorf("maxConcurrent: got %d, want 100", maxConcurrent)
 				}
 				cleanup()
 			}

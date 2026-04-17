@@ -430,6 +430,42 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 	}
 }
 
+func TestLaunch_MaxConcurrent_Rejected(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		err = st.CreateRun(ctx, &store.Run{
+			ID:         fmt.Sprintf("run-%03d", i),
+			Repo:       "github.com/test/repo.git",
+			Ticket:     fmt.Sprintf("TICKET-%d", i),
+			Status:     store.StatusRunning,
+			Provider:   "docker",
+			LaunchedBy: "someone",
+			StartedAt:  now.Add(time.Duration(i) * time.Second),
+			TimeoutAt:  now.Add(25 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("pre-creating run %d: %v", i, err)
+		}
+	}
+	st.Close()
+
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-NEW"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "max concurrent runs reached") {
+		t.Errorf("error %q does not contain %q", err.Error(), "max concurrent runs reached")
+	}
+}
+
 func TestLaunch_DockerFailure(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()

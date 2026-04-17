@@ -42,7 +42,7 @@ type LaunchResult struct {
 
 // InstanceStatus describes the current state of a running or completed instance.
 type InstanceStatus struct {
-	State      string // running, stopped, unknown
+	State      string // pending, running, stopping, stopped, unknown
 	ExitCode   *int   // nil while running
 	StartedAt  time.Time
 	FinishedAt *time.Time // nil while running

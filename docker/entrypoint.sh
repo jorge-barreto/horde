@@ -47,10 +47,25 @@ else
     ORC_CMD="orc run $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
 fi
 
-# Upload artifacts to S3 (ECS only — env vars are absent in docker mode)
+# ECS path: sync session state and artifacts through S3 so retries can
+# resume. Docker mode skips this block — bind mounts handle persistence.
 if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
+    # Restore prior agent session state (Claude CLI reads ~/.claude/projects/).
+    # First-run prefix is empty; sync handles that as a no-op. Failures are
+    # non-fatal — a missing prior session means orc --resume falls back to a
+    # fresh start, which is better than aborting the run.
+    mkdir -p /root/.claude
+    aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" /root/.claude/ \
+        || echo "WARNING: session restore failed (continuing)" >&2
+
     eval $ORC_CMD
     EXIT_CODE=$?
+
+    # Always persist session state, even on failure, so retry can resume.
+    if [ -d /root/.claude ]; then
+        aws s3 sync /root/.claude/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" \
+            || echo "WARNING: session upload failed" >&2
+    fi
     if [ -d .orc/artifacts/ ]; then
         aws s3 cp .orc/artifacts/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/artifacts/" --recursive || echo "WARNING: artifact upload failed" >&2
     fi

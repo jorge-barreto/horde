@@ -529,6 +529,18 @@ func (h *harness) WorkspaceExists(runID string) bool {
 	return err == nil
 }
 
+// SessionsDir returns the host path to a run's sessions directory
+// (bind-mounted to /root/.claude in the container).
+func (h *harness) SessionsDir(runID string) string {
+	return filepath.Join(h.homeDir, ".horde", "workspaces", runID+"-sessions")
+}
+
+// SessionsExists checks whether the sessions directory exists.
+func (h *harness) SessionsExists(runID string) bool {
+	_, err := os.Stat(h.SessionsDir(runID))
+	return err == nil
+}
+
 // ResultsDir returns the host path to a run's results directory.
 func (h *harness) ResultsDir(runID string) string {
 	return filepath.Join(h.homeDir, ".horde", "results", runID)

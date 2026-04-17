@@ -35,6 +35,13 @@ func WorkspacePath(homeDir, runID string) string {
 	return filepath.Join(homeDir, ".horde", "workspaces", runID)
 }
 
+// SessionsPath returns the host path for a run's persistent agent session
+// state (bind-mounted to /root/.claude inside the container). Keeping it
+// beside the workspace dir mirrors the per-run lifecycle.
+func SessionsPath(homeDir, runID string) string {
+	return filepath.Join(homeDir, ".horde", "workspaces", runID+"-sessions")
+}
+
 // LaunchResult contains the outcome of a successful launch.
 type LaunchResult struct {
 	InstanceID string            // container ID or ECS task ARN

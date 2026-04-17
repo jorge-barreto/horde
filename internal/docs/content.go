@@ -186,14 +186,20 @@ Auto-Build and Rebuild Triggers
 
 horde builds images automatically on launch. No manual build step needed.
 
+Every build stamps the resulting image with a horde.built_at label
+(RFC3339Nano timestamp). The staleness check reads this label rather
+than the image's Created time — cache-hit builds still refresh the label,
+so the check is cache-safe.
+
 Base image rebuilds when:
     - The image does not exist
-    - Any file in ~/.horde/workerfiles/ is newer than the image
+    - The image has no horde.built_at label (pre-label horde build)
+    - Any file in ~/.horde/workerfiles/ is newer than the label
 
 Project image rebuilds when:
-    - The image does not exist
-    - The base image was rebuilt (base is newer than project image)
-    - Any file in worker/ is newer than the project image
+    - The image does not exist or has no horde.built_at label
+    - The base image's label is newer than the project image's label
+    - Any file in worker/ is newer than the project image's label
 
 After 'make install', the embedded files get a fresh mtime, so the next
 launch detects them as newer and rebuilds. This means upgrading horde
@@ -219,17 +225,22 @@ How it works:
 
     1. Creates a persistent workspace at ~/.horde/workspaces/<run-id>/
        and mounts it into the container at /workspace.
-    2. Runs the container in detached mode with environment variables
+    2. Creates a persistent sessions dir at
+       ~/.horde/workspaces/<run-id>-sessions/ and mounts it into the
+       container at /root/.claude so agent session history survives
+       across retries (orc --resume needs these files).
+    3. Runs the container in detached mode with environment variables
        for repo URL, ticket, branch, workflow, and run ID.
-    3. Secrets from .env are passed via --env-file.
-    4. Volume mounts from .horde/config.yaml are applied with -v flags.
-    5. The container's entrypoint clones the repo, runs orc, and exits.
+    4. Secrets from .env are passed via --env-file.
+    5. Volume mounts from .horde/config.yaml are applied with -v flags.
+    6. The container's entrypoint clones the repo, runs orc, and exits.
 
 Run data is stored locally:
 
-    ~/.horde/horde.db               SQLite run history
-    ~/.horde/workspaces/<run-id>/   Persistent workspace (survives container loss)
-    ~/.horde/results/<run-id>/      Artifacts, audit logs, saved logs
+    ~/.horde/horde.db                        SQLite run history
+    ~/.horde/workspaces/<run-id>/            Persistent workspace
+    ~/.horde/workspaces/<run-id>-sessions/   Persistent agent session state
+    ~/.horde/results/<run-id>/               Artifacts, audit logs, saved logs
 
 Completion is detected lazily — the next 'horde status', 'horde results',
 or 'horde list' call checks the container state. On detecting completion,
@@ -272,9 +283,11 @@ Retry
 
     horde retry <run-id> [-- <orc-args>...]
 
-Launches a new container against the preserved workspace. If the old
-container is still alive, it is stopped first. orc sees its audit state
-and picks up from the failed phase automatically.
+Launches a new container against the preserved workspace and sessions
+dir. If the old container is still alive, it is stopped first. orc sees
+its audit state and picks up from the failed phase automatically; the
+agent's Claude session is restored from ~/.horde/workspaces/<run-id>-sessions/
+so orc --resume can reattach to the in-flight conversation.
 
 The same run ID is reused. The timeout is reset.
 
@@ -316,12 +329,15 @@ Clean
 Containers are removed but workspaces are preserved by default for
 retry and shell access. Use --purge to free disk space when you no
 longer need the workspace. Running and pending runs cannot be cleaned.
+--purge also removes the matching sessions dir.
 
 Workspace Persistence
 ---------------------
 
 Each run's workspace lives at ~/.horde/workspaces/<run-id>/ on the host,
-mounted into the container at /workspace. This means:
+mounted into the container at /workspace. Agent session state lives
+alongside it at ~/.horde/workspaces/<run-id>-sessions/, mounted at
+/root/.claude. This means:
 
     - Container crashes: workspace survives, retry launches fresh compute
     - Docker restarts: same — workspace is on the host filesystem
@@ -339,7 +355,7 @@ Container Lifecycle
     horde launch   →  workspace created on host, container mounts it
     orc finishes   →  container stays alive (sleep infinity)
     horde status   →  detects completion via marker file, copies artifacts
-    horde retry    →  exec in live container, or new container with workspace
+    horde retry    →  stop old container (if any), launch new against workspace
     horde shell    →  exec in live container, or ephemeral container
     horde kill     →  container stopped, workspace preserved
     horde clean    →  container removed, workspace preserved

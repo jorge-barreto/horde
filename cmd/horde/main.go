@@ -788,11 +788,15 @@ directories (all code changes will be lost).`,
 				homeDir, _ := os.UserHomeDir()
 				if homeDir != "" {
 					workspaceDir := provider.WorkspacePath(homeDir, runID)
+					sessionsDir := provider.SessionsPath(homeDir, runID)
 					if purge {
 						if err := removeWorkspace(ctx, workspaceDir); err != nil {
 							fmt.Fprintf(os.Stderr, "warning: removing workspace: %v\n", err)
 						} else {
 							fmt.Printf("Removed workspace for run %s\n", runID)
+						}
+						if err := removeWorkspace(ctx, sessionsDir); err != nil {
+							fmt.Fprintf(os.Stderr, "warning: removing sessions: %v\n", err)
 						}
 					} else if _, err := os.Stat(workspaceDir); err == nil {
 						fmt.Fprintf(os.Stderr, "note: workspace preserved at %s (use --purge to remove)\n", workspaceDir)
@@ -836,6 +840,7 @@ directories (all code changes will be lost).`,
 				}
 				if purge && homeDir != "" {
 					removeWorkspace(ctx, provider.WorkspacePath(homeDir, r.ID))
+					removeWorkspace(ctx, provider.SessionsPath(homeDir, r.ID))
 				}
 			}
 			fmt.Printf("Removed %d container(s)\n", cleaned)

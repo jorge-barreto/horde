@@ -72,8 +72,11 @@ func (l *logReadCloser) Close() error {
 }
 
 func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error) {
-	// Create persistent workspace directory and prepend it to mounts.
-	// If the directory already exists (retry), this is a no-op.
+	// Create persistent workspace and sessions directories and prepend them
+	// to mounts. Both dirs are per-run and persist across retries so orc can
+	// resume the workspace tree AND the agent's session history from
+	// /root/.claude (Claude CLI writes session JSON there). If the dirs
+	// already exist (retry), MkdirAll is a no-op.
 	var allMounts []string
 	if opts.HomeDir != "" && opts.RunID != "" {
 		wsDir := WorkspacePath(opts.HomeDir, opts.RunID)
@@ -81,6 +84,12 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 			return nil, fmt.Errorf("creating workspace directory: %w", err)
 		}
 		allMounts = append(allMounts, wsDir+":/workspace")
+
+		sessionsDir := SessionsPath(opts.HomeDir, opts.RunID)
+		if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating sessions directory: %w", err)
+		}
+		allMounts = append(allMounts, sessionsDir+":/root/.claude")
 	}
 	allMounts = append(allMounts, opts.Mounts...)
 

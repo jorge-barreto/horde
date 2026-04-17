@@ -338,6 +338,7 @@ For the `aws-ecs` provider, all config is discovered from a single SSM parameter
   "subnets": ["subnet-abc", "subnet-def"],
   "security_group": "sg-123",
   "log_group": "/ecs/horde-worker",
+  "log_stream_prefix": "ecs",
   "artifacts_bucket": "my-horde-artifacts",
   "runs_table": "horde-runs",
   "max_concurrent": 5,
@@ -464,7 +465,7 @@ The format is chosen to be:
 ### v0.2 — Baseline
 
 - **Scoped IAM for tasks**: Task role can only write to the artifacts S3 bucket and read specific secrets. No EC2, no other AWS services.
-- **Scoped IAM for CLI users**: The CDK construct outputs a managed policy ARN. Developers need: `ecs:RunTask`, `ecs:DescribeTasks`, `ecs:StopTask` on the cluster; `ssm:GetParameter` on `/horde/config`; `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:Query` on `horde-runs` table; `logs:GetLogEvents` on the log group; `s3:GetObject` on the artifacts bucket.
+- **Scoped IAM for CLI users**: The CDK construct outputs a managed policy ARN. Developers need: `ecs:RunTask`, `ecs:DescribeTasks`, `ecs:StopTask` on the cluster; `ecs:TagResource` on task resources under the cluster (e.g., `arn:aws:ecs:*:*:task/<cluster>/*`); `iam:PassRole` on the horde task role and execution role (e.g., `arn:aws:iam::*:role/horde-*`); `ssm:GetParameter` on `/horde/config`; `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:Query` on `horde-runs` table; `logs:GetLogEvents` on the log group; `s3:GetObject` on the artifacts bucket.
 - **Scoped git token**: Fine-grained GitHub PAT — read + push to `horde/*` branches only. Cannot push to main, cannot delete branches.
 - **API key limits**: Anthropic API key with usage limits set at the key level.
 - **Ephemeral**: Instance is destroyed after the run. No persistent state, no attack surface.
@@ -514,7 +515,7 @@ type LaunchResult struct {
 }
 
 type InstanceStatus struct {
-    State      string // running, stopped, unknown
+    State      string // pending, running, stopping, stopped, unknown
     ExitCode   *int   // nil while running
     StartedAt  time.Time
     FinishedAt *time.Time // nil while running

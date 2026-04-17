@@ -1058,8 +1058,12 @@ func TestDockerProvider_ReadFile_FileNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "not found in results for run") {
-		t.Errorf("expected error to contain %q, got: %v", "not found in results for run", err)
+	var notFound *FileNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Errorf("ReadFile() error type = %T, want *FileNotFoundError", err)
+	}
+	if notFound.Path != ".orc/audit/missing.json" {
+		t.Errorf("FileNotFoundError.Path = %q, want %q", notFound.Path, ".orc/audit/missing.json")
 	}
 }
 
@@ -1167,10 +1171,11 @@ func TestDockerProvider_ReadFile_ReadError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if strings.Contains(err.Error(), "not found in results for run") {
-		t.Errorf("expected a read error, not a not-found error, got: %v", err)
-	}
 	if !strings.Contains(err.Error(), "reading file:") {
 		t.Errorf("expected error to contain %q, got: %v", "reading file:", err)
+	}
+	var notFound *FileNotFoundError
+	if errors.As(err, &notFound) {
+		t.Errorf("ReadFile() error = %T, should NOT be *FileNotFoundError", err)
 	}
 }

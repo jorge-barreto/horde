@@ -349,9 +349,231 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	return data, nil
 }
 
+func mapExitCode(code int) store.Status {
+	switch code {
+	case 0:
+		return store.StatusSuccess
+	case 5:
+		return store.StatusKilled
+	default:
+		return store.StatusFailed
+	}
+}
+
+type dockerRunResult struct {
+	TotalCostUSD *float64 `json:"total_cost_usd"`
+	ExitCode     *int     `json:"exit_code"`
+}
+
+func copyDir(src, dst string) {
+	filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			os.MkdirAll(target, 0o755)
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		os.MkdirAll(filepath.Dir(target), 0o755)
+		os.WriteFile(target, data, 0o644)
+		return nil
+	})
+}
+
 // Finalize checks whether a pending/running Docker container has completed
-// or timed out. Full implementation is in bead i2c.4.2; this stub satisfies
-// the Provider interface so the build compiles.
+// or timed out. For completed instances it collects artifacts and populates
+// the run's terminal fields (Status, ExitCode, CompletedAt, TotalCostUSD)
+// in-place. If the instance is still running (and not timed out), the run
+// is left unchanged. The caller is responsible for persisting any changes
+// to the store.
 func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir string) error {
+	if run.Status != store.StatusPending && run.Status != store.StatusRunning {
+		return nil
+	}
+	if run.InstanceID == "" {
+		return nil
+	}
+
+	instanceStatus, err := p.Status(ctx, run.InstanceID)
+	if err != nil {
+		return fmt.Errorf("checking instance status: %w", err)
+	}
+
+	switch instanceStatus.State {
+	case "running":
+		// Check if orc finished first (marker file on host workspace — container
+		// stays alive via sleep infinity). This must come before the timeout
+		// check: if orc completed, its exit code is authoritative regardless of
+		// whether the timeout window has passed.
+		markerPath := filepath.Join(WorkspacePath(homeDir, run.ID), ".horde-exit-code")
+		exitData, err := os.ReadFile(markerPath)
+		if err == nil {
+			exitCode := 1 // default to failure
+			fmt.Sscanf(strings.TrimSpace(string(exitData)), "%d", &exitCode)
+
+			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+			p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
+			p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+
+			if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
+				if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
+					os.MkdirAll(resultsDir, 0o755)
+					os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+				}
+				logs.Close()
+			}
+
+			var resultPath string
+			if run.Workflow != "" {
+				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+			} else {
+				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+			}
+			var cost *float64
+			if data, err := os.ReadFile(resultPath); err == nil {
+				var rr dockerRunResult
+				if json.Unmarshal(data, &rr) == nil {
+					cost = rr.TotalCostUSD
+				}
+			}
+
+			now := time.Now()
+			run.Status = mapExitCode(exitCode)
+			run.ExitCode = &exitCode
+			run.CompletedAt = &now
+			run.TotalCostUSD = cost
+			return nil
+		}
+
+		// Orc still running — check timeout
+		if time.Now().After(run.TimeoutAt) {
+			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+			if err := p.Stop(ctx, StopOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: stopping timed-out container: %v\n", err)
+				return nil
+			}
+
+			var cost *float64
+			var exitCode *int
+			var resultPath string
+			if run.Workflow != "" {
+				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+			} else {
+				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+			}
+			if data, err := os.ReadFile(resultPath); err == nil {
+				var rr dockerRunResult
+				if json.Unmarshal(data, &rr) == nil {
+					cost = rr.TotalCostUSD
+					exitCode = rr.ExitCode
+				}
+			}
+
+			now := time.Now()
+			run.Status = store.StatusKilled
+			run.ExitCode = exitCode
+			run.CompletedAt = &now
+			run.TotalCostUSD = cost
+			return nil
+		}
+
+		return nil // orc still running, nothing to do
+
+	case "stopped":
+		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+		p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
+		p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+
+		if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
+			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
+				os.MkdirAll(resultsDir, 0o755)
+				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+			}
+			logs.Close()
+		}
+
+		var resultPath string
+		if run.Workflow != "" {
+			resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
+		} else {
+			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
+		}
+		var cost *float64
+		if data, err := os.ReadFile(resultPath); err == nil {
+			var rr dockerRunResult
+			if json.Unmarshal(data, &rr) == nil {
+				cost = rr.TotalCostUSD
+			}
+		}
+
+		// Check orc's exit marker on host workspace first — docker's exit code
+		// reflects how the container process (sleep infinity) died, not orc's result.
+		var newStatus store.Status
+		var exitCode *int
+		markerPath := filepath.Join(WorkspacePath(homeDir, run.ID), ".horde-exit-code")
+		if data, err := os.ReadFile(markerPath); err == nil {
+			code := 1
+			fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code)
+			exitCode = &code
+			newStatus = mapExitCode(code)
+		} else if instanceStatus.ExitCode != nil {
+			exitCode = instanceStatus.ExitCode
+			newStatus = mapExitCode(*instanceStatus.ExitCode)
+		} else {
+			newStatus = store.StatusFailed
+		}
+
+		now := time.Now()
+		run.Status = newStatus
+		run.ExitCode = exitCode
+		run.CompletedAt = &now
+		run.TotalCostUSD = cost
+
+	case "unknown":
+		var cost *float64
+		workspaceDir := WorkspacePath(homeDir, run.ID)
+		if _, err := os.Stat(workspaceDir); err == nil {
+			fmt.Fprintf(os.Stderr, "warning: container for run %s vanished — workspace preserved at %s\n", run.ID, workspaceDir)
+			fmt.Fprintf(os.Stderr, "  use 'horde retry %s' to resume or 'horde shell %s' to inspect\n", run.ID, run.ID)
+
+			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+			auditSrc := filepath.Join(workspaceDir, ".orc", "audit")
+			artifactsSrc := filepath.Join(workspaceDir, ".orc", "artifacts")
+			if _, err := os.Stat(auditSrc); err == nil {
+				copyDir(auditSrc, filepath.Join(resultsDir, "audit"))
+			}
+			if _, err := os.Stat(artifactsSrc); err == nil {
+				copyDir(artifactsSrc, filepath.Join(resultsDir, "artifacts"))
+			}
+
+			var resultPath string
+			if run.Workflow != "" {
+				resultPath = filepath.Join(workspaceDir, ".orc", "audit", run.Workflow, run.Ticket, "run-result.json")
+			} else {
+				resultPath = filepath.Join(workspaceDir, ".orc", "audit", run.Ticket, "run-result.json")
+			}
+			if data, err := os.ReadFile(resultPath); err == nil {
+				var rr dockerRunResult
+				if json.Unmarshal(data, &rr) == nil {
+					cost = rr.TotalCostUSD
+				}
+			}
+		}
+
+		now := time.Now()
+		run.Status = store.StatusFailed
+		run.CompletedAt = &now
+		run.TotalCostUSD = cost
+	}
+
 	return nil
 }

@@ -55,4 +55,5 @@ type Store interface {
 	ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error)
 	FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
 	CountActive(ctx context.Context) (int, error)
+	ListActive(ctx context.Context) ([]*Run, error)
 }

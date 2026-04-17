@@ -433,3 +433,39 @@ func (s *DynamoStore) CountActive(ctx context.Context) (int, error) {
 	}
 	return total, nil
 }
+
+func (s *DynamoStore) ListActive(ctx context.Context) ([]*Run, error) {
+	runs := make([]*Run, 0)
+	for _, status := range []Status{StatusPending, StatusRunning} {
+		input := &dynamodb.QueryInput{
+			TableName:              aws.String(s.tableName),
+			IndexName:              aws.String(GSIByStatus),
+			KeyConditionExpression: aws.String("#st = :st"),
+			ExpressionAttributeNames: map[string]string{
+				"#st": AttrStatus,
+			},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":st": &types.AttributeValueMemberS{Value: string(status)},
+			},
+			ScanIndexForward: aws.Bool(false),
+		}
+		for {
+			out, err := s.client.Query(ctx, input)
+			if err != nil {
+				return nil, fmt.Errorf("listing active runs: %w", err)
+			}
+			for _, item := range out.Items {
+				run, err := parseRun(item)
+				if err != nil {
+					return nil, fmt.Errorf("listing active runs: %w", err)
+				}
+				runs = append(runs, run)
+			}
+			if out.LastEvaluatedKey == nil {
+				break
+			}
+			input.ExclusiveStartKey = out.LastEvaluatedKey
+		}
+	}
+	return runs, nil
+}

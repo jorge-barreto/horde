@@ -344,3 +344,29 @@ func (s *SQLiteStore) CountActive(ctx context.Context) (int, error) {
 	}
 	return count, nil
 }
+
+func (s *SQLiteStore) ListActive(ctx context.Context) ([]*Run, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, repo, ticket, branch, workflow, provider,
+			instance_id, metadata, status, exit_code, launched_by,
+			started_at, completed_at, timeout_at, total_cost_usd
+		FROM runs WHERE status IN ('pending', 'running')
+		ORDER BY started_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing active runs: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]*Run, 0)
+	for rows.Next() {
+		run, err := s.scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("listing active runs: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing active runs: %w", err)
+	}
+	return runs, nil
+}

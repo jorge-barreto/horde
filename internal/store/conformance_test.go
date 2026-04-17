@@ -838,6 +838,70 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("ListActive/Empty", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		runs, err := s.ListActive(ctx)
+		if err != nil {
+			t.Fatalf("ListActive: %v", err)
+		}
+		if len(runs) != 0 {
+			t.Errorf("len: got %d, want 0", len(runs))
+		}
+	})
+
+	t.Run("ListActive/MixedStatuses", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/listrepo"
+		statuses := []Status{StatusPending, StatusRunning, StatusSuccess, StatusFailed, StatusKilled}
+		for i, st := range statuses {
+			run := conformanceRun(fmt.Sprintf("run-%d", i), repo, "PROJ-1", st)
+			run.StartedAt = time.Date(2026, 4, 15, 10, i, 0, 0, time.UTC)
+			run.TimeoutAt = run.StartedAt.Add(60 * time.Minute)
+			if err := s.CreateRun(ctx, run); err != nil {
+				t.Fatalf("CreateRun run-%d: %v", i, err)
+			}
+		}
+		runs, err := s.ListActive(ctx)
+		if err != nil {
+			t.Fatalf("ListActive: %v", err)
+		}
+		if len(runs) != 2 {
+			t.Errorf("len: got %d, want 2", len(runs))
+		}
+		for _, r := range runs {
+			if r.ID == "" {
+				t.Error("run has empty ID")
+			}
+			if r.Ticket == "" {
+				t.Error("run has empty Ticket")
+			}
+		}
+	})
+
+	t.Run("ListActive/CrossRepo", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		run1 := conformanceRun("run-1", "github.com/org/repo1", "PROJ-1", StatusPending)
+		run2 := conformanceRun("run-2", "github.com/org/repo2", "PROJ-2", StatusPending)
+		run2.StartedAt = run1.StartedAt.Add(time.Minute)
+		run2.TimeoutAt = run2.StartedAt.Add(60 * time.Minute)
+
+		for _, r := range []*Run{run1, run2} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun %s: %v", r.ID, err)
+			}
+		}
+		runs, err := s.ListActive(ctx)
+		if err != nil {
+			t.Fatalf("ListActive: %v", err)
+		}
+		if len(runs) != 2 {
+			t.Errorf("len: got %d, want 2", len(runs))
+		}
+	})
+
 	t.Run("MetadataRoundTrip/Nil", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)

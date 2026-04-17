@@ -365,7 +365,8 @@ type Store interface {
     UpdateRun(ctx context.Context, id string, update *RunUpdate) error
     ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error)
     FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
-    CountActive(ctx context.Context) (int, error) // v0.2 — cluster-wide concurrency check
+    CountActive(ctx context.Context) (int, error)    // v0.2 — cluster-wide concurrency check
+    ListActive(ctx context.Context) ([]*Run, error)  // v0.2 — list active runs for concurrency error detail
 }
 ```
 

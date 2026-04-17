@@ -109,7 +109,7 @@ ticket is already active.`,
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
 
-			prov, st, maxConcurrent, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, maxConcurrent, provName, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -135,12 +135,6 @@ ticket is already active.`,
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
-			}
-
-			provName := cmd.String("provider")
-			if provName == "" {
-				// TODO(d69): when auto-detect succeeds, resolve actual provider name.
-				provName = "docker"
 			}
 
 			cwd, err := os.Getwd()
@@ -728,11 +722,7 @@ include completed, failed, and killed runs.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			all := cmd.Bool("all")
 
-			provName := cmd.String("provider")
-			if provName == "" {
-				provName = "docker"
-			}
-			prov, st, _, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -832,11 +822,7 @@ directories (all code changes will be lost).`,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			provName := cmd.String("provider")
-			if provName == "" {
-				provName = "docker"
-			}
-			prov, st, _, cleanup, err := initProviderAndStoreWith(ctx, provName, cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -1244,7 +1230,11 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 		return config.LaunchedBy(cwd), nil
 	case "aws-ecs":
 		if awsCfg == nil {
-			return "", fmt.Errorf("resolving launched_by: AWS config required for aws-ecs provider")
+			cfg, err := awscfg.Load(ctx, profile)
+			if err != nil {
+				return "", fmt.Errorf("resolving launched_by: %w", err)
+			}
+			awsCfg = &cfg
 		}
 		arn, err := awscfg.CallerIdentity(ctx, *awsCfg, profile)
 		if err != nil {
@@ -1260,7 +1250,7 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 // Selection rule: "docker" → DockerProvider + SQLite; "aws-ecs" → ECS + DynamoDB
 // (not yet implemented); "" → auto-detect via SSM.
 // Returns a cleanup function that must be deferred to release store resources.
-func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, func(), error) {
+func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, string, func(), error) {
 	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 }
 

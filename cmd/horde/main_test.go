@@ -3057,12 +3057,14 @@ func TestResolveLaunchedBy_Docker(t *testing.T) {
 
 func TestResolveLaunchedBy_ECS_NilConfig(t *testing.T) {
 	t.Parallel()
+	// nil awsCfg triggers on-demand load via awscfg.Load; in a test environment
+	// without real AWS credentials the call returns an error.
 	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", nil, "")
 	if err == nil {
 		t.Fatalf("resolveLaunchedBy(aws-ecs, nil config) = %q, want error", got)
 	}
-	if !strings.Contains(err.Error(), "AWS config required") {
-		t.Errorf("error = %q, want it to contain %q", err.Error(), "AWS config required")
+	if !strings.Contains(err.Error(), "resolving launched_by:") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "resolving launched_by:")
 	}
 }
 

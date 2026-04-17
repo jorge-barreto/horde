@@ -160,7 +160,7 @@ func TestInitProviderAndStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			prov, st, maxConcurrent, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
+			prov, st, maxConcurrent, _, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
 
 			if tc.wantErr {
 				if err == nil {
@@ -249,28 +249,19 @@ func TestNewProviderWith(t *testing.T) {
 func TestInitFromRunID(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no flag uses stored provider", func(t *testing.T) {
+	t.Run("no flag triggers auto-detect", func(t *testing.T) {
 		t.Parallel()
 		deps := factoryDeps{
-			openStore: func(_ string) (store.Store, func(), error) {
-				return &stubStore{
-					run: &store.Run{ID: "abc123", Provider: "docker"},
-				}, func() {}, nil
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				return aws.Config{}, fmt.Errorf("no AWS credentials")
 			},
 		}
-		prov, st, run, cleanup, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		_, _, _, _, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
+		if err == nil {
+			t.Fatal("expected error from auto-detect, got nil")
 		}
-		defer cleanup()
-		if _, ok := prov.(*provider.DockerProvider); !ok {
-			t.Errorf("expected *provider.DockerProvider, got %T", prov)
-		}
-		if st == nil {
-			t.Error("expected non-nil store")
-		}
-		if run.ID != "abc123" {
-			t.Errorf("expected run ID abc123, got %s", run.ID)
+		if !strings.Contains(err.Error(), "auto-detecting provider") {
+			t.Errorf("expected auto-detect error, got: %v", err)
 		}
 	})
 
@@ -302,7 +293,7 @@ func TestInitFromRunID(t *testing.T) {
 				}, func() {}, nil
 			},
 		}
-		_, _, _, _, err := initFromRunIDWith(context.Background(), "", "", "missing", deps)
+		_, _, _, _, err := initFromRunIDWith(context.Background(), "docker", "", "missing", deps)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -311,22 +302,4 @@ func TestInitFromRunID(t *testing.T) {
 		}
 	})
 
-	t.Run("empty stored provider defaults to docker", func(t *testing.T) {
-		t.Parallel()
-		deps := factoryDeps{
-			openStore: func(_ string) (store.Store, func(), error) {
-				return &stubStore{
-					run: &store.Run{ID: "abc123", Provider: ""},
-				}, func() {}, nil
-			},
-		}
-		prov, _, _, cleanup, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		defer cleanup()
-		if _, ok := prov.(*provider.DockerProvider); !ok {
-			t.Errorf("expected *provider.DockerProvider, got %T", prov)
-		}
-	})
 }

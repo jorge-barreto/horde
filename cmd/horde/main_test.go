@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/store"
 )
 
@@ -3588,5 +3589,196 @@ func TestResults_JSON_MissingRunResult(t *testing.T) {
 	}
 	if v.ExitCode == nil || *v.ExitCode != 1 {
 		t.Errorf("ExitCode = %v, want 1", v.ExitCode)
+	}
+}
+
+type listableStubStore struct {
+	stubStore
+	runs []*store.Run
+}
+
+func (s *listableStubStore) ListByRepo(_ context.Context, repo string, activeOnly bool) ([]*store.Run, error) {
+	var result []*store.Run
+	for _, r := range s.runs {
+		if r.Repo != repo {
+			continue
+		}
+		if activeOnly && r.Status != store.StatusPending && r.Status != store.StatusRunning {
+			continue
+		}
+		result = append(result, r)
+	}
+	if result == nil {
+		result = make([]*store.Run, 0)
+	}
+	return result, nil
+}
+
+func (s *listableStubStore) UpdateRun(_ context.Context, id string, update *store.RunUpdate) error {
+	for _, r := range s.runs {
+		if r.ID == id {
+			if update.Status != nil {
+				r.Status = *update.Status
+			}
+			if update.ExitCode != nil {
+				r.ExitCode = update.ExitCode
+			}
+			if update.CompletedAt != nil {
+				r.CompletedAt = update.CompletedAt
+			}
+			if update.TotalCostUSD != nil {
+				r.TotalCostUSD = update.TotalCostUSD
+			}
+			return nil
+		}
+	}
+	return store.ErrRunNotFound
+}
+
+type noopProvider struct{}
+
+func (p *noopProvider) Launch(_ context.Context, _ provider.LaunchOpts) (*provider.LaunchResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (p *noopProvider) Status(_ context.Context, _ string) (*provider.InstanceStatus, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (p *noopProvider) Logs(_ context.Context, _ string, _ bool) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (p *noopProvider) Stop(_ context.Context, _ provider.StopOpts) error {
+	return fmt.Errorf("not implemented")
+}
+func (p *noopProvider) ReadFile(_ context.Context, _ provider.ReadFileOpts) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (p *noopProvider) Finalize(_ context.Context, _ *store.Run, _ string) error {
+	return nil
+}
+
+func TestList_DynamoStore_ColumnOutput(t *testing.T) {
+	ctx := context.Background()
+	repo := "github.com/test/repo.git"
+	now := time.Now()
+	completedAt := now.Add(-5 * time.Minute)
+	cost := 4.52
+
+	st := &listableStubStore{
+		runs: []*store.Run{
+			{
+				ID:           "dynrun00001",
+				Ticket:       "PROJ-42",
+				Branch:       "feature-x",
+				Status:       store.StatusSuccess,
+				Repo:         repo,
+				Provider:     "aws-ecs",
+				LaunchedBy:   "testuser",
+				StartedAt:    now.Add(-15 * time.Minute),
+				CompletedAt:  &completedAt,
+				TimeoutAt:    now.Add(45 * time.Minute),
+				TotalCostUSD: &cost,
+			},
+			{
+				ID:         "dynrun00002",
+				Ticket:     "PROJ-99",
+				Branch:     "",
+				Status:     store.StatusRunning,
+				Repo:       repo,
+				Provider:   "aws-ecs",
+				LaunchedBy: "testuser",
+				StartedAt:  now.Add(-2 * time.Minute),
+				TimeoutAt:  now.Add(58 * time.Minute),
+			},
+			{
+				ID:         "dynrun00003",
+				Ticket:     "OTHER-1",
+				Branch:     "main",
+				Status:     store.StatusSuccess,
+				Repo:       "github.com/other/repo.git",
+				Provider:   "aws-ecs",
+				LaunchedBy: "testuser",
+				StartedAt:  now.Add(-30 * time.Minute),
+				TimeoutAt:  now.Add(30 * time.Minute),
+			},
+		},
+	}
+	prov := &noopProvider{}
+
+	// Verify ListByRepo filters by repo (all runs)
+	allRuns, err := st.ListByRepo(ctx, repo, false)
+	if err != nil {
+		t.Fatalf("ListByRepo(all): %v", err)
+	}
+	if len(allRuns) != 2 {
+		t.Fatalf("ListByRepo(all): want 2 runs, got %d", len(allRuns))
+	}
+
+	// Run Finalize loop (no-op for noopProvider)
+	homeDir := t.TempDir()
+	for _, run := range allRuns {
+		origStatus := run.Status
+		if err := prov.Finalize(ctx, run, homeDir); err != nil {
+			t.Errorf("Finalize(%s): %v", run.ID, err)
+			continue
+		}
+		if run.Status != origStatus {
+			if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+				Status:       &run.Status,
+				ExitCode:     run.ExitCode,
+				CompletedAt:  run.CompletedAt,
+				TotalCostUSD: run.TotalCostUSD,
+			}); err != nil {
+				t.Errorf("UpdateRun(%s): %v", run.ID, err)
+			}
+		}
+	}
+
+	// Capture printRunTable output
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	printRunTable(allRuns)
+
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+	outStr := string(out)
+
+	// Assert header columns
+	for _, col := range []string{"RUN ID", "TICKET", "BRANCH", "STATUS", "DURATION", "COST"} {
+		if !strings.Contains(outStr, col) {
+			t.Errorf("output missing header %q: %s", col, outStr)
+		}
+	}
+
+	// Assert data rows for this repo
+	for _, want := range []string{"dynrun00001", "PROJ-42", "feature-x", "$4.52", "dynrun00002", "(default)"} {
+		if !strings.Contains(outStr, want) {
+			t.Errorf("output missing %q: %s", want, outStr)
+		}
+	}
+
+	// Assert other repo's data is absent
+	for _, absent := range []string{"dynrun00003", "OTHER-1"} {
+		if strings.Contains(outStr, absent) {
+			t.Errorf("output should not contain %q: %s", absent, outStr)
+		}
+	}
+
+	// Verify active-only filtering
+	activeRuns, err := st.ListByRepo(ctx, repo, true)
+	if err != nil {
+		t.Fatalf("ListByRepo(activeOnly): %v", err)
+	}
+	if len(activeRuns) != 1 {
+		t.Fatalf("ListByRepo(activeOnly): want 1 run, got %d", len(activeRuns))
+	}
+	if activeRuns[0].ID != "dynrun00002" {
+		t.Errorf("activeRuns[0].ID = %q, want dynrun00002", activeRuns[0].ID)
 	}
 }

@@ -79,6 +79,24 @@ func TestInitProviderAndStore(t *testing.T) {
 			errContains: []string{"initializing aws-ecs provider"},
 		},
 		{
+			name:     "explicit aws-ecs SSM ok",
+			provName: "aws-ecs",
+			deps: factoryDeps{
+				loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+					return aws.Config{}, nil
+				},
+				newSSMClient: func(_ aws.Config) config.SSMClient {
+					return &fakeSSMClient{
+						output: &ssm.GetParameterOutput{
+							Parameter: &ssmtypes.Parameter{Value: aws.String(validSSMJSON())},
+						},
+					}
+				},
+			},
+			wantErr:     true,
+			errContains: []string{"initializing aws-ecs store"},
+		},
+		{
 			name:     "default SSM ok",
 			provName: "",
 			deps: factoryDeps{
@@ -94,7 +112,7 @@ func TestInitProviderAndStore(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: []string{"aws-ecs provider is not yet implemented"},
+			errContains: []string{"initializing aws-ecs store"},
 		},
 		{
 			name:     "default SSM missing",
@@ -201,6 +219,29 @@ func TestNewProviderWith(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), `unsupported provider "gcp"`) {
 			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("aws-ecs", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				return aws.Config{}, nil
+			},
+			newSSMClient: func(_ aws.Config) config.SSMClient {
+				return &fakeSSMClient{
+					output: &ssm.GetParameterOutput{
+						Parameter: &ssmtypes.Parameter{Value: aws.String(validSSMJSON())},
+					},
+				}
+			},
+		}
+		prov, err := newProviderWith(context.Background(), "aws-ecs", "", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := prov.(*provider.ECSProvider); !ok {
+			t.Errorf("expected *provider.ECSProvider, got %T", prov)
 		}
 	})
 }

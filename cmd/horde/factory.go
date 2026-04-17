@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/config"
@@ -59,10 +62,12 @@ func newProviderWith(ctx context.Context, name, profile string, deps factoryDeps
 			return nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		if _, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath); err != nil {
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
+		if err != nil {
 			return nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
-		return nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+		prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
+		return prov, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
 	}
@@ -125,7 +130,12 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 		if err != nil {
 			return nil, nil, 0, nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
-		return nil, nil, hordeCfg.MaxConcurrent, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+		st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
+		if err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("initializing aws-ecs store: %w", err)
+		}
+		prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
+		return prov, st, hordeCfg.MaxConcurrent, func() {}, nil
 	case "":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {
@@ -136,7 +146,12 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 		if err != nil {
 			return nil, nil, 0, nil, fmt.Errorf("auto-detecting provider: %s\nhint: use --provider docker for local mode", config.Diagnostic(err))
 		}
-		return nil, nil, hordeCfg.MaxConcurrent, nil, fmt.Errorf("aws-ecs provider is not yet implemented")
+		st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
+		if err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("initializing aws-ecs store: %w", err)
+		}
+		prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
+		return prov, st, hordeCfg.MaxConcurrent, func() {}, nil
 	default:
 		return nil, nil, 0, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
 	}

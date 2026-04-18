@@ -23,9 +23,10 @@ import (
 )
 
 type fakeECSClient struct {
-	runTaskInput  *ecs.RunTaskInput
-	runTaskOutput *ecs.RunTaskOutput
-	runTaskErr    error
+	runTaskInput      *ecs.RunTaskInput
+	runTaskOutput     *ecs.RunTaskOutput
+	runTaskReturnNil  bool // if true, RunTask returns (nil, nil)
+	runTaskErr        error
 
 	describeTasksInput   *ecs.DescribeTasksInput
 	describeTasksOutput  *ecs.DescribeTasksOutput
@@ -43,6 +44,9 @@ func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, o
 	f.runTaskInput = params
 	if f.runTaskErr != nil {
 		return nil, f.runTaskErr
+	}
+	if f.runTaskReturnNil {
+		return nil, nil
 	}
 	if f.runTaskOutput != nil {
 		return f.runTaskOutput, nil
@@ -327,6 +331,24 @@ func TestECSProvider_Launch_FailureNilReason(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown failure") {
 		t.Errorf("error = %q, want it to contain \"unknown failure\"", err.Error())
+	}
+}
+
+// TestECSProvider_Launch_NilResponse covers the ecs.go nil-response
+// guard in Launch. Regression guard for horde-ukr.
+func TestECSProvider_Launch_NilResponse(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{runTaskReturnNil: true}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc"})
+	if err == nil {
+		t.Fatal("Launch() error = nil, want non-nil (nil RunTask response must surface as error)")
+	}
+	if !strings.Contains(err.Error(), "launching ECS task") {
+		t.Errorf("error = %q, want it to contain \"launching ECS task\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil response") {
+		t.Errorf("error = %q, want it to contain \"nil response\"", err.Error())
 	}
 }
 

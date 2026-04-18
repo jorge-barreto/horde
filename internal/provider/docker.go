@@ -432,8 +432,12 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			}
 
 			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-			p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
-			p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+			if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
+			}
+			if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts")); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: copying artifacts for run %s: %v\n", run.ID, err)
+			}
 
 			if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
 				if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
@@ -501,8 +505,12 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 	case "stopped":
 		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-		p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit"))
-		p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts"))
+		if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
+		}
+		if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts")); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: copying artifacts for run %s: %v\n", run.ID, err)
+		}
 
 		if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
 			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {

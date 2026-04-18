@@ -849,6 +849,75 @@ func TestStatus_MissingRunID(t *testing.T) {
 	}
 }
 
+// TestStatus_LazyCheck_CopyFailureWarns covers horde-lu0: when
+// CopyFromContainer fails during Finalize's "marker-file completion" path,
+// the provider must emit a stderr warning so users understand why cost data
+// or artifacts may be missing, rather than silently proceeding with nil cost.
+func TestStatus_LazyCheck_CopyFailureWarns(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  cp)     echo "Error response from daemon: container not running" >&2; exit 1 ;;
+  logs)   exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "statuslu00001"
+
+	// Pre-seed the .horde-exit-code marker so Finalize takes the "orc finished"
+	// branch that triggers CopyFromContainer.
+	workspaceDir := filepath.Join(env.tmpHome, ".horde", "workspaces", runID)
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("creating workspace dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".horde-exit-code"), []byte("0\n"), 0o644); err != nil {
+		t.Fatalf("writing marker file: %v", err)
+	}
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute),
+		Status: store.StatusRunning, InstanceID: "abc123",
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStderr := os.Stderr
+	prErr, pwErr, _ := os.Pipe()
+	os.Stderr = pwErr
+	defer func() { os.Stderr = origStderr }()
+
+	origStdout := os.Stdout
+	prOut, pwOut, _ := os.Pipe()
+	os.Stdout = pwOut
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
+
+	pwErr.Close()
+	pwOut.Close()
+	os.Stderr = origStderr
+	os.Stdout = origStdout
+	stderr, _ := io.ReadAll(prErr)
+	_, _ = io.ReadAll(prOut)
+
+	if runErr != nil {
+		t.Fatalf("status returned error: %v", runErr)
+	}
+	if !strings.Contains(string(stderr), "warning: copying results for run") || !strings.Contains(string(stderr), runID) {
+		t.Errorf("stderr missing CopyFromContainer warning for run %s: %s", runID, string(stderr))
+	}
+}
+
 // TestStatus_LazyCheck_StatusError covers horde-kx2: when the provider's
 // Status() fails with a non-"No such container" error during Finalize (the
 // "lazy check" path for pending/running runs), statusCmd must surface the

@@ -64,8 +64,15 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" /root/.claude/ \
         || echo "WARNING: session restore failed (continuing)" >&2
 
-    eval $ORC_CMD
+    # Run orc in the background so a SIGTERM/SIGINT (ECS StopTask) can be
+    # forwarded to it; the upload block below must still run so artifacts
+    # and session state aren't lost when the task is stopped mid-run.
+    eval "$ORC_CMD" &
+    ORC_PID=$!
+    trap 'kill -TERM "$ORC_PID" 2>/dev/null' TERM INT
+    wait "$ORC_PID"
     EXIT_CODE=$?
+    trap - TERM INT
 
     # Always persist session state, even on failure, so retry can resume.
     if [ -d /root/.claude ]; then

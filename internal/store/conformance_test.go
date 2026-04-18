@@ -665,8 +665,10 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		running.TimeoutAt = running.StartedAt.Add(60 * time.Minute)
 
 		done := conformanceRun("run-done", repo, "PROJ-3", StatusSuccess)
+		failed := conformanceRun("run-failed", repo, "PROJ-4", StatusFailed)
+		killed := conformanceRun("run-killed", repo, "PROJ-5", StatusKilled)
 
-		for _, r := range []*Run{pend, running, done} {
+		for _, r := range []*Run{pend, running, done, failed, killed} {
 			if err := s.CreateRun(ctx, r); err != nil {
 				t.Fatalf("CreateRun %s: %v", r.ID, err)
 			}
@@ -689,8 +691,8 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if err != nil {
 			t.Fatalf("ListByRepo all: %v", err)
 		}
-		if len(all) != 3 {
-			t.Fatalf("all len: got %d, want 3", len(all))
+		if len(all) != 5 {
+			t.Fatalf("all len: got %d, want 5", len(all))
 		}
 	})
 

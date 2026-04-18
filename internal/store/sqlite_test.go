@@ -813,7 +813,15 @@ func TestSQLiteStore_ListByRepo_ActiveOnly(t *testing.T) {
 	run3.ID = "run-success"
 	run3.Status = StatusSuccess
 
-	for _, r := range []*Run{run1, run2, run3} {
+	run4 := newTestRun()
+	run4.ID = "run-failed"
+	run4.Status = StatusFailed
+
+	run5 := newTestRun()
+	run5.ID = "run-killed"
+	run5.Status = StatusKilled
+
+	for _, r := range []*Run{run1, run2, run3, run4, run5} {
 		if err := s.CreateRun(ctx, r); err != nil {
 			t.Fatalf("CreateRun(%s): %v", r.ID, err)
 		}
@@ -836,8 +844,8 @@ func TestSQLiteStore_ListByRepo_ActiveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListByRepo(activeOnly=false): %v", err)
 	}
-	if len(all) != 3 {
-		t.Errorf("activeOnly=false: got %d results, want 3", len(all))
+	if len(all) != 5 {
+		t.Errorf("activeOnly=false: got %d results, want 5", len(all))
 	}
 }
 

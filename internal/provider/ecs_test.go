@@ -2237,3 +2237,149 @@ func TestECSProvider_HydrateRun_InvalidTicketOrWorkflow(t *testing.T) {
 		}
 	}
 }
+
+// --- Cross-method integration tests (horde-vo2) ---
+//
+// These tests verify that the InstanceID (task ARN) returned by Launch
+// flows correctly through Status, Logs, and Stop. They use the fake
+// ECS/CloudWatch clients to detect interface contract drift between
+// methods — e.g. a Launch that returns an ARN in one format which Logs
+// cannot parse, or a Status call that looks up the wrong cluster.
+
+func TestECSProvider_Integration_LaunchThenStatus(t *testing.T) {
+	t.Parallel()
+	const taskARN = "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123"
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{{TaskArn: aws.String(taskARN)}},
+		},
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{{
+				TaskArn:    aws.String(taskARN),
+				LastStatus: aws.String("RUNNING"),
+				StartedAt:  aws.Time(time.Now()),
+			}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+
+	res, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123", Ticket: "PROJ-1"})
+	if err != nil {
+		t.Fatalf("Launch() error = %v", err)
+	}
+	if res.InstanceID != taskARN {
+		t.Fatalf("Launch InstanceID = %q, want %q", res.InstanceID, taskARN)
+	}
+
+	st, err := p.Status(context.Background(), res.InstanceID)
+	if err != nil {
+		t.Fatalf("Status(%q) error = %v", res.InstanceID, err)
+	}
+	if st.State != "running" {
+		t.Errorf("Status.State = %q, want %q", st.State, "running")
+	}
+	if fake.describeTasksInput == nil {
+		t.Fatal("DescribeTasks was not called")
+	}
+	if len(fake.describeTasksInput.Tasks) != 1 || fake.describeTasksInput.Tasks[0] != taskARN {
+		t.Errorf("DescribeTasks.Tasks = %v, want [%q]", fake.describeTasksInput.Tasks, taskARN)
+	}
+	if aws.ToString(fake.describeTasksInput.Cluster) != testHordeConfig().ClusterARN {
+		t.Errorf("DescribeTasks.Cluster = %q, want %q", aws.ToString(fake.describeTasksInput.Cluster), testHordeConfig().ClusterARN)
+	}
+}
+
+func TestECSProvider_Integration_LaunchThenLogs(t *testing.T) {
+	t.Parallel()
+	const taskARN = "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123"
+	const taskID = "abc123"
+	token := "t1"
+	ecsFake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{{TaskArn: aws.String(taskARN)}},
+		},
+	}
+	cwFake := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("hello\n")}},
+				NextForwardToken: aws.String(token),
+			},
+			{
+				Events:           []cwltypes.OutputLogEvent{},
+				NextForwardToken: aws.String(token),
+			},
+		},
+	}
+	p := NewECSProvider(ecsFake, cwFake, &fakeS3Client{}, testHordeConfig())
+
+	res, err := p.Launch(context.Background(), LaunchOpts{RunID: taskID, Ticket: "PROJ-1"})
+	if err != nil {
+		t.Fatalf("Launch() error = %v", err)
+	}
+
+	reader, err := p.Logs(context.Background(), res.InstanceID, false)
+	if err != nil {
+		t.Fatalf("Logs(%q) error = %v", res.InstanceID, err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(data) != "hello\n" {
+		t.Errorf("Logs output = %q, want %q", string(data), "hello\n")
+	}
+	if len(cwFake.getLogEventsInputs) < 1 {
+		t.Fatal("GetLogEvents was not called")
+	}
+	wantStream := "ecs/horde-worker/" + taskID
+	if got := aws.ToString(cwFake.getLogEventsInputs[0].LogStreamName); got != wantStream {
+		t.Errorf("LogStreamName = %q, want %q (Logs must accept the ARN returned by Launch and derive the task ID correctly)", got, wantStream)
+	}
+}
+
+func TestECSProvider_Integration_LaunchStopStatus(t *testing.T) {
+	t.Parallel()
+	const taskARN = "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123"
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{{TaskArn: aws.String(taskARN)}},
+		},
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{{
+				TaskArn:    aws.String(taskARN),
+				LastStatus: aws.String("STOPPED"),
+				StoppedAt:  aws.Time(time.Now()),
+				Containers: []ecstypes.Container{{ExitCode: aws.Int32(0)}},
+			}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+
+	res, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123", Ticket: "PROJ-1"})
+	if err != nil {
+		t.Fatalf("Launch() error = %v", err)
+	}
+
+	if err := p.Stop(context.Background(), StopOpts{InstanceID: res.InstanceID}); err != nil {
+		t.Fatalf("Stop(%q) error = %v", res.InstanceID, err)
+	}
+	if fake.stopTaskInput == nil {
+		t.Fatal("StopTask was not called")
+	}
+	if aws.ToString(fake.stopTaskInput.Task) != taskARN {
+		t.Errorf("StopTask.Task = %q, want %q", aws.ToString(fake.stopTaskInput.Task), taskARN)
+	}
+
+	st, err := p.Status(context.Background(), res.InstanceID)
+	if err != nil {
+		t.Fatalf("Status(%q) error = %v", res.InstanceID, err)
+	}
+	if st.State != "stopped" {
+		t.Errorf("Status.State = %q, want %q", st.State, "stopped")
+	}
+	if st.ExitCode == nil || *st.ExitCode != 0 {
+		t.Errorf("Status.ExitCode = %v, want 0", st.ExitCode)
+	}
+}

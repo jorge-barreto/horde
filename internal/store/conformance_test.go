@@ -376,6 +376,20 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("CreateRun/DuplicateID", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		run := conformanceRun("dup-id", "github.com/org/repo", "PROJ-1", StatusPending)
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("first CreateRun: %v", err)
+		}
+		dup := conformanceRun("dup-id", "github.com/org/other", "PROJ-2", StatusPending)
+		err := s.CreateRun(ctx, dup)
+		if err == nil {
+			t.Fatal("second CreateRun: expected error, got nil")
+		}
+	})
+
 	t.Run("GetRun/NotFound", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)

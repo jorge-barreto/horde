@@ -30,6 +30,27 @@ const containerName = "horde-worker"
 // errors tolerated in follow mode before stopping the log poll loop.
 const maxConsecutiveDescribeFailures = 5
 
+// ecsFailureReason renders an ECS Failure struct as a human-readable
+// error fragment. Empty Reason defaults to "unknown failure". When
+// present, Arn and Detail are appended for debuggability.
+func ecsFailureReason(f ecstypes.Failure) string {
+	reason := "unknown failure"
+	if f.Reason != nil && *f.Reason != "" {
+		reason = *f.Reason
+	}
+	var extras []string
+	if f.Arn != nil && *f.Arn != "" {
+		extras = append(extras, "arn="+*f.Arn)
+	}
+	if f.Detail != nil && *f.Detail != "" {
+		extras = append(extras, "detail="+*f.Detail)
+	}
+	if len(extras) > 0 {
+		reason += " (" + strings.Join(extras, ", ") + ")"
+	}
+	return reason
+}
+
 // drainTimeout bounds the final-drain phase after STOPPED detection.
 // The drain uses an independent context (not the follow context) so that
 // Ctrl-C while following does not abort drain and lose final output.
@@ -134,12 +155,7 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 	}
 
 	if len(out.Failures) > 0 {
-		f := out.Failures[0]
-		reason := "unknown reason"
-		if f.Reason != nil {
-			reason = *f.Reason
-		}
-		return nil, fmt.Errorf("launching ECS task: %s", reason)
+		return nil, fmt.Errorf("launching ECS task: %s", ecsFailureReason(out.Failures[0]))
 	}
 
 	if len(out.Tasks) == 0 {
@@ -174,12 +190,7 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 	}
 
 	if len(out.Failures) > 0 {
-		f := out.Failures[0]
-		reason := "unknown reason"
-		if f.Reason != nil {
-			reason = *f.Reason
-		}
-		return nil, fmt.Errorf("describing ECS task: %s", reason)
+		return nil, fmt.Errorf("describing ECS task: %s", ecsFailureReason(out.Failures[0]))
 	}
 
 	if len(out.Tasks) == 0 {
@@ -341,12 +352,7 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 			} else {
 				describeFailures = 0
 				if taskOut != nil && len(taskOut.Failures) > 0 {
-					reason := ""
-					f := taskOut.Failures[0]
-					if f.Reason != nil {
-						reason = *f.Reason
-					}
-					fmt.Fprintf(pw, "WARNING: task no longer available: %s\n", reason)
+					fmt.Fprintf(pw, "WARNING: task no longer available: %s\n", ecsFailureReason(taskOut.Failures[0]))
 					return
 				}
 				if taskOut != nil && len(taskOut.Tasks) > 0 {

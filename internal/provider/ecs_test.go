@@ -321,8 +321,32 @@ func TestECSProvider_Launch_FailureNilReason(t *testing.T) {
 	if !strings.Contains(err.Error(), "launching ECS task") {
 		t.Errorf("error = %q, want it to contain \"launching ECS task\"", err.Error())
 	}
-	if !strings.Contains(err.Error(), "unknown reason") {
-		t.Errorf("error = %q, want it to contain \"unknown reason\"", err.Error())
+	if !strings.Contains(err.Error(), "unknown failure") {
+		t.Errorf("error = %q, want it to contain \"unknown failure\"", err.Error())
+	}
+}
+
+func TestECSProvider_Launch_FailureIncludesArnAndDetail(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Failures: []ecstypes.Failure{{
+				Reason: aws.String("RESOURCE:ENI"),
+				Arn:    aws.String("arn:aws:ecs:us-east-1:123:task/abc"),
+				Detail: aws.String("no ENIs available in subnet"),
+			}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{})
+	if err == nil {
+		t.Fatal("Launch() error = nil, want non-nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"RESOURCE:ENI", "arn:aws:ecs:us-east-1:123:task/abc", "no ENIs available in subnet"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to contain %q", msg, want)
+		}
 	}
 }
 
@@ -697,8 +721,8 @@ func TestECSProvider_Status_FailureNilReason(t *testing.T) {
 	if !strings.Contains(err.Error(), "describing ECS task") {
 		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
 	}
-	if !strings.Contains(err.Error(), "unknown reason") {
-		t.Errorf("error = %q, want it to contain \"unknown reason\"", err.Error())
+	if !strings.Contains(err.Error(), "unknown failure") {
+		t.Errorf("error = %q, want it to contain \"unknown failure\"", err.Error())
 	}
 }
 

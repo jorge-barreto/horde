@@ -67,7 +67,13 @@ type logReadCloser struct {
 
 func (l *logReadCloser) Close() error {
 	if l.cmd.Process != nil {
-		l.cmd.Process.Kill()
+		// If the process has already exited, ProcessState is set and
+		// Kill() would be a no-op signal to a reaped PID. Skipping the
+		// call avoids spurious errors on platforms where signaling a
+		// dead process returns one.
+		if l.cmd.ProcessState == nil {
+			l.cmd.Process.Kill()
+		}
 		<-l.done // wait for background goroutine to reap the child process
 	}
 	return l.ReadCloser.Close()

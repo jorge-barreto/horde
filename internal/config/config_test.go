@@ -170,7 +170,7 @@ func TestRepoURL_PreservesExitError(t *testing.T) {
 }
 
 func TestLaunchedBy_Configured(t *testing.T) {
-	t.Parallel()
+	// Cannot use t.Parallel: t.Setenv modifies process-wide state
 	dir := t.TempDir()
 	run := func(args ...string) {
 		cmd := exec.Command(args[0], args[1:]...)
@@ -181,6 +181,10 @@ func TestLaunchedBy_Configured(t *testing.T) {
 	}
 	run("git", "init")
 	run("git", "config", "user.name", "Test User")
+
+	// Prevent global/system git config from leaking into the test
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 
 	got := LaunchedBy(dir)
 	if got != "Test User" {

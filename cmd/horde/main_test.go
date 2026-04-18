@@ -621,7 +621,7 @@ func TestProvider_InvalidValue(t *testing.T) {
 }
 
 func TestProvider_ExplicitDocker(t *testing.T) {
-	_ = setupLaunchEnv(t)
+	env := setupLaunchEnv(t)
 	ctx := context.Background()
 
 	origStdout := os.Stdout
@@ -636,10 +636,35 @@ func TestProvider_ExplicitDocker(t *testing.T) {
 
 	pw.Close()
 	os.Stdout = origStdout
-	pr.Close()
+	out, _ := io.ReadAll(pr)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	runID := strings.TrimSpace(string(out))
+	if !regexp.MustCompile(`^[a-z0-9]{12}$`).MatchString(runID) {
+		t.Errorf("runID %q does not match ^[a-z0-9]{12}$", runID)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st.Close()
+	r, err := st.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Provider != "docker" {
+		t.Errorf("Provider = %q, want %q", r.Provider, "docker")
+	}
+	if r.Ticket != "TICKET-1" {
+		t.Errorf("Ticket = %q, want %q", r.Ticket, "TICKET-1")
+	}
+	if r.Status != store.StatusRunning {
+		t.Errorf("Status = %q, want %q", r.Status, store.StatusRunning)
 	}
 }
 
@@ -659,7 +684,7 @@ func TestProfile_AcceptedAsGlobalFlag(t *testing.T) {
 
 	pw.Close()
 	os.Stdout = origStdout
-	pr.Close()
+	_, _ = io.ReadAll(pr)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

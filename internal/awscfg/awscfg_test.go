@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 func TestLoad_DefaultProfile(t *testing.T) {
@@ -61,6 +62,39 @@ func TestLoad_RegionFromEnv(t *testing.T) {
 	}
 	if cfg.Region != "us-west-2" {
 		t.Errorf("cfg.Region = %q, want %q", cfg.Region, "us-west-2")
+	}
+}
+
+func TestCallerIdentity_NilARN(t *testing.T) {
+	// Cannot use t.Parallel — we mutate package var getCallerIdentity.
+	orig := getCallerIdentity
+	t.Cleanup(func() { getCallerIdentity = orig })
+	getCallerIdentity = func(ctx context.Context, cfg aws.Config, in *sts.GetCallerIdentityInput) (*sts.GetCallerIdentityOutput, error) {
+		return &sts.GetCallerIdentityOutput{}, nil // Arn is nil
+	}
+	_, err := CallerIdentity(context.Background(), aws.Config{}, "")
+	if err == nil {
+		t.Fatal("CallerIdentity() expected error when ARN is nil, got nil")
+	}
+	want := "ARN not present in response"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("CallerIdentity() error = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+func TestCallerIdentity_Success(t *testing.T) {
+	orig := getCallerIdentity
+	t.Cleanup(func() { getCallerIdentity = orig })
+	getCallerIdentity = func(ctx context.Context, cfg aws.Config, in *sts.GetCallerIdentityInput) (*sts.GetCallerIdentityOutput, error) {
+		arn := "arn:aws:iam::123:user/test"
+		return &sts.GetCallerIdentityOutput{Arn: &arn}, nil
+	}
+	got, err := CallerIdentity(context.Background(), aws.Config{}, "")
+	if err != nil {
+		t.Fatalf("CallerIdentity() unexpected error: %v", err)
+	}
+	if got != "arn:aws:iam::123:user/test" {
+		t.Errorf("CallerIdentity() = %q, want %q", got, "arn:aws:iam::123:user/test")
 	}
 }
 

@@ -284,7 +284,8 @@ func (s *SQLiteStore) ListByRepo(ctx context.Context, repo string, activeOnly bo
 	args := []any{repo}
 
 	if activeOnly {
-		query += " AND status IN ('pending', 'running')"
+		query += " AND status IN (?, ?)"
+		args = append(args, string(StatusPending), string(StatusRunning))
 	}
 	query += " ORDER BY started_at DESC"
 
@@ -313,9 +314,9 @@ func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticke
 		`SELECT id, repo, ticket, branch, workflow, provider,
 			instance_id, metadata, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd
-		FROM runs WHERE repo = ? AND ticket = ? AND status IN ('pending', 'running')
+		FROM runs WHERE repo = ? AND ticket = ? AND status IN (?, ?)
 		ORDER BY started_at DESC`,
-		repo, ticket)
+		repo, ticket, string(StatusPending), string(StatusRunning))
 	if err != nil {
 		return nil, fmt.Errorf("finding active runs by ticket: %w", err)
 	}
@@ -338,7 +339,8 @@ func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticke
 func (s *SQLiteStore) CountActive(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM runs WHERE status IN ('pending', 'running')").Scan(&count)
+		"SELECT COUNT(*) FROM runs WHERE status IN (?, ?)",
+		string(StatusPending), string(StatusRunning)).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting active runs: %w", err)
 	}
@@ -350,8 +352,9 @@ func (s *SQLiteStore) ListActive(ctx context.Context) ([]*Run, error) {
 		`SELECT id, repo, ticket, branch, workflow, provider,
 			instance_id, metadata, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd
-		FROM runs WHERE status IN ('pending', 'running')
-		ORDER BY started_at DESC`)
+		FROM runs WHERE status IN (?, ?)
+		ORDER BY started_at DESC`,
+		string(StatusPending), string(StatusRunning))
 	if err != nil {
 		return nil, fmt.Errorf("listing active runs: %w", err)
 	}

@@ -161,3 +161,27 @@ func TestRunUpdate_CompletionUpdate(t *testing.T) {
 		t.Errorf("InstanceID should be nil for completion update, got %v", u.InstanceID)
 	}
 }
+
+func TestStatus_IsTerminal(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		status Status
+		want   bool
+	}{
+		{StatusPending, false},
+		{StatusRunning, false},
+		{StatusSuccess, true},
+		{StatusFailed, true},
+		{StatusKilled, true},
+		{Status("unknown-future-status"), false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.status), func(t *testing.T) {
+			t.Parallel()
+			if got := tc.status.IsTerminal(); got != tc.want {
+				t.Errorf("%q.IsTerminal() = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+}

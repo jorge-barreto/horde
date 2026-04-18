@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/jorge-barreto/horde/internal/provider"
-	"github.com/jorge-barreto/horde/internal/store"
 	"github.com/urfave/cli/v3"
 )
 
@@ -73,15 +72,6 @@ func hydrateWriteFailures(w io.Writer, outs []hydrateOutcome) {
 			continue
 		}
 		fmt.Fprintf(w, "  %s: %v\n", o.RunID, o.Err)
-	}
-}
-
-func isTerminalStatus(s store.Status) bool {
-	switch s {
-	case store.StatusSuccess, store.StatusFailed, store.StatusKilled:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -157,7 +147,7 @@ func hydrateOne(ctx context.Context, deps factoryDeps, provFlag, profile, runID,
 	}
 	defer cleanup()
 
-	if !isTerminalStatus(run.Status) {
+	if !run.Status.IsTerminal() {
 		return hydrateOutcome{RunID: runID, Status: hydrateStatusFailed,
 			Err: fmt.Errorf("run is not terminal (status: %s)", run.Status)}
 	}

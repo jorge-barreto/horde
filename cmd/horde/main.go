@@ -509,7 +509,7 @@ in the results directory.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			if run.Status == store.StatusSuccess || run.Status == store.StatusFailed || run.Status == store.StatusKilled {
+			if run.Status.IsTerminal() {
 				// Container is gone — try saved logs
 				logPath := filepath.Join(provider.LocalResultsDir(homeDir, runID), "container.log")
 				if data, err := os.ReadFile(logPath); err == nil {
@@ -594,7 +594,7 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 					return fmt.Errorf("updating run: %w", err)
 				}
 			}
-			if run.Status != store.StatusPending && run.Status != store.StatusRunning {
+			if run.Status.IsTerminal() {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
 			}
 			var cost *float64

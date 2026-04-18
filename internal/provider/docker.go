@@ -399,7 +399,7 @@ func copyDir(src, dst string) error {
 // is left unchanged. The caller is responsible for persisting any changes
 // to the store.
 func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir string) error {
-	if run.Status != store.StatusPending && run.Status != store.StatusRunning {
+	if run.Status.IsTerminal() {
 		return nil
 	}
 	if run.InstanceID == "" {

@@ -97,19 +97,19 @@ func TestHydrateWriteFailures(t *testing.T) {
 
 func TestRunNotTerminalCheck(t *testing.T) {
 	t.Parallel()
-	if !isTerminalStatus(store.StatusSuccess) {
+	if !store.StatusSuccess.IsTerminal() {
 		t.Error("success should be terminal")
 	}
-	if !isTerminalStatus(store.StatusFailed) {
+	if !store.StatusFailed.IsTerminal() {
 		t.Error("failed should be terminal")
 	}
-	if !isTerminalStatus(store.StatusKilled) {
+	if !store.StatusKilled.IsTerminal() {
 		t.Error("killed should be terminal")
 	}
-	if isTerminalStatus(store.StatusRunning) {
+	if store.StatusRunning.IsTerminal() {
 		t.Error("running should not be terminal")
 	}
-	if isTerminalStatus(store.StatusPending) {
+	if store.StatusPending.IsTerminal() {
 		t.Error("pending should not be terminal")
 	}
 }

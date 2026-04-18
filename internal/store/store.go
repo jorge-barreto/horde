@@ -19,6 +19,17 @@ const (
 	StatusKilled  Status = "killed"
 )
 
+// IsTerminal reports whether a run has reached a final state and will not
+// change further. New statuses must be classified here — callers use this
+// to decide "active vs done" without enumerating statuses inline.
+func (s Status) IsTerminal() bool {
+	switch s {
+	case StatusSuccess, StatusFailed, StatusKilled:
+		return true
+	}
+	return false
+}
+
 type Run struct {
 	ID           string
 	Repo         string

@@ -16,7 +16,6 @@ import (
 var _ Store = (*DynamoStore)(nil)
 
 type dynamoAPI interface {
-	DescribeTable(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
 	PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
@@ -37,14 +36,9 @@ func NewDynamoStore(ctx context.Context, cfg aws.Config, tableName string) (*Dyn
 	return newDynamoStore(ctx, client, tableName)
 }
 
-func newDynamoStore(ctx context.Context, client dynamoAPI, tableName string) (*DynamoStore, error) {
+func newDynamoStore(_ context.Context, client dynamoAPI, tableName string) (*DynamoStore, error) {
 	if tableName == "" {
 		return nil, fmt.Errorf("creating DynamoDB store: table name is empty")
-	}
-	if _, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: aws.String(tableName),
-	}); err != nil {
-		return nil, fmt.Errorf("pinging DynamoDB table %q: %w", tableName, err)
 	}
 	return &DynamoStore{client: client, tableName: tableName}, nil
 }

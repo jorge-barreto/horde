@@ -37,10 +37,6 @@ func copyItem(item map[string]types.AttributeValue) map[string]types.AttributeVa
 	return out
 }
 
-func (f *functionalDynamo) DescribeTable(_ context.Context, _ *dynamodb.DescribeTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
-	return &dynamodb.DescribeTableOutput{}, nil
-}
-
 func (f *functionalDynamo) PutItem(_ context.Context, params *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

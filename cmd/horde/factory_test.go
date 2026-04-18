@@ -105,8 +105,7 @@ func TestInitProviderAndStore(t *testing.T) {
 					}
 				},
 			},
-			wantErr:     true,
-			errContains: []string{"initializing aws-ecs store"},
+			wantErr: false,
 		},
 		{
 			name:     "default SSM ok",
@@ -123,8 +122,7 @@ func TestInitProviderAndStore(t *testing.T) {
 					}
 				},
 			},
-			wantErr:     true,
-			errContains: []string{"initializing aws-ecs store"},
+			wantErr: false,
 		},
 		{
 			name:     "default SSM missing",
@@ -220,6 +218,20 @@ func TestInitProviderAndStore(t *testing.T) {
 				}
 				if gotProvName != "docker" {
 					t.Errorf("provName: got %q, want %q", gotProvName, "docker")
+				}
+				cleanup()
+			} else {
+				if _, ok := prov.(*provider.ECSProvider); !ok {
+					t.Errorf("expected *provider.ECSProvider, got %T", prov)
+				}
+				if st == nil {
+					t.Error("expected non-nil store")
+				}
+				if cleanup == nil {
+					t.Error("expected non-nil cleanup")
+				}
+				if gotProvName != "aws-ecs" {
+					t.Errorf("provName: got %q, want %q", gotProvName, "aws-ecs")
 				}
 				cleanup()
 			}

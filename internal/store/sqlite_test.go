@@ -882,10 +882,16 @@ func TestSQLiteStore_FindActiveByTicket_Match(t *testing.T) {
 	repo := "github.com/org/repo.git"
 	ticket := "PROJ-42"
 
-	// active with matching repo+ticket — the one we expect returned
+	// active with matching repo+ticket — newest, expected first
 	run1 := newTestRun()
 	run1.ID = "run-active-match"
 	run1.Status = StatusPending
+
+	// older active with matching repo+ticket — verifies ORDER BY started_at DESC
+	run1Older := newTestRun()
+	run1Older.ID = "run-active-match-older"
+	run1Older.Status = StatusRunning
+	run1Older.StartedAt = run1.StartedAt.Add(-1 * time.Hour)
 
 	// completed with same repo+ticket — should NOT be returned
 	run2 := newTestRun()
@@ -898,7 +904,7 @@ func TestSQLiteStore_FindActiveByTicket_Match(t *testing.T) {
 	run3.Ticket = "PROJ-99"
 	run3.Status = StatusRunning
 
-	for _, r := range []*Run{run1, run2, run3} {
+	for _, r := range []*Run{run1, run1Older, run2, run3} {
 		if err := s.CreateRun(ctx, r); err != nil {
 			t.Fatalf("CreateRun(%s): %v", r.ID, err)
 		}
@@ -908,11 +914,14 @@ func TestSQLiteStore_FindActiveByTicket_Match(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("len(results) = %d, want 1", len(results))
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
 	}
 	if results[0].ID != "run-active-match" {
-		t.Errorf("results[0].ID = %q, want %q", results[0].ID, "run-active-match")
+		t.Errorf("results[0].ID = %q, want %q (newest first)", results[0].ID, "run-active-match")
+	}
+	if results[1].ID != "run-active-match-older" {
+		t.Errorf("results[1].ID = %q, want %q", results[1].ID, "run-active-match-older")
 	}
 }
 

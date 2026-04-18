@@ -717,11 +717,13 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		repo := "github.com/org/ticketrepo"
 		ticket := "PROJ-42"
 
-		run1 := conformanceRun("run-1", repo, ticket, StatusPending)    // active, matching
+		run1 := conformanceRun("run-1", repo, ticket, StatusPending)    // active, matching, newest
+		run1Older := conformanceRun("run-1-older", repo, ticket, StatusRunning)
+		run1Older.StartedAt = run1.StartedAt.Add(-1 * time.Hour)
 		run2 := conformanceRun("run-2", repo, ticket, StatusSuccess)    // inactive
 		run3 := conformanceRun("run-3", repo, "PROJ-99", StatusRunning) // different ticket
 
-		for _, r := range []*Run{run1, run2, run3} {
+		for _, r := range []*Run{run1, run1Older, run2, run3} {
 			if err := s.CreateRun(ctx, r); err != nil {
 				t.Fatalf("CreateRun %s: %v", r.ID, err)
 			}
@@ -731,11 +733,14 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
-		if len(results) != 1 {
-			t.Fatalf("len: got %d, want 1", len(results))
+		if len(results) != 2 {
+			t.Fatalf("len: got %d, want 2", len(results))
 		}
 		if results[0].ID != "run-1" {
-			t.Errorf("results[0].ID: got %q, want %q", results[0].ID, "run-1")
+			t.Errorf("results[0].ID: got %q, want %q (newest first)", results[0].ID, "run-1")
+		}
+		if results[1].ID != "run-1-older" {
+			t.Errorf("results[1].ID: got %q, want %q", results[1].ID, "run-1-older")
 		}
 	})
 

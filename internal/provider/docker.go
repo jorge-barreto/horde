@@ -580,9 +580,25 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			}
 		}
 
+		// Check orc's exit marker on host workspace — if orc completed before the
+		// container vanished, the marker has the authoritative exit code.
+		var newStatus store.Status
+		var exitCode *int
+		markerPath := filepath.Join(WorkspacePath(homeDir, run.ID), ".horde-exit-code")
+		if data, err := os.ReadFile(markerPath); err == nil {
+			code := 1
+			if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code); n == 0 {
+				fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", run.ID)
+			}
+			exitCode = &code
+			newStatus = mapExitCode(code)
+		} else {
+			newStatus = store.StatusFailed
+		}
+
 		now := time.Now()
-		run.Status = store.StatusFailed
-		run.ExitCode = nil
+		run.Status = newStatus
+		run.ExitCode = exitCode
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
 	}

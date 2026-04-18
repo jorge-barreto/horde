@@ -1545,6 +1545,9 @@ func TestDockerProvider_Finalize_Unknown(t *testing.T) {
 	if run.CompletedAt == nil {
 		t.Error("CompletedAt = nil, want non-nil")
 	}
+	if run.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil (no workspace, no marker)", run.ExitCode)
+	}
 }
 
 func TestDockerProvider_Finalize_UnknownWithWorkspace(t *testing.T) {
@@ -1580,11 +1583,154 @@ func TestDockerProvider_Finalize_UnknownWithWorkspace(t *testing.T) {
 	if run.CompletedAt == nil {
 		t.Error("CompletedAt = nil, want non-nil")
 	}
+	if run.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil (workspace present but no marker)", run.ExitCode)
+	}
 	if run.TotalCostUSD == nil {
 		t.Fatal("TotalCostUSD = nil, want non-nil")
 	}
 	if *run.TotalCostUSD != wantCost {
 		t.Errorf("TotalCostUSD = %v, want %v", *run.TotalCostUSD, wantCost)
+	}
+}
+
+func TestDockerProvider_Finalize_UnknownWithMarkerSuccess(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, unknownDockerScript())
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	homeDir := t.TempDir()
+	wsDir := WorkspacePath(homeDir, "r-unk-ok")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, ".horde-exit-code"), []byte("0"), 0o644); err != nil {
+		t.Fatalf("writing marker: %v", err)
+	}
+
+	run := &store.Run{
+		ID:         "r-unk-ok",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	if err := NewDockerProvider().Finalize(context.Background(), run, homeDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != store.StatusSuccess {
+		t.Errorf("Status = %v, want %v", run.Status, store.StatusSuccess)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 0 {
+		t.Errorf("ExitCode = %v, want &0", run.ExitCode)
+	}
+	if run.CompletedAt == nil {
+		t.Error("CompletedAt = nil, want non-nil")
+	}
+}
+
+func TestDockerProvider_Finalize_UnknownWithMarkerFailed(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, unknownDockerScript())
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	homeDir := t.TempDir()
+	wsDir := WorkspacePath(homeDir, "r-unk-fail")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, ".horde-exit-code"), []byte("1"), 0o644); err != nil {
+		t.Fatalf("writing marker: %v", err)
+	}
+
+	run := &store.Run{
+		ID:         "r-unk-fail",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	if err := NewDockerProvider().Finalize(context.Background(), run, homeDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != store.StatusFailed {
+		t.Errorf("Status = %v, want %v", run.Status, store.StatusFailed)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 1 {
+		t.Errorf("ExitCode = %v, want &1", run.ExitCode)
+	}
+	if run.CompletedAt == nil {
+		t.Error("CompletedAt = nil, want non-nil")
+	}
+}
+
+func TestDockerProvider_Finalize_UnknownWithMarkerKilled(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, unknownDockerScript())
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	homeDir := t.TempDir()
+	wsDir := WorkspacePath(homeDir, "r-unk-kill")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, ".horde-exit-code"), []byte("5"), 0o644); err != nil {
+		t.Fatalf("writing marker: %v", err)
+	}
+
+	run := &store.Run{
+		ID:         "r-unk-kill",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	if err := NewDockerProvider().Finalize(context.Background(), run, homeDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != store.StatusKilled {
+		t.Errorf("Status = %v, want %v", run.Status, store.StatusKilled)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 5 {
+		t.Errorf("ExitCode = %v, want &5", run.ExitCode)
+	}
+	if run.CompletedAt == nil {
+		t.Error("CompletedAt = nil, want non-nil")
+	}
+}
+
+func TestDockerProvider_Finalize_UnknownWithGarbageMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, unknownDockerScript())
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	homeDir := t.TempDir()
+	wsDir := WorkspacePath(homeDir, "r-unk-garb")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, ".horde-exit-code"), []byte("not-a-number"), 0o644); err != nil {
+		t.Fatalf("writing marker: %v", err)
+	}
+
+	run := &store.Run{
+		ID:         "r-unk-garb",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	if err := NewDockerProvider().Finalize(context.Background(), run, homeDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != store.StatusFailed {
+		t.Errorf("Status = %v, want %v", run.Status, store.StatusFailed)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 1 {
+		t.Errorf("ExitCode = %v, want &1 (default on garbage)", run.ExitCode)
+	}
+	if run.CompletedAt == nil {
+		t.Error("CompletedAt = nil, want non-nil")
 	}
 }
 

@@ -447,10 +447,7 @@ This is the production store — shared across the team. Every developer with AW
 | completed_at | S | RFC3339 (null while running) |
 | timeout_at | S | RFC3339 — when this run should be killed |
 | total_cost_usd | N | Total cost from run-result.json (null if unavailable) |
-| cluster_arn | S | ECS cluster ARN |
-| log_group | S | CloudWatch log group |
-| artifacts_bucket | S | S3 bucket name |
-| artifacts_uri | S | S3 URI prefix for this run's artifacts |
+| metadata | M | Nested map of provider-specific fields (ECS: cluster_arn, log_group, log_stream_prefix, artifacts_bucket, artifacts_uri). Provider data is isolated here so the top-level schema stays provider-agnostic. |
 | ttl | N | Unix epoch for DynamoDB TTL (v0.3) |
 
 Pay-per-request billing — essentially free at low-to-moderate volume.

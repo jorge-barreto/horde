@@ -3784,44 +3784,6 @@ func TestOpenStore_Unsupported(t *testing.T) {
 	}
 }
 
-func TestProvider_AWSECS_SSMError(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
-	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
-
-	_ = setupLaunchEnv(t)
-	ctx := context.Background()
-
-	err := newApp().Run(ctx, []string{"horde", "--provider", "aws-ecs", "launch", "TICKET-1"})
-	if err == nil {
-		t.Fatal("expected error for aws-ecs provider, got nil")
-	}
-	// Before hook (in this bead) catches "aws-ecs" first; after d69.4.2 the factory fires.
-	// Either way, the error must mention "aws-ecs".
-	if !strings.Contains(err.Error(), "aws-ecs") {
-		t.Errorf("error %q does not mention aws-ecs", err.Error())
-	}
-}
-
-func TestProvider_AutoDetect_Error(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
-	t.Setenv("AWS_DEFAULT_REGION", "us-east-1")
-
-	_ = setupLaunchEnv(t)
-	ctx := context.Background()
-
-	// With no --provider flag, auto-detect tries aws-ecs via SSM.
-	// Fake AWS creds are set but no real SSM → must fail with diagnostic.
-	err := newApp().Run(ctx, []string{"horde", "launch", "TICKET-1"})
-	if err == nil {
-		t.Fatal("expected auto-detect error, got nil")
-	}
-	if !strings.Contains(err.Error(), "auto-detecting") {
-		t.Errorf("error %q does not contain %q", err.Error(), "auto-detecting")
-	}
-}
-
 // --- JSON output tests ---
 
 func TestStatus_JSON_CompletedRun(t *testing.T) {

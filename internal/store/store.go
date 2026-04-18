@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -49,6 +50,7 @@ type RunUpdate struct {
 }
 
 type Store interface {
+	io.Closer
 	CreateRun(ctx context.Context, run *Run) error
 	GetRun(ctx context.Context, id string) (*Run, error)
 	UpdateRun(ctx context.Context, id string, update *RunUpdate) error

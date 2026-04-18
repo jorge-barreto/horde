@@ -28,6 +28,10 @@ type DynamoStore struct {
 	tableName string
 }
 
+// Close is a no-op. The underlying AWS SDK client holds no resources
+// that need explicit release; present to satisfy the Store interface.
+func (s *DynamoStore) Close() error { return nil }
+
 func NewDynamoStore(ctx context.Context, cfg aws.Config, tableName string) (*DynamoStore, error) {
 	client := dynamodb.NewFromConfig(cfg)
 	return newDynamoStore(ctx, client, tableName)

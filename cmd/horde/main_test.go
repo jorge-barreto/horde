@@ -3785,3 +3785,81 @@ func TestList_DynamoStore_ColumnOutput(t *testing.T) {
 		t.Errorf("activeRuns[0].ID = %q, want dynrun00002", activeRuns[0].ID)
 	}
 }
+
+func TestRetry_ECS_SkipsEnvValidation(t *testing.T) {
+	tmpHome := t.TempDir()
+	projectDir := filepath.Join(tmpHome, "project")
+	os.MkdirAll(projectDir, 0o755)
+
+	// Git init + remote
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = projectDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "remote", "add", "origin", "https://github.com/test/repo.git")
+	// NO .env file — that's the point of this test
+
+	// Fake docker script handling the commands retryCmd invokes:
+	// - inspect → JSON for a stopped container (prov.Status calls this)
+	// - image   → future timestamp so ensureBaseImage skips rebuild
+	// - *       → container ID for docker run -d
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) echo '[{"State":{"Running":false,"ExitCode":1,"StartedAt":"2025-01-01T00:00:00Z","FinishedAt":"2025-01-01T01:00:00Z"}}]';;
+  image) echo "2099-01-01T00:00:00Z";;
+  *) echo "abc123container";;
+esac
+`
+	binDir := filepath.Join(tmpHome, "bin")
+	os.MkdirAll(binDir, 0o755)
+	os.WriteFile(filepath.Join(binDir, "docker"), []byte(dockerScript), 0o755)
+
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	oldDir, _ := os.Getwd()
+	os.Chdir(projectDir)
+	t.Cleanup(func() { os.Chdir(oldDir) })
+
+	// Pre-insert a failed aws-ecs run into SQLite
+	// (factory uses --provider docker → opens SQLite, but the stored run says aws-ecs)
+	dbPath := filepath.Join(tmpHome, ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-time.Hour)
+	runID := "testrun123ab"
+	err = st.CreateRun(context.Background(), &store.Run{
+		ID:          runID,
+		Repo:        "github.com/test/repo.git",
+		Ticket:      "TICKET-1",
+		Provider:    "aws-ecs",
+		InstanceID:  "abc123",
+		Status:      store.StatusFailed,
+		LaunchedBy:  "testuser",
+		StartedAt:   now.Add(-2 * time.Hour),
+		CompletedAt: &completedAt,
+		TimeoutAt:   now.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("pre-creating run: %v", err)
+	}
+	st.Close()
+
+	// Create workspace dir with .git (retryCmd checks this at line 348)
+	workspaceDir := filepath.Join(tmpHome, ".horde", "workspaces", runID)
+	os.MkdirAll(filepath.Join(workspaceDir, ".git"), 0o755)
+
+	ctx := context.Background()
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "retry", runID})
+	// The retry may succeed or fail for unrelated reasons (e.g. container launch),
+	// but it must NOT fail because of a missing .env file.
+	if err != nil && strings.Contains(err.Error(), ".env") {
+		t.Errorf("got .env-related error for aws-ecs retry: %v", err)
+	}
+}

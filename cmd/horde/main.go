@@ -353,9 +353,12 @@ resumes any interrupted agent session. Override with explicit orc args:
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
-			envPath, err := config.ValidateEnvFile(cwd)
-			if err != nil {
-				return err
+			var envPath string
+			if run.Provider == "docker" {
+				envPath, err = config.ValidateEnvFile(cwd)
+				if err != nil {
+					return err
+				}
 			}
 			projCfg, err := config.LoadProjectConfig(cwd)
 			if err != nil {

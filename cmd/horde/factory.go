@@ -73,9 +73,29 @@ func newProviderWith(ctx context.Context, name, profile string, deps factoryDeps
 	}
 }
 
-// initFromRunIDWith opens the store, looks up the run, and creates the provider
-// from the stored run.Provider field (unless provFlag overrides it).
+// initFromRunIDWith looks up the run and creates the matching provider.
+// When provFlag is empty, it tries the local SQLite store first — this
+// covers docker-only users who have no AWS credentials. If the run is
+// not found locally, it falls through to AWS auto-detection.
 func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, deps factoryDeps) (provider.Provider, store.Store, *store.Run, func(), error) {
+	// When no explicit provider flag is given, check SQLite first.
+	// This avoids AWS auto-detection errors for docker-only users.
+	if provFlag == "" {
+		if st, cleanup, err := deps.openStore("docker"); err == nil {
+			if run, err := st.GetRun(ctx, runID); err == nil {
+				prov, err := newProviderWith(ctx, run.Provider, profile, deps)
+				if err != nil {
+					cleanup()
+					return nil, nil, nil, nil, err
+				}
+				return prov, st, run, cleanup, nil
+			}
+			// Run not in SQLite — close and fall through to auto-detect.
+			cleanup()
+		}
+	}
+
+	// Explicit provider flag, or run not found in SQLite.
 	prov, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
 	if err != nil {
 		return nil, nil, nil, nil, err

@@ -252,9 +252,12 @@ func TestNewProviderWith(t *testing.T) {
 func TestInitFromRunID(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no flag triggers auto-detect", func(t *testing.T) {
+	t.Run("no flag SQLite miss falls through to auto-detect", func(t *testing.T) {
 		t.Parallel()
 		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{runErr: store.ErrRunNotFound}, func() {}, nil
+			},
 			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
 				return aws.Config{}, fmt.Errorf("no AWS credentials")
 			},
@@ -265,6 +268,57 @@ func TestInitFromRunID(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "auto-detecting provider") {
 			t.Errorf("expected auto-detect error, got: %v", err)
+		}
+	})
+
+	t.Run("no flag finds run in SQLite uses stored docker provider", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{
+					run: &store.Run{ID: "abc123", Provider: "docker"},
+				}, func() {}, nil
+			},
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				t.Fatal("loadAWSConfig should not be called when run is found in SQLite")
+				return aws.Config{}, nil
+			},
+		}
+		prov, st, run, cleanup, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer cleanup()
+		if _, ok := prov.(*provider.DockerProvider); !ok {
+			t.Errorf("expected *provider.DockerProvider, got %T", prov)
+		}
+		if st == nil {
+			t.Error("expected non-nil store")
+		}
+		if run.ID != "abc123" {
+			t.Errorf("run.ID: got %q, want %q", run.ID, "abc123")
+		}
+	})
+
+	t.Run("no flag SQLite open error falls through to auto-detect", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(name string) (store.Store, func(), error) {
+				if name == "docker" {
+					return nil, nil, fmt.Errorf("cannot open SQLite")
+				}
+				return &stubStore{}, func() {}, nil
+			},
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				return aws.Config{}, fmt.Errorf("no AWS credentials")
+			},
+		}
+		_, _, _, _, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "auto-detecting provider") {
+			t.Errorf("expected auto-detect fallback error, got: %v", err)
 		}
 	})
 

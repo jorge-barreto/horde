@@ -171,7 +171,7 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 	}, nil
 }
 
-func (p *DockerProvider) CopyFromContainer(ctx context.Context, containerID, containerPath, hostPath string) error {
+func (p *DockerProvider) copyFromContainer(ctx context.Context, containerID, containerPath, hostPath string) error {
 	if err := os.MkdirAll(hostPath, 0o755); err != nil {
 		return fmt.Errorf("creating destination directory: %w", err)
 	}
@@ -279,8 +279,8 @@ func (p *DockerProvider) Stop(ctx context.Context, opts StopOpts) error {
 	// Best-effort copy of audit and artifacts — errors are intentionally ignored.
 	// Container is preserved for retry/shell — not removed here.
 	if opts.ResultsDir != "" {
-		p.CopyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/audit/.", filepath.Join(opts.ResultsDir, "audit"))
-		p.CopyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(opts.ResultsDir, "artifacts"))
+		p.copyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/audit/.", filepath.Join(opts.ResultsDir, "audit"))
+		p.copyFromContainer(ctx, opts.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(opts.ResultsDir, "artifacts"))
 	}
 
 	return nil
@@ -432,10 +432,10 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			}
 
 			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-			if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
+			if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
 			}
-			if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts")); err != nil {
+			if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts")); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: copying artifacts for run %s: %v\n", run.ID, err)
 			}
 
@@ -505,10 +505,10 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 	case "stopped":
 		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
-		if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
+		if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
 		}
-		if err := p.CopyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts")); err != nil {
+		if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/artifacts/.", filepath.Join(resultsDir, "artifacts")); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: copying artifacts for run %s: %v\n", run.ID, err)
 		}
 

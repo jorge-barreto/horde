@@ -429,7 +429,7 @@ fi
 
 	destDir := filepath.Join(t.TempDir(), "dest")
 	p := NewDockerProvider()
-	err := p.CopyFromContainer(context.Background(), "abc123", "/workspace/.orc/audit/.", destDir)
+	err := p.copyFromContainer(context.Background(), "abc123", "/workspace/.orc/audit/.", destDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -452,7 +452,7 @@ fi
 
 	hostPath := filepath.Join(t.TempDir(), "dest")
 	p := NewDockerProvider()
-	err := p.CopyFromContainer(context.Background(), "cid", "/workspace/.orc/audit/.", hostPath)
+	err := p.copyFromContainer(context.Background(), "cid", "/workspace/.orc/audit/.", hostPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -480,7 +480,7 @@ fi
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
 	p := NewDockerProvider()
-	err := p.CopyFromContainer(context.Background(), "abc123", "/workspace/.orc/audit/.", t.TempDir())
+	err := p.copyFromContainer(context.Background(), "abc123", "/workspace/.orc/audit/.", t.TempDir())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

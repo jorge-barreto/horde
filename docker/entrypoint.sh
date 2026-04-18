@@ -11,6 +11,11 @@ if [ -z "${GIT_TOKEN:-}" ]; then echo "ERROR: GIT_TOKEN not set" >&2; exit 3; fi
 # gh CLI uses the same token as git push.
 export GH_TOKEN="${GIT_TOKEN:-}"
 
+# Prevent git from hanging on an interactive credential prompt if
+# GIT_ASKPASS silently fails. Non-TTY containers would otherwise block
+# forever waiting for input that can never arrive.
+export GIT_TERMINAL_PROMPT=0
+
 # The workspace directory is bind-mounted from the host and may be owned by a
 # different UID. Git ≥ 2.35.2 rejects operations in such directories unless
 # they are explicitly marked safe.

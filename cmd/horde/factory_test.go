@@ -322,6 +322,29 @@ func TestInitFromRunID(t *testing.T) {
 		}
 	})
 
+	t.Run("no flag GetRun I/O error is returned not swallowed", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			openStore: func(_ string) (store.Store, func(), error) {
+				return &stubStore{runErr: fmt.Errorf("disk I/O error")}, func() {}, nil
+			},
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				t.Fatal("loadAWSConfig should not be called when GetRun returns a real error")
+				return aws.Config{}, nil
+			},
+		}
+		_, _, _, _, err := initFromRunIDWith(context.Background(), "", "", "abc123", deps)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "reading local store") {
+			t.Errorf("expected 'reading local store' wrapper, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "disk I/O error") {
+			t.Errorf("expected original error to be preserved, got: %v", err)
+		}
+	})
+
 	t.Run("explicit flag overrides stored provider", func(t *testing.T) {
 		t.Parallel()
 		deps := factoryDeps{

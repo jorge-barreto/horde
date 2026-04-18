@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,7 +83,8 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 	// This avoids AWS auto-detection errors for docker-only users.
 	if provFlag == "" {
 		if st, cleanup, err := deps.openStore("docker"); err == nil {
-			if run, err := st.GetRun(ctx, runID); err == nil {
+			run, err := st.GetRun(ctx, runID)
+			if err == nil {
 				prov, err := newProviderWith(ctx, run.Provider, profile, deps)
 				if err != nil {
 					cleanup()
@@ -90,8 +92,13 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 				}
 				return prov, st, run, cleanup, nil
 			}
-			// Run not in SQLite — close and fall through to auto-detect.
 			cleanup()
+			// Only fall through to AWS auto-detect when the run simply
+			// doesn't exist locally.  Real store errors (disk full,
+			// corruption, I/O) must be surfaced immediately.
+			if !errors.Is(err, store.ErrRunNotFound) {
+				return nil, nil, nil, nil, fmt.Errorf("reading local store: %w", err)
+			}
 		}
 	}
 

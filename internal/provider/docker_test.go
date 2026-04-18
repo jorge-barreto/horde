@@ -801,6 +801,18 @@ fi
 	if lrc.cmd.ProcessState == nil {
 		t.Error("expected ProcessState to be non-nil after Close() (process not reaped)")
 	}
+
+	// Close() must have waited on the done channel before returning.
+	// If the done channel were not being closed on the Wait-goroutine
+	// exit, this receive would block here and the test would time out.
+	// Use a short timeout to fail fast rather than deadlocking on
+	// regression.
+	select {
+	case <-lrc.done:
+		// expected: done channel closed
+	case <-time.After(100 * time.Millisecond):
+		t.Error("done channel was not closed after Close() returned")
+	}
 }
 
 func TestDockerProvider_Logs_Follow_VerifyArgs(t *testing.T) {

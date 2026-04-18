@@ -2687,10 +2687,20 @@ esac
 	}
 	st.Close()
 
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
 	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
+	pw.Close()
+	os.Stdout = origStdout
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
+	stdoutBytes, _ := io.ReadAll(pr)
+	stdout := string(stdoutBytes)
 
 	st2, err := store.NewSQLiteStore(env.dbPath)
 	if err != nil {
@@ -2712,6 +2722,19 @@ esac
 	}
 	if r.ExitCode == nil || *r.ExitCode != 0 {
 		t.Errorf("ExitCode: got %v, want 0", r.ExitCode)
+	}
+
+	// Verify the in-place mutation on the Finalize'd run reaches
+	// stdout via printRunStatus — guards against accidental removal
+	// of the run.TotalCostUSD/run.ExitCode assignments in Finalize.
+	if !strings.Contains(stdout, "3.14") {
+		t.Errorf("stdout %q should display TotalCostUSD 3.14", stdout)
+	}
+	// Exit code is displayed in the status block; search for "0" near
+	// "exit" case-insensitively to be resilient to formatting tweaks.
+	lower := strings.ToLower(stdout)
+	if !strings.Contains(lower, "exit") {
+		t.Errorf("stdout %q should mention exit code", stdout)
 	}
 }
 

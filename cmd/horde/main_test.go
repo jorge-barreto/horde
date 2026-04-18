@@ -3011,6 +3011,85 @@ esac
 	}
 }
 
+// TestKill_MalformedRunResult covers horde-bqy: killCmd must treat
+// run-result.json parse failures as best-effort. A malformed JSON file
+// must not surface as an error; the command completes and kills the
+// container — it just leaves cost/exit code unset.
+func TestKill_MalformedRunResult(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
+  stop) exit 0 ;;
+  cp)
+    case "$2" in
+      *audit*) mkdir -p "$3/TICKET-1" && printf '{not valid json' > "$3/TICKET-1/run-result.json" ;;
+    esac
+    ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "killrun0040"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	err = st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Workflow:   "",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("malformed run-result.json must not surface error, got: %v", runErr)
+	}
+	if !strings.Contains(string(out), "Killed run") {
+		t.Errorf("output missing 'Killed run': %s", string(out))
+	}
+
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store for verification: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("getting run: %v", err)
+	}
+	if r.Status != store.StatusKilled {
+		t.Errorf("status: got %q, want %q", r.Status, store.StatusKilled)
+	}
+	// cost and exit code must be nil since the JSON was unparseable.
+	if r.TotalCostUSD != nil {
+		t.Errorf("TotalCostUSD: got %v, want nil (malformed JSON)", *r.TotalCostUSD)
+	}
+	if r.ExitCode != nil {
+		t.Errorf("ExitCode: got %v, want nil (malformed JSON)", *r.ExitCode)
+	}
+}
+
 func TestKill_CapturesCostAndExitCode_WithWorkflow(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

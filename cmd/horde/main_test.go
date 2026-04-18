@@ -3809,7 +3809,7 @@ func TestRetry_ECS_SkipsEnvValidation(t *testing.T) {
 	// - *       → container ID for docker run -d
 	dockerScript := `#!/bin/sh
 case "$1" in
-  inspect) echo '[{"State":{"Running":false,"ExitCode":1,"StartedAt":"2025-01-01T00:00:00Z","FinishedAt":"2025-01-01T01:00:00Z"}}]';;
+  inspect) echo '{"Running":false,"ExitCode":1,"StartedAt":"2025-01-01T00:00:00Z","FinishedAt":"2025-01-01T01:00:00Z"}';;
   image) echo "2099-01-01T00:00:00Z";;
   *) echo "abc123container";;
 esac

@@ -3076,6 +3076,126 @@ func TestResults_MissingRunResult(t *testing.T) {
 	}
 }
 
+// TestResults_CorruptJSON covers horde-jqr: when run-result.json exists but
+// contains malformed or schema-mismatched JSON, results must fall back to the
+// partial-results view rather than crash or propagate an error.
+func TestResults_CorruptJSON(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{"malformed", `{invalid json`},
+		{"truncated", `{"phases": [`},
+		{"wrong type for phases", `{"phases": "not an array"}`},
+		{"totally wrong schema", `[1,2,3]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+			ctx := context.Background()
+			runID := "resultsjqr01"
+
+			resultsDir := filepath.Join(env.tmpHome, ".horde", "results", runID, "audit", "TICKET-1")
+			if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+				t.Fatalf("creating results dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(resultsDir, "run-result.json"), []byte(tc.payload), 0o644); err != nil {
+				t.Fatalf("writing run-result.json: %v", err)
+			}
+
+			st, err := store.NewSQLiteStore(env.dbPath)
+			if err != nil {
+				t.Fatalf("opening store: %v", err)
+			}
+			exitCode := 1
+			cost := 2.50
+			if err := st.CreateRun(ctx, &store.Run{
+				ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+				Provider: "docker", LaunchedBy: "testuser",
+				StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
+				Status: store.StatusFailed, ExitCode: &exitCode, TotalCostUSD: &cost,
+			}); err != nil {
+				t.Fatalf("creating run: %v", err)
+			}
+			st.Close()
+
+			origStdout := os.Stdout
+			pr, pw, _ := os.Pipe()
+			os.Stdout = pw
+			defer func() { os.Stdout = origStdout }()
+			runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", runID})
+			pw.Close()
+			os.Stdout = origStdout
+			out, _ := io.ReadAll(pr)
+
+			if runErr != nil {
+				t.Fatalf("results returned error on corrupt JSON: %v", runErr)
+			}
+			outStr := string(out)
+			if !strings.Contains(outStr, "Detailed results unavailable") {
+				t.Errorf("output missing fallback header: %s", outStr)
+			}
+			if !strings.Contains(outStr, "failed") || !strings.Contains(outStr, "$2.50") {
+				t.Errorf("output missing partial-results fields: %s", outStr)
+			}
+		})
+	}
+}
+
+// TestResults_JSON_CorruptJSON is the --json sibling of TestResults_CorruptJSON:
+// corrupt run-result.json must still produce a valid partial-results JSON doc.
+func TestResults_JSON_CorruptJSON(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	runID := "resultsjqr02"
+
+	resultsDir := filepath.Join(env.tmpHome, ".horde", "results", runID, "audit", "TICKET-1")
+	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+		t.Fatalf("creating results dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "run-result.json"), []byte(`{not json`), 0o644); err != nil {
+		t.Fatalf("writing run-result.json: %v", err)
+	}
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	exitCode := 1
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
+		Status: store.StatusFailed, ExitCode: &exitCode,
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", "--json", runID})
+	pw.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(pr)
+
+	if runErr != nil {
+		t.Fatalf("results --json returned error on corrupt JSON: %v", runErr)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("--json output not valid JSON: %v\n%s", err, string(out))
+	}
+	if parsed["id"] != runID {
+		t.Errorf("json id: got %v, want %q", parsed["id"], runID)
+	}
+	if parsed["partial"] != true {
+		t.Errorf("json partial: got %v, want true", parsed["partial"])
+	}
+}
+
 func TestResults_LazyCompletion(t *testing.T) {
 	dockerScript := "#!/bin/sh\ncase \"$1\" in\n  inspect) printf '{\"Running\":false,\"ExitCode\":0,\"StartedAt\":\"2024-06-15T10:30:00Z\",\"FinishedAt\":\"2024-06-15T10:45:00Z\"}' ;;\n  cp) exit 0 ;;\n  rm) exit 0 ;;\nesac\n"
 	env := setupStatusEnv(t, dockerScript)

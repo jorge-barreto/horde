@@ -51,6 +51,12 @@ func TestNormalizeRepoURL_Errors(t *testing.T) {
 	}{
 		{"empty string", "", "normalizing remote URL: input is empty"},
 		{"whitespace only", "  ", "normalizing remote URL: input is empty"},
+		{"scp no colon", "justahostname", "unrecognized format"},
+		{"scp empty host with user", "@:path", "unrecognized format"},
+		{"scp empty host no user", ":path", "unrecognized format"},
+		{"scp empty path", "host:", "unrecognized format"},
+		{"scp empty path with user", "git@host:", "unrecognized format"},
+		{"scp empty host and path", ":", "unrecognized format"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -31,6 +31,9 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 		if at := strings.Index(host, "@"); at >= 0 {
 			host = host[at+1:]
 		}
+		if host == "" || path == "" {
+			return "", fmt.Errorf("normalizing remote URL %q: unrecognized format", rawURL)
+		}
 		normalized = host + "/" + path
 	} else {
 		// URL with scheme: https://, http://, ssh://, git://

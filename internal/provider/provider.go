@@ -17,6 +17,7 @@ type Provider interface {
 	Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
 	Stop(ctx context.Context, opts StopOpts) error
 	ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
+	HydrateRun(ctx context.Context, opts HydrateOpts) error
 	// Finalize checks whether a pending/running instance has completed or
 	// timed out. For completed instances, it collects artifacts and populates
 	// the run's terminal fields (Status, ExitCode, CompletedAt, TotalCostUSD)
@@ -76,6 +77,37 @@ type ReadFileOpts struct {
 type StopOpts struct {
 	InstanceID string // container ID or ECS task ARN
 	ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
+}
+
+// HydrateOpts contains parameters for copying a run's audit and artifacts
+// trees — and the project's orc configuration — to local destination
+// directories.
+//
+// Providers locate the source tree using RunID plus the orc-native
+// (Workflow, Ticket) path components. Workflow may be empty — in which
+// case the source path omits the workflow segment. DestAuditDir and
+// DestArtifactsDir are the final on-disk destinations for the bytes
+// under the run's <workflow>/<ticket>/ subtree (caller-assembled).
+//
+// DestConfigDir, if set, is where the provider copies the project's
+// orc configuration surface — i.e. everything under the run's .orc/
+// directory except audit/ and artifacts/ (those two are per-run and
+// reserved by orc). An empty DestConfigDir skips config hydration.
+// A missing config source is NOT an error; it degrades gracefully.
+// This lets orc improve / orc doctor find config.yaml, phases/,
+// scripts/, workflows/, prompts/, etc. alongside the per-run data.
+//
+// If the per-run source data does not exist, implementations return
+// *FileNotFoundError with Path set to a description of what was missing.
+type HydrateOpts struct {
+	RunID            string            // run ID (used to resolve the per-run source)
+	Workflow         string            // orc workflow name, or "" for default workflow
+	Ticket           string            // orc ticket name
+	InstanceID       string            // container ID or ECS task ARN
+	Metadata         map[string]string // provider-specific metadata from LaunchResult
+	DestAuditDir     string            // absolute destination for audit content
+	DestArtifactsDir string            // absolute destination for artifacts content
+	DestConfigDir    string            // absolute destination for orc config surface; "" skips
 }
 
 // FileNotFoundError is returned when a requested file does not exist in the provider's storage.

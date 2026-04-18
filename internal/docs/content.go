@@ -32,6 +32,12 @@ var topics = []Topic{
 		Content: topicRetry,
 	},
 	{
+		Name:    "hydrate",
+		Title:   "Hydrating Run Results",
+		Summary: "Copy run artifacts locally for orc improve / orc doctor",
+		Content: topicHydrate,
+	},
+	{
 		Name:    "env",
 		Title:   "Environment Setup",
 		Summary: "Required secrets, .env file, token permissions",
@@ -428,4 +434,60 @@ horde validates the .env file before every launch. It checks that both
 CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN keys are present (but does not
 verify that the values are valid tokens — that fails later at clone
 or orc execution time).
+`
+
+const topicHydrate = `Hydrating Run Results
+=====================
+
+` + "`horde hydrate`" + ` copies the .orc/audit/ and .orc/artifacts/ trees from
+one or more completed runs into a local directory so you can run
+` + "`orc improve`" + `, ` + "`orc doctor`" + `, or any other orc tool that operates on
+a local .orc/ folder.
+
+Synopsis
+
+    horde hydrate <run-id> [<run-id>...] --into <dir>
+
+Layout
+
+Hydrated data is placed under a per-run leaf directory so multiple runs
+never collide:
+
+    <dir>/.orc/audit/<ticket>-<run-id>/...
+    <dir>/.orc/artifacts/<ticket>-<run-id>/...
+
+For runs that used a named workflow, the workflow name is inserted before
+the leaf:
+
+    <dir>/.orc/audit/<workflow>/<ticket>-<run-id>/...
+
+Examples
+
+Single run:
+
+    horde hydrate abc123def456 --into /tmp/inspect
+    cd /tmp/inspect
+    orc improve
+
+Weekly batch (e.g. a cron job):
+
+    horde list --all --json \\
+      | jq -r '.[].id' \\
+      | xargs horde hydrate --into /tmp/weekly
+
+Semantics
+
+- Each run-id is processed independently. A failure on one does not abort
+  the others.
+- Runs whose destination subdirectory already exists are skipped. To
+  re-hydrate, delete the subdirectory.
+- Runs that are not in a terminal state (pending/running) are reported as
+  failures and skipped.
+- Exit 0 if all run-ids were hydrated or skipped. Exit non-zero if any
+  run-id failed.
+
+Providers
+
+- Docker provider: copies from ~/.horde/results/<run-id>/.
+- ECS provider: downloads from s3://<artifacts-bucket>/horde-runs/<run-id>/.
 `

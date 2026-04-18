@@ -190,6 +190,20 @@ Runs have a maximum duration. Default: 24 hours. Override with `--timeout` on `h
 
 The timeout covers the entire run including git clone, orc execution, and artifact upload.
 
+### 8. Hydrate
+
+Copies `.orc/audit/` and `.orc/artifacts/` from one or more completed runs
+into a user-specified local directory so the user can invoke
+`orc improve` / `orc doctor` against the results. Runs are placed under
+`.orc/audit/<ticket>-<run-id>/` and `.orc/artifacts/<ticket>-<run-id>/`
+(with an optional workflow prefix segment). Idempotent per run — existing
+subdirs are skipped. Best-effort multi-run: exits non-zero if any run-id
+fails, while still materializing the runs that succeeded. Docker provider
+copies from `~/.horde/results/`; ECS provider downloads from the S3
+artifacts prefix.
+
+See `horde docs hydrate` for user-facing documentation.
+
 ## Instance Setup
 
 ### Base Docker Image

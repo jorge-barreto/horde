@@ -441,12 +441,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 				logs.Close()
 			}
 
-			var resultPath string
-			if run.Workflow != "" {
-				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-			}
+			resultPath := filepath.Join(resultsDir, AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			var cost *float64
 			if data, err := os.ReadFile(resultPath); err == nil {
 				var rr dockerRunResult
@@ -473,12 +468,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 			var cost *float64
 			var exitCode *int
-			var resultPath string
-			if run.Workflow != "" {
-				resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-			}
+			resultPath := filepath.Join(resultsDir, AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			if data, err := os.ReadFile(resultPath); err == nil {
 				var rr dockerRunResult
 				if json.Unmarshal(data, &rr) == nil {
@@ -514,12 +504,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			logs.Close()
 		}
 
-		var resultPath string
-		if run.Workflow != "" {
-			resultPath = filepath.Join(resultsDir, "audit", run.Workflow, run.Ticket, "run-result.json")
-		} else {
-			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
-		}
+		resultPath := filepath.Join(resultsDir, AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 		// Stopped branch reads TotalCostUSD from run-result.json but
 		// deliberately ignores rr.ExitCode: for natural completion the
 		// authoritative exit code comes from the host .horde-exit-code
@@ -581,12 +566,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 				}
 			}
 
-			var resultPath string
-			if run.Workflow != "" {
-				resultPath = filepath.Join(workspaceDir, ".orc", "audit", run.Workflow, run.Ticket, "run-result.json")
-			} else {
-				resultPath = filepath.Join(workspaceDir, ".orc", "audit", run.Ticket, "run-result.json")
-			}
+			resultPath := filepath.Join(workspaceDir, ".orc", AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			if data, err := os.ReadFile(resultPath); err == nil {
 				var rr dockerRunResult
 				if json.Unmarshal(data, &rr) == nil {

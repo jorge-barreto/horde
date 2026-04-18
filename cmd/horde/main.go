@@ -619,7 +619,7 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				}
 
 				// Best-effort: read run-result.json for cost and exit code
-				resultPath := filepath.Join(resultsDir, auditRelPath(run.Workflow, run.Ticket, "run-result.json"))
+				resultPath := filepath.Join(resultsDir, provider.AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 				if data, err := os.ReadFile(resultPath); err == nil {
 					var rr runResult
 					if json.Unmarshal(data, &rr) == nil {
@@ -694,7 +694,7 @@ information if the result file is missing (e.g., orc crashed early).`,
 				fmt.Printf("Run %s is still in progress (status: %s)\n", run.ID, run.Status)
 				return nil
 			}
-			resultPath := filepath.Join(".orc", auditRelPath(run.Workflow, run.Ticket, "run-result.json"))
+			resultPath := filepath.Join(".orc", provider.AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			data, err := prov.ReadFile(ctx, provider.ReadFileOpts{
 				RunID:      run.ID,
 				Path:       resultPath,
@@ -822,19 +822,6 @@ include completed, failed, and killed runs.`,
 type runResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
-}
-
-// auditRelPath builds the audit-tree path suffix for a per-run file:
-// "audit/[workflow/]ticket/<filename>". Callers prefix this with the
-// appropriate base (host results dir, .orc/ logical path, or the
-// container's /workspace/.orc path) using filepath.Join or path.Join.
-func auditRelPath(workflow, ticket, filename string) string {
-	parts := []string{"audit"}
-	if workflow != "" {
-		parts = append(parts, workflow)
-	}
-	parts = append(parts, ticket, filename)
-	return filepath.Join(parts...)
 }
 
 func cleanCmd() *cli.Command {
@@ -1092,7 +1079,7 @@ func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *stor
 	if run.InstanceID == "" {
 		return nil
 	}
-	costsPath := "/workspace/.orc/" + auditRelPath(run.Workflow, run.Ticket, "costs.json")
+	costsPath := "/workspace/.orc/" + provider.AuditRelPath(run.Workflow, run.Ticket, "costs.json")
 	data, err := prov.ReadContainerFile(ctx, run.InstanceID, costsPath)
 	if err != nil {
 		return nil

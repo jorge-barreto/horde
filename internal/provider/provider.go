@@ -106,6 +106,19 @@ func LocalResultsDir(homeDir, runID string) string {
 	return filepath.Join(homeDir, ".horde", "results", runID)
 }
 
+// AuditRelPath builds the audit-tree path suffix for a per-run file:
+// "audit/[workflow/]ticket/<filename>". Callers prefix this with the
+// appropriate base (host results dir, .orc/ logical path, or the
+// container's /workspace/.orc path) using filepath.Join or path.Join.
+func AuditRelPath(workflow, ticket, filename string) string {
+	parts := []string{"audit"}
+	if workflow != "" {
+		parts = append(parts, workflow)
+	}
+	parts = append(parts, ticket, filename)
+	return filepath.Join(parts...)
+}
+
 // SessionsPath returns the host path for a run's persistent agent session
 // state (bind-mounted to /root/.claude inside the container). Keeping it
 // beside the workspace dir mirrors the per-run lifecycle.

@@ -4537,9 +4537,9 @@ func TestAuditRelPath(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := auditRelPath(tc.workflow, tc.ticket, tc.filename)
+			got := provider.AuditRelPath(tc.workflow, tc.ticket, tc.filename)
 			if got != tc.want {
-				t.Errorf("auditRelPath(%q, %q, %q) = %q, want %q",
+				t.Errorf("provider.AuditRelPath(%q, %q, %q) = %q, want %q",
 					tc.workflow, tc.ticket, tc.filename, got, tc.want)
 			}
 		})

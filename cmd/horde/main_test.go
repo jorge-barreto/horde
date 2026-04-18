@@ -4465,3 +4465,30 @@ esac
 		t.Errorf("stdout should report 1 successful removal, got: %s", string(stdout))
 	}
 }
+
+func TestAuditRelPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		workflow string
+		ticket   string
+		filename string
+		want     string
+	}{
+		{"with workflow", "flow1", "PROJ-1", "run-result.json", "audit/flow1/PROJ-1/run-result.json"},
+		{"empty workflow", "", "PROJ-1", "run-result.json", "audit/PROJ-1/run-result.json"},
+		{"costs.json file", "flow1", "PROJ-1", "costs.json", "audit/flow1/PROJ-1/costs.json"},
+		{"empty workflow costs", "", "PROJ-2", "costs.json", "audit/PROJ-2/costs.json"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := auditRelPath(tc.workflow, tc.ticket, tc.filename)
+			if got != tc.want {
+				t.Errorf("auditRelPath(%q, %q, %q) = %q, want %q",
+					tc.workflow, tc.ticket, tc.filename, got, tc.want)
+			}
+		})
+	}
+}

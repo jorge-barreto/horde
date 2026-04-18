@@ -1098,7 +1098,7 @@ func TestDockerProvider_ReadFile_FileNotFound(t *testing.T) {
 	}
 	var notFound *FileNotFoundError
 	if !errors.As(err, &notFound) {
-		t.Errorf("ReadFile() error type = %T, want *FileNotFoundError", err)
+		t.Fatalf("ReadFile() error type = %T, want *FileNotFoundError", err)
 	}
 	if notFound.Path != ".orc/audit/missing.json" {
 		t.Errorf("FileNotFoundError.Path = %q, want %q", notFound.Path, ".orc/audit/missing.json")

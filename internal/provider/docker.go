@@ -518,6 +518,13 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		} else {
 			resultPath = filepath.Join(resultsDir, "audit", run.Ticket, "run-result.json")
 		}
+		// Stopped branch reads TotalCostUSD from run-result.json but
+		// deliberately ignores rr.ExitCode: for natural completion the
+		// authoritative exit code comes from the host .horde-exit-code
+		// marker (orc's own exit), with docker inspect as a fallback.
+		// The timeout and kill branches, by contrast, use
+		// rr.ExitCode because the container was force-stopped and
+		// neither the marker nor docker inspect reflects orc's result.
 		var cost *float64
 		if data, err := os.ReadFile(resultPath); err == nil {
 			var rr dockerRunResult

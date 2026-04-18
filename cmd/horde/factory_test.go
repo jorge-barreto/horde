@@ -69,6 +69,17 @@ func TestInitProviderAndStore(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:     "explicit docker openStore error",
+			provName: "docker",
+			deps: factoryDeps{
+				openStore: func(_ string) (store.Store, func(), error) {
+					return nil, nil, fmt.Errorf("cannot open SQLite at /bad/path")
+				},
+			},
+			wantErr:     true,
+			errContains: []string{"cannot open SQLite"},
+		},
+		{
 			name:     "explicit aws-ecs no-creds",
 			provName: "aws-ecs",
 			deps: factoryDeps{
@@ -171,6 +182,21 @@ func TestInitProviderAndStore(t *testing.T) {
 					if !strings.Contains(err.Error(), sub) {
 						t.Errorf("error %q does not contain %q", err.Error(), sub)
 					}
+				}
+				if prov != nil {
+					t.Errorf("prov on error = %v, want nil", prov)
+				}
+				if st != nil {
+					t.Errorf("store on error = %v, want nil", st)
+				}
+				if cleanup != nil {
+					t.Error("cleanup on error != nil, want nil")
+				}
+				if maxConcurrent != 0 {
+					t.Errorf("maxConcurrent on error = %d, want 0", maxConcurrent)
+				}
+				if gotProvName != "" {
+					t.Errorf("provName on error = %q, want \"\"", gotProvName)
 				}
 				return
 			}

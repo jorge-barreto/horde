@@ -346,3 +346,7 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	}
 	return data, nil
 }
+
+func (p *DockerProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
+	return errors.New("not implemented")
+}

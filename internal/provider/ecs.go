@@ -477,3 +477,7 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 	}
 	return data, nil
 }
+
+func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
+	return errors.New("not implemented")
+}

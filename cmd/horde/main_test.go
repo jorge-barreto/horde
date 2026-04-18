@@ -2851,7 +2851,7 @@ func TestResults_CompletedWithResults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
 	outStr := string(out)
-	for _, want := range []string{runID, "TICKET-1", "completed", "$4.52", "12m 34s", "PHASE", "plan", "$1.23", "3m 0s"} {
+	for _, want := range []string{runID, "TICKET-1", "success", "$4.52", "12m 34s", "PHASE", "plan", "$1.23", "3m 0s"} {
 		if !strings.Contains(outStr, want) {
 			t.Errorf("output missing %q: %s", want, outStr)
 		}
@@ -2899,7 +2899,7 @@ func TestResults_CompletedNoCost(t *testing.T) {
 	if strings.Contains(outStr, "Total Cost:") {
 		t.Errorf("output should not contain Total Cost when absent from JSON, got: %s", outStr)
 	}
-	for _, want := range []string{runID, "TICKET-1", "completed", "5m 0s"} {
+	for _, want := range []string{runID, "TICKET-1", "success", "5m 0s"} {
 		if !strings.Contains(outStr, want) {
 			t.Errorf("output missing %q: %s", want, outStr)
 		}
@@ -3486,8 +3486,11 @@ func TestResults_JSON_CompletedWithResults(t *testing.T) {
 	if v.Partial {
 		t.Errorf("Partial = true, want false")
 	}
-	if v.Status != "completed" {
-		t.Errorf("Status = %q, want completed", v.Status)
+	if v.Status != "success" {
+		t.Errorf("Status = %q, want success", v.Status)
+	}
+	if v.OrcStatus != "completed" {
+		t.Errorf("OrcStatus = %q, want completed", v.OrcStatus)
 	}
 	if v.TotalCostUSD == nil || *v.TotalCostUSD != 4.52 {
 		t.Errorf("TotalCostUSD = %v, want 4.52", v.TotalCostUSD)

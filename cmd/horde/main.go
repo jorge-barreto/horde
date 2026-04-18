@@ -1191,7 +1191,7 @@ func printFullResults(run *store.Run, result *fullRunResult) {
 	if run.Workflow != "" {
 		fmt.Printf("Workflow:       %s\n", run.Workflow)
 	}
-	fmt.Printf("Status:         %s\n", result.Status)
+	fmt.Printf("Status:         %s\n", run.Status)
 	if result.TotalCostUSD != nil {
 		fmt.Printf("Total Cost:     $%.2f\n", *result.TotalCostUSD)
 	}

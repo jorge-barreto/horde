@@ -42,6 +42,7 @@ type ResultsV1 struct {
 	Ticket        string    `json:"ticket"`
 	Workflow      string    `json:"workflow,omitempty"`
 	Status        string    `json:"status"`
+	OrcStatus     string    `json:"orc_status,omitempty"`
 	ExitCode      *int      `json:"exit_code,omitempty"`
 	TotalCostUSD  *float64  `json:"total_cost_usd,omitempty"`
 	TotalDuration string    `json:"total_duration,omitempty"`
@@ -108,7 +109,8 @@ func fullResultsToV1(run *store.Run, result *fullRunResult) ResultsV1 {
 		ID:            run.ID,
 		Ticket:        run.Ticket,
 		Workflow:      run.Workflow,
-		Status:        result.Status,
+		Status:        string(run.Status),
+		OrcStatus:     result.Status,
 		ExitCode:      run.ExitCode,
 		TotalCostUSD:  result.TotalCostUSD,
 		TotalDuration: result.TotalDuration,

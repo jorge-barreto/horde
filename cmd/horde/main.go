@@ -1229,7 +1229,7 @@ func printPartialResults(run *store.Run) {
 	}
 	fmt.Printf("Status: %s\n", run.Status)
 	if run.ExitCode != nil {
-		fmt.Printf("Exit Code: %d\n", *run.ExitCode)
+		fmt.Printf("Exit code: %d\n", *run.ExitCode)
 	}
 	if run.TotalCostUSD != nil {
 		fmt.Printf("Cost:   $%.2f\n", *run.TotalCostUSD)

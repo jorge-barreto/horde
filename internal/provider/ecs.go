@@ -482,15 +482,24 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 }
 
 // HydrateRun downloads the run's audit and artifacts trees from
-// s3://<artifacts_bucket>/horde-runs/<run-id>/{audit,artifacts}/ into the
-// caller-supplied destination directories. Returns *FileNotFoundError if
-// no objects are found under either prefix for this run.
+// s3://<artifacts_bucket>/horde-runs/<run-id>/{audit,artifacts}/[<workflow>/]<ticket>/
+// into the caller-supplied destination directories. Returns *FileNotFoundError
+// if no objects are found under either prefix for this run.
 func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
 	if opts.RunID == "" {
 		return fmt.Errorf("hydrating run: run ID is required")
 	}
 	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
 		return fmt.Errorf("hydrating run: invalid run ID")
+	}
+	if opts.Ticket == "" {
+		return fmt.Errorf("hydrating run: ticket is required")
+	}
+	if strings.ContainsAny(opts.Ticket, "/\\") || strings.Contains(opts.Ticket, "..") {
+		return fmt.Errorf("hydrating run: invalid ticket")
+	}
+	if strings.ContainsAny(opts.Workflow, "/\\") || strings.Contains(opts.Workflow, "..") {
+		return fmt.Errorf("hydrating run: invalid workflow")
 	}
 	if opts.DestAuditDir == "" || opts.DestArtifactsDir == "" {
 		return fmt.Errorf("hydrating run: destination directories are required")
@@ -503,8 +512,9 @@ func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
 		return fmt.Errorf("hydrating run: artifacts_bucket not found in metadata")
 	}
 
-	auditPrefix := "horde-runs/" + opts.RunID + "/audit/"
-	artifactsPrefix := "horde-runs/" + opts.RunID + "/artifacts/"
+	runPrefix := "horde-runs/" + opts.RunID + "/"
+	auditPrefix := runPrefix + "audit/" + orcKeySuffix(opts.Workflow, opts.Ticket)
+	artifactsPrefix := runPrefix + "artifacts/" + orcKeySuffix(opts.Workflow, opts.Ticket)
 
 	audit, err := p.downloadS3Prefix(ctx, bucket, auditPrefix, opts.DestAuditDir)
 	if err != nil {
@@ -515,9 +525,18 @@ func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
 		return fmt.Errorf("hydrating artifacts: %w", err)
 	}
 	if audit == 0 && artifacts == 0 {
-		return &FileNotFoundError{Path: "s3://" + bucket + "/horde-runs/" + opts.RunID + "/"}
+		return &FileNotFoundError{Path: "s3://" + bucket + "/" + runPrefix}
 	}
 	return nil
+}
+
+// orcKeySuffix returns the "<workflow>/<ticket>/" (or "<ticket>/") suffix
+// that orc uses for per-run audit/artifact paths.
+func orcKeySuffix(workflow, ticket string) string {
+	if workflow == "" {
+		return ticket + "/"
+	}
+	return workflow + "/" + ticket + "/"
 }
 
 // downloadS3Prefix lists all objects under prefix and writes each to

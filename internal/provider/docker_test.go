@@ -1180,21 +1180,25 @@ func TestDockerProvider_ReadFile_ReadError(t *testing.T) {
 	}
 }
 
-func TestDockerProvider_HydrateRun_Success(t *testing.T) {
+func TestDockerProvider_HydrateRun_SuccessDefaultWorkflow(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
+	// Source layout (default workflow, no workflow segment):
+	//   ~/.horde/results/abc123/audit/PROJ-1/run-result.json
+	//   ~/.horde/results/abc123/artifacts/PROJ-1/output.txt
 	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
-	if err := os.MkdirAll(filepath.Join(resultsDir, "audit"), 0o755); err != nil {
+	srcAuditRun := filepath.Join(resultsDir, "audit", "PROJ-1")
+	srcArtRun := filepath.Join(resultsDir, "artifacts", "PROJ-1")
+	for _, d := range []string{srcAuditRun, srcArtRun} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(srcAuditRun, "run-result.json"), []byte(`{"ok":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(resultsDir, "artifacts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(resultsDir, "audit", "run-result.json"), []byte(`{"ok":true}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(resultsDir, "artifacts", "output.txt"), []byte("bytes"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(srcArtRun, "output.txt"), []byte("bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1205,6 +1209,7 @@ func TestDockerProvider_HydrateRun_Success(t *testing.T) {
 	p := NewDockerProvider()
 	err := p.HydrateRun(context.Background(), HydrateOpts{
 		RunID:            "abc123",
+		Ticket:           "PROJ-1",
 		DestAuditDir:     destAudit,
 		DestArtifactsDir: destArtifacts,
 	})
@@ -1222,6 +1227,39 @@ func TestDockerProvider_HydrateRun_Success(t *testing.T) {
 	}
 }
 
+func TestDockerProvider_HydrateRun_SuccessNamedWorkflow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Source layout with named workflow:
+	//   ~/.horde/results/abc123/audit/review/PROJ-1/run-result.json
+	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
+	srcAuditRun := filepath.Join(resultsDir, "audit", "review", "PROJ-1")
+	if err := os.MkdirAll(srcAuditRun, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcAuditRun, "run-result.json"), []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	destBase := t.TempDir()
+	p := NewDockerProvider()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "abc123",
+		Workflow:         "review",
+		Ticket:           "PROJ-1",
+		DestAuditDir:     filepath.Join(destBase, "audit"),
+		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
+	})
+	if err != nil {
+		t.Fatalf("HydrateRun: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(destBase, "audit", "run-result.json"))
+	if err != nil || string(got) != `{"ok":true}` {
+		t.Errorf("audit: got %q err=%v", got, err)
+	}
+}
+
 func TestDockerProvider_HydrateRun_ResultsMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1230,6 +1268,7 @@ func TestDockerProvider_HydrateRun_ResultsMissing(t *testing.T) {
 	p := NewDockerProvider()
 	err := p.HydrateRun(context.Background(), HydrateOpts{
 		RunID:            "nope",
+		Ticket:           "PROJ-1",
 		DestAuditDir:     filepath.Join(dest, "audit"),
 		DestArtifactsDir: filepath.Join(dest, "artifacts"),
 	})
@@ -1245,6 +1284,7 @@ func TestDockerProvider_HydrateRun_InvalidRunID(t *testing.T) {
 	for _, bad := range []string{"", "../etc", "a/b", "a\\b"} {
 		err := p.HydrateRun(context.Background(), HydrateOpts{
 			RunID:            bad,
+			Ticket:           "PROJ-1",
 			DestAuditDir:     "/tmp/x/a",
 			DestArtifactsDir: "/tmp/x/b",
 		})
@@ -1254,13 +1294,30 @@ func TestDockerProvider_HydrateRun_InvalidRunID(t *testing.T) {
 	}
 }
 
+func TestDockerProvider_HydrateRun_InvalidTicketOrWorkflow(t *testing.T) {
+	t.Parallel()
+	p := NewDockerProvider()
+	cases := []HydrateOpts{
+		{RunID: "abc123", Ticket: "", DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "../etc", DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "a/b", DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "PROJ-1", Workflow: "../flow", DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "PROJ-1", Workflow: "a/b", DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+	}
+	for i, opts := range cases {
+		if err := p.HydrateRun(context.Background(), opts); err == nil {
+			t.Errorf("case %d: bad ticket/workflow should be rejected: %+v", i, opts)
+		}
+	}
+}
+
 func TestDockerProvider_HydrateRun_MissingDestDirs(t *testing.T) {
 	t.Parallel()
 	p := NewDockerProvider()
 	cases := []HydrateOpts{
-		{RunID: "abc123", DestAuditDir: "", DestArtifactsDir: "/tmp/x"},
-		{RunID: "abc123", DestAuditDir: "/tmp/x", DestArtifactsDir: ""},
-		{RunID: "abc123", DestAuditDir: "", DestArtifactsDir: ""},
+		{RunID: "abc123", Ticket: "PROJ-1", DestAuditDir: "", DestArtifactsDir: "/tmp/x"},
+		{RunID: "abc123", Ticket: "PROJ-1", DestAuditDir: "/tmp/x", DestArtifactsDir: ""},
+		{RunID: "abc123", Ticket: "PROJ-1", DestAuditDir: "", DestArtifactsDir: ""},
 	}
 	for i, opts := range cases {
 		if err := p.HydrateRun(context.Background(), opts); err == nil {
@@ -1274,11 +1331,12 @@ func TestDockerProvider_HydrateRun_AuditOnly(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
-	// Only audit/ exists — artifacts/ never created.
-	if err := os.MkdirAll(filepath.Join(resultsDir, "audit"), 0o755); err != nil {
+	// Only audit/<ticket>/ exists — artifacts/ never created.
+	srcAuditRun := filepath.Join(resultsDir, "audit", "PROJ-1")
+	if err := os.MkdirAll(srcAuditRun, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(resultsDir, "audit", "r.json"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(srcAuditRun, "r.json"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1286,6 +1344,7 @@ func TestDockerProvider_HydrateRun_AuditOnly(t *testing.T) {
 	p := NewDockerProvider()
 	err := p.HydrateRun(context.Background(), HydrateOpts{
 		RunID:            "abc123",
+		Ticket:           "PROJ-1",
 		DestAuditDir:     filepath.Join(destBase, "audit"),
 		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
 	})

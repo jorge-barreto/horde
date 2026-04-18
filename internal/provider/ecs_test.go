@@ -2048,18 +2048,19 @@ func TestECSProvider_ReadFile_NilBody(t *testing.T) {
 	}
 }
 
-func TestECSProvider_HydrateRun_Success(t *testing.T) {
+func TestECSProvider_HydrateRun_SuccessDefaultWorkflow(t *testing.T) {
 	t.Parallel()
 
+	// Default workflow: S3 keys under horde-runs/<id>/audit/<ticket>/...
 	fake := &fakeS3Client{
 		listKeys: map[string][]string{
-			"horde-runs/abc123/audit/":     {"horde-runs/abc123/audit/run-result.json", "horde-runs/abc123/audit/nested/timing.json"},
-			"horde-runs/abc123/artifacts/": {"horde-runs/abc123/artifacts/output.txt"},
+			"horde-runs/abc123/audit/PROJ-1/":     {"horde-runs/abc123/audit/PROJ-1/run-result.json", "horde-runs/abc123/audit/PROJ-1/nested/timing.json"},
+			"horde-runs/abc123/artifacts/PROJ-1/": {"horde-runs/abc123/artifacts/PROJ-1/output.txt"},
 		},
 		getObjectByKey: map[string]string{
-			"horde-runs/abc123/audit/run-result.json":    `{"ok":true}`,
-			"horde-runs/abc123/audit/nested/timing.json": `{"phase":"plan"}`,
-			"horde-runs/abc123/artifacts/output.txt":     "bytes",
+			"horde-runs/abc123/audit/PROJ-1/run-result.json":    `{"ok":true}`,
+			"horde-runs/abc123/audit/PROJ-1/nested/timing.json": `{"phase":"plan"}`,
+			"horde-runs/abc123/artifacts/PROJ-1/output.txt":     "bytes",
 		},
 	}
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
@@ -2067,6 +2068,7 @@ func TestECSProvider_HydrateRun_Success(t *testing.T) {
 	destBase := t.TempDir()
 	err := p.HydrateRun(context.Background(), HydrateOpts{
 		RunID:            "abc123",
+		Ticket:           "PROJ-1",
 		Metadata:         map[string]string{"artifacts_bucket": "my-horde-artifacts"},
 		DestAuditDir:     filepath.Join(destBase, "audit"),
 		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
@@ -2089,6 +2091,38 @@ func TestECSProvider_HydrateRun_Success(t *testing.T) {
 	}
 }
 
+func TestECSProvider_HydrateRun_SuccessNamedWorkflow(t *testing.T) {
+	t.Parallel()
+
+	// Named workflow: S3 keys under horde-runs/<id>/audit/<workflow>/<ticket>/...
+	fake := &fakeS3Client{
+		listKeys: map[string][]string{
+			"horde-runs/abc123/audit/review/PROJ-1/": {"horde-runs/abc123/audit/review/PROJ-1/run-result.json"},
+		},
+		getObjectByKey: map[string]string{
+			"horde-runs/abc123/audit/review/PROJ-1/run-result.json": `{"ok":true}`,
+		},
+	}
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, fake, testHordeConfig())
+
+	destBase := t.TempDir()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "abc123",
+		Workflow:         "review",
+		Ticket:           "PROJ-1",
+		Metadata:         map[string]string{"artifacts_bucket": "my-horde-artifacts"},
+		DestAuditDir:     filepath.Join(destBase, "audit"),
+		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
+	})
+	if err != nil {
+		t.Fatalf("HydrateRun: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(destBase, "audit", "run-result.json"))
+	if err != nil || string(got) != `{"ok":true}` {
+		t.Errorf("audit: got %q err=%v", got, err)
+	}
+}
+
 func TestECSProvider_HydrateRun_NoObjects(t *testing.T) {
 	t.Parallel()
 
@@ -2098,6 +2132,7 @@ func TestECSProvider_HydrateRun_NoObjects(t *testing.T) {
 	destBase := t.TempDir()
 	err := p.HydrateRun(context.Background(), HydrateOpts{
 		RunID:            "abc123",
+		Ticket:           "PROJ-1",
 		Metadata:         map[string]string{"artifacts_bucket": "my-horde-artifacts"},
 		DestAuditDir:     filepath.Join(destBase, "audit"),
 		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
@@ -2115,6 +2150,7 @@ func TestECSProvider_HydrateRun_MissingBucket(t *testing.T) {
 	destBase := t.TempDir()
 	err := p.HydrateRun(context.Background(), HydrateOpts{
 		RunID:            "abc123",
+		Ticket:           "PROJ-1",
 		Metadata:         nil,
 		DestAuditDir:     filepath.Join(destBase, "audit"),
 		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
@@ -2130,12 +2166,30 @@ func TestECSProvider_HydrateRun_InvalidRunID(t *testing.T) {
 	for _, bad := range []string{"", "../etc", "a/b", "a\\b"} {
 		err := p.HydrateRun(context.Background(), HydrateOpts{
 			RunID:            bad,
+			Ticket:           "PROJ-1",
 			Metadata:         map[string]string{"artifacts_bucket": "b"},
 			DestAuditDir:     "/tmp/x/a",
 			DestArtifactsDir: "/tmp/x/b",
 		})
 		if err == nil {
 			t.Errorf("run id %q should be rejected", bad)
+		}
+	}
+}
+
+func TestECSProvider_HydrateRun_InvalidTicketOrWorkflow(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	cases := []HydrateOpts{
+		{RunID: "abc123", Ticket: "", Metadata: map[string]string{"artifacts_bucket": "b"}, DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "../etc", Metadata: map[string]string{"artifacts_bucket": "b"}, DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "a/b", Metadata: map[string]string{"artifacts_bucket": "b"}, DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "PROJ-1", Workflow: "../flow", Metadata: map[string]string{"artifacts_bucket": "b"}, DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+		{RunID: "abc123", Ticket: "PROJ-1", Workflow: "a/b", Metadata: map[string]string{"artifacts_bucket": "b"}, DestAuditDir: "/tmp/x/a", DestArtifactsDir: "/tmp/x/b"},
+	}
+	for i, opts := range cases {
+		if err := p.HydrateRun(context.Background(), opts); err == nil {
+			t.Errorf("case %d: bad ticket/workflow should be rejected: %+v", i, opts)
 		}
 	}
 }

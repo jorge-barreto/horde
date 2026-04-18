@@ -74,19 +74,22 @@ type StopOpts struct {
 // HydrateOpts contains parameters for copying a run's audit and artifacts
 // trees to local destination directories.
 //
-// The caller is responsible for assembling DestAuditDir and DestArtifactsDir
-// (including any <ticket>-<run-id> or workflow-prefix segments). Providers
-// only move bytes — they do not interpret run fields.
+// Providers locate the source tree using RunID plus the orc-native
+// (Workflow, Ticket) path components. Workflow may be empty — in which
+// case the source path omits the workflow segment. DestAuditDir and
+// DestArtifactsDir are the final on-disk destinations for the bytes
+// under the run's <workflow>/<ticket>/ subtree (caller-assembled).
 //
 // If the source data does not exist for this run, implementations return
-// *FileNotFoundError with Path set to a human-readable description of
-// what was missing (e.g. "results for run abc123").
+// *FileNotFoundError with Path set to a description of what was missing.
 type HydrateOpts struct {
-	RunID            string            // run ID (used by ECS to resolve S3 prefix)
+	RunID            string            // run ID (used to resolve the per-run source)
+	Workflow         string            // orc workflow name, or "" for default workflow
+	Ticket           string            // orc ticket name
 	InstanceID       string            // container ID or ECS task ARN
 	Metadata         map[string]string // provider-specific metadata from LaunchResult
-	DestAuditDir     string            // absolute destination for .orc/audit/<ticket>-<run-id>
-	DestArtifactsDir string            // absolute destination for .orc/artifacts/<ticket>-<run-id>
+	DestAuditDir     string            // absolute destination for audit content
+	DestArtifactsDir string            // absolute destination for artifacts content
 }
 
 // FileNotFoundError is returned when a requested file does not exist in the provider's storage.

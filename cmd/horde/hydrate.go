@@ -172,6 +172,8 @@ func hydrateOne(ctx context.Context, deps factoryDeps, provFlag, profile, runID,
 
 	if err := prov.HydrateRun(ctx, provider.HydrateOpts{
 		RunID:            run.ID,
+		Workflow:         run.Workflow,
+		Ticket:           run.Ticket,
 		InstanceID:       run.InstanceID,
 		Metadata:         run.Metadata,
 		DestAuditDir:     auditDir,

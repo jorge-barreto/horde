@@ -379,15 +379,21 @@ func copyDir(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
-			os.MkdirAll(target, 0o755)
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return fmt.Errorf("creating directory %s: %w", target, err)
+			}
 			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return nil // skip unreadable source files (container fs may be partial)
 		}
-		os.MkdirAll(filepath.Dir(target), 0o755)
-		os.WriteFile(target, data, 0o644)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("creating parent directory for %s: %w", target, err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", target, err)
+		}
 		return nil
 	})
 }

@@ -1790,6 +1790,39 @@ func TestCopyDir(t *testing.T) {
 			t.Errorf("content = %q, want %q", string(got), "hello")
 		}
 	})
+
+	t.Run("returns error on read-only destination", func(t *testing.T) {
+		t.Parallel()
+
+		if os.Getuid() == 0 {
+			t.Skip("test requires non-root to enforce filesystem permissions")
+		}
+
+		src := t.TempDir()
+		dst := filepath.Join(t.TempDir(), "locked")
+
+		// Create a source file inside a subdirectory.
+		if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+			t.Fatalf("creating subdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(src, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("writing file: %v", err)
+		}
+
+		// Create destination and lock it so child writes fail.
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			t.Fatalf("creating dst: %v", err)
+		}
+		if err := os.Chmod(dst, 0o555); err != nil {
+			t.Fatalf("chmod dst: %v", err)
+		}
+		t.Cleanup(func() { os.Chmod(dst, 0o755) })
+
+		err := copyDir(src, dst)
+		if err == nil {
+			t.Fatal("expected error for read-only destination, got nil")
+		}
+	})
 }
 
 func TestDockerProvider_Finalize_RunningWithGarbageMarker(t *testing.T) {

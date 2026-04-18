@@ -146,7 +146,7 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if strings.Contains(strings.ToLower(string(exitErr.Stderr)), "no such") {
-				return &InstanceStatus{State: "unknown"}, nil
+				return &InstanceStatus{State: StateUnknown}, nil
 			}
 			return nil, fmt.Errorf("inspecting container: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
@@ -164,7 +164,7 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 	}
 
 	if state.Running {
-		return &InstanceStatus{State: "running", StartedAt: startedAt}, nil
+		return &InstanceStatus{State: StateRunning, StartedAt: startedAt}, nil
 	}
 
 	finishedAt, err := time.Parse(time.RFC3339Nano, state.FinishedAt)
@@ -172,7 +172,7 @@ func (p *DockerProvider) Status(ctx context.Context, instanceID string) (*Instan
 		return nil, fmt.Errorf("parsing container finish time: %w", err)
 	}
 	return &InstanceStatus{
-		State:      "stopped",
+		State:      StateStopped,
 		ExitCode:   &state.ExitCode,
 		StartedAt:  startedAt,
 		FinishedAt: &finishedAt,
@@ -412,7 +412,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 	}
 
 	switch instanceStatus.State {
-	case "running":
+	case StateRunning:
 		// Check if orc finished first (marker file on host workspace — container
 		// stays alive via sleep infinity). This must come before the timeout
 		// check: if orc completed, its exit code is authoritative regardless of
@@ -497,7 +497,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 		return nil // orc still running, nothing to do
 
-	case "stopped":
+	case StateStopped:
 		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
 		if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
@@ -560,7 +560,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
 
-	case "unknown":
+	case StateUnknown:
 		var cost *float64
 		workspaceDir := WorkspacePath(homeDir, run.ID)
 		if _, err := os.Stat(workspaceDir); err == nil {

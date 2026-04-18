@@ -113,8 +113,16 @@ type LaunchResult struct {
 }
 
 // InstanceStatus describes the current state of a running or completed instance.
+// Instance state sentinels. Providers must use these strings so callers can
+// switch on State without a provider-specific type switch.
+const (
+	StateRunning = "running"
+	StateStopped = "stopped"
+	StateUnknown = "unknown"
+)
+
 type InstanceStatus struct {
-	State      string // pending, running, stopping, stopped, unknown
+	State      string // see StateRunning/StateStopped/StateUnknown
 	ExitCode   *int   // nil while running
 	StartedAt  time.Time
 	FinishedAt *time.Time // nil while running

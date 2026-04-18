@@ -341,7 +341,7 @@ resumes any interrupted agent session. Override with explicit orc args:
 			if err != nil {
 				return fmt.Errorf("checking container: %w", err)
 			}
-			if instStatus.State == "running" {
+			if instStatus.State == provider.StateRunning {
 				if err := prov.Stop(ctx, provider.StopOpts{InstanceID: run.InstanceID}); err != nil {
 					return fmt.Errorf("stopping old container: %w", err)
 				}
@@ -998,7 +998,7 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 			if err != nil {
 				return fmt.Errorf("checking container: %w", err)
 			}
-			if instStatus.State == "running" {
+			if instStatus.State == provider.StateRunning {
 				// Container alive — exec directly
 				fmt.Fprintf(os.Stderr, "Opening shell for run %s (%s). Type 'exit' to leave.\n", runID, run.Ticket)
 				shellExec := exec.CommandContext(ctx, "docker", "exec", "-it",
@@ -1014,7 +1014,7 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 			// Container stopped or gone — check for workspace on host
 			workspaceDir := provider.WorkspacePath(homeDir, run.ID)
 			if _, err := os.Stat(filepath.Join(workspaceDir, ".git")); err != nil {
-				if instStatus.State == "unknown" {
+				if instStatus.State == provider.StateUnknown {
 					return fmt.Errorf("container for run %s no longer exists and no workspace found", runID)
 				}
 				return fmt.Errorf("container for run %s is not running — use 'horde retry' first", runID)

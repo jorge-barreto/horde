@@ -226,28 +226,28 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 		// unknown sentinel rather than an error so callers don't need
 		// provider-specific switches.
 		if f := out.Failures[0]; f.Reason != nil && strings.EqualFold(*f.Reason, "MISSING") {
-			return &InstanceStatus{State: "unknown"}, nil
+			return &InstanceStatus{State: StateUnknown}, nil
 		}
 		return nil, fmt.Errorf("describing ECS task: %s", ecsFailureReason(out.Failures[0]))
 	}
 
 	if len(out.Tasks) == 0 {
-		return &InstanceStatus{State: "unknown"}, nil
+		return &InstanceStatus{State: StateUnknown}, nil
 	}
 
 	task := out.Tasks[0]
 
-	state := "unknown"
+	state := StateUnknown
 	if task.LastStatus != nil {
 		switch *task.LastStatus {
 		case "PROVISIONING", "PENDING", "ACTIVATING":
 			state = "pending"
 		case "RUNNING":
-			state = "running"
+			state = StateRunning
 		case "DEPROVISIONING", "STOPPING":
 			state = "stopping"
 		case "STOPPED":
-			state = "stopped"
+			state = StateStopped
 		}
 	}
 

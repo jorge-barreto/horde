@@ -2256,6 +2256,41 @@ func TestECSProvider_ReadFile_EmptyRunID(t *testing.T) {
 	}
 }
 
+// TestECSProvider_ReadFile_PathTraversal verifies defense-in-depth
+// rejection of path traversal attempts in opts.Path after the .orc/
+// prefix check. Covers horde-t9i.
+func TestECSProvider_ReadFile_PathTraversal(t *testing.T) {
+	t.Parallel()
+	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"escapes up", ".orc/../secret"},
+		{"escapes deeper", ".orc/audit/../../other/secret"},
+		{"absolute root", ".orc//etc/passwd"},
+		{"dot-only relpath", ".orc/."},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := p.ReadFile(context.Background(), ReadFileOpts{
+				RunID:    "run-001",
+				Path:     tc.path,
+				Metadata: map[string]string{"artifacts_bucket": "my-bucket"},
+			})
+			if err == nil {
+				t.Fatal("ReadFile() error = nil, want non-nil")
+			}
+			if !strings.Contains(err.Error(), "escapes") {
+				t.Errorf("ReadFile(%q) error = %q, want it to contain \"escapes\"", tc.path, err.Error())
+			}
+		})
+	}
+}
+
 func TestECSProvider_ReadFile_RunIDTraversal(t *testing.T) {
 	t.Parallel()
 	p := NewECSProvider(&fakeECSClient{}, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())

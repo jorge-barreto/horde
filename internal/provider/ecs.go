@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -471,6 +472,15 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 	if relPath == "" {
 		return nil, fmt.Errorf("reading file: path must include a filename after %q", orcPrefix)
 	}
+	// Defense-in-depth: reject paths that traverse outside .orc/ once
+	// path.Clean collapses "..". This mirrors the Docker provider's
+	// prefix-containment check. S3 flat keys don't interpret "..", but
+	// we validate against the logical path the caller supplied.
+	cleanedRel := path.Clean(relPath)
+	if cleanedRel == ".." || strings.HasPrefix(cleanedRel, "../") || cleanedRel == "." || strings.HasPrefix(cleanedRel, "/") {
+		return nil, fmt.Errorf("reading file: path escapes %q prefix", orcPrefix)
+	}
+	relPath = cleanedRel
 
 	bucket := ""
 	if opts.Metadata != nil {

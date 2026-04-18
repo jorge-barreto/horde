@@ -1616,6 +1616,49 @@ func TestECSProvider_Logs_Follow_DrainRNFBreaksCleanly(t *testing.T) {
 	}
 }
 
+// TestECSProvider_Logs_Follow_DrainNilResponse verifies the nil-output
+// guard in the drain loop after STOPPED detection. If GetLogEvents
+// returns (nil, nil) during drain, the goroutine must exit cleanly
+// without panic. Covers horde-dtv.
+func TestECSProvider_Logs_Follow_DrainNilResponse(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			// Call 0 (poll): one line.
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("before stop\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// Call 1 (drain): nil response must not panic; goroutine must exit.
+			nil,
+		},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if !strings.Contains(string(data), "before stop") {
+		t.Errorf("data = %q, want it to contain \"before stop\"", string(data))
+	}
+	if strings.Contains(string(data), "WARNING") {
+		t.Errorf("data = %q, want no WARNING on nil drain response", string(data))
+	}
+}
+
 func TestECSProvider_Logs_Follow_NilResponse(t *testing.T) {
 	t.Parallel()
 	fakeLogs := &fakeCloudWatchLogsClient{

@@ -511,7 +511,7 @@ in the results directory.`,
 
 			if run.Status == store.StatusSuccess || run.Status == store.StatusFailed || run.Status == store.StatusKilled {
 				// Container is gone — try saved logs
-				logPath := filepath.Join(homeDir, ".horde", "results", runID, "container.log")
+				logPath := filepath.Join(provider.LocalResultsDir(homeDir, runID), "container.log")
 				if data, err := os.ReadFile(logPath); err == nil {
 					os.Stdout.Write(data)
 					return nil
@@ -600,7 +600,7 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 			var cost *float64
 			var exitCode *int
 			if run.InstanceID != "" {
-				resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+				resultsDir := provider.LocalResultsDir(homeDir, run.ID)
 
 				// Capture container logs before stopping
 				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {

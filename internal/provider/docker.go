@@ -324,7 +324,7 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	if err != nil {
 		return nil, fmt.Errorf("reading file: %w", err)
 	}
-	resultsDir := filepath.Join(homeDir, ".horde", "results", opts.RunID)
+	resultsDir := LocalResultsDir(homeDir, opts.RunID)
 	fullPath := filepath.Join(resultsDir, relPath)
 
 	cleanResults := filepath.Clean(resultsDir) + string(filepath.Separator)
@@ -425,7 +425,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 				fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", run.ID)
 			}
 
-			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+			resultsDir := LocalResultsDir(homeDir, run.ID)
 			if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
 			}
@@ -465,7 +465,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 		// Orc still running — check timeout
 		if time.Now().After(run.TimeoutAt) {
-			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+			resultsDir := LocalResultsDir(homeDir, run.ID)
 			if err := p.Stop(ctx, StopOpts{InstanceID: run.InstanceID, ResultsDir: resultsDir}); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: stopping timed-out container: %v\n", err)
 				return nil
@@ -498,7 +498,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		return nil // orc still running, nothing to do
 
 	case StateStopped:
-		resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+		resultsDir := LocalResultsDir(homeDir, run.ID)
 		if err := p.copyFromContainer(ctx, run.InstanceID, "/workspace/.orc/audit/.", filepath.Join(resultsDir, "audit")); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: copying results for run %s: %v\n", run.ID, err)
 		}
@@ -567,7 +567,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			fmt.Fprintf(os.Stderr, "warning: container for run %s vanished — workspace preserved at %s\n", run.ID, workspaceDir)
 			fmt.Fprintf(os.Stderr, "  use 'horde retry %s' to resume or 'horde shell %s' to inspect\n", run.ID, run.ID)
 
-			resultsDir := filepath.Join(homeDir, ".horde", "results", run.ID)
+			resultsDir := LocalResultsDir(homeDir, run.ID)
 			auditSrc := filepath.Join(workspaceDir, ".orc", "audit")
 			artifactsSrc := filepath.Join(workspaceDir, ".orc", "artifacts")
 			if _, err := os.Stat(auditSrc); err == nil {
@@ -652,7 +652,7 @@ func (p *DockerProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error
 	if err != nil {
 		return fmt.Errorf("hydrating run: %w", err)
 	}
-	resultsDir := filepath.Join(homeDir, ".horde", "results", opts.RunID)
+	resultsDir := LocalResultsDir(homeDir, opts.RunID)
 	if _, err := os.Stat(resultsDir); err != nil {
 		if os.IsNotExist(err) {
 			return &FileNotFoundError{Path: resultsDir, Err: err}

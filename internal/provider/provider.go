@@ -99,6 +99,13 @@ func WorkspacePath(homeDir, runID string) string {
 	return filepath.Join(homeDir, ".horde", "workspaces", runID)
 }
 
+// LocalResultsDir returns the host path where a run's results (audit,
+// artifacts, container.log) are staged on the local filesystem. Both the
+// provider and CLI call this to avoid drift in the results layout.
+func LocalResultsDir(homeDir, runID string) string {
+	return filepath.Join(homeDir, ".horde", "results", runID)
+}
+
 // SessionsPath returns the host path for a run's persistent agent session
 // state (bind-mounted to /root/.claude inside the container). Keeping it
 // beside the workspace dir mirrors the per-run lifecycle.

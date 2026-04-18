@@ -347,6 +347,51 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	return data, nil
 }
 
+// HydrateRun copies a run's audit and artifacts trees from the local results
+// store (~/.horde/results/<run-id>/{audit,artifacts}/) to the caller-supplied
+// destination dirs. Returns *FileNotFoundError if the results dir for this
+// run does not exist. A missing audit/ or artifacts/ subdirectory individually
+// is treated as empty (some runs don't produce both).
 func (p *DockerProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
-	return errors.New("not implemented")
+	if opts.RunID == "" {
+		return fmt.Errorf("hydrating run: run ID is required")
+	}
+	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
+		return fmt.Errorf("hydrating run: invalid run ID")
+	}
+	if opts.DestAuditDir == "" || opts.DestArtifactsDir == "" {
+		return fmt.Errorf("hydrating run: destination directories are required")
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("hydrating run: %w", err)
+	}
+	resultsDir := filepath.Join(homeDir, ".horde", "results", opts.RunID)
+	if _, err := os.Stat(resultsDir); err != nil {
+		if os.IsNotExist(err) {
+			return &FileNotFoundError{Path: resultsDir, Err: err}
+		}
+		return fmt.Errorf("hydrating run: %w", err)
+	}
+
+	srcAudit := filepath.Join(resultsDir, "audit")
+	if _, err := os.Stat(srcAudit); err == nil {
+		if err := copyLocalTree(srcAudit, opts.DestAuditDir); err != nil {
+			return fmt.Errorf("hydrating audit: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("hydrating audit: %w", err)
+	}
+
+	srcArtifacts := filepath.Join(resultsDir, "artifacts")
+	if _, err := os.Stat(srcArtifacts); err == nil {
+		if err := copyLocalTree(srcArtifacts, opts.DestArtifactsDir); err != nil {
+			return fmt.Errorf("hydrating artifacts: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("hydrating artifacts: %w", err)
+	}
+
+	return nil
 }

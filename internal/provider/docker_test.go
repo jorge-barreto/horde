@@ -1179,3 +1179,120 @@ func TestDockerProvider_ReadFile_ReadError(t *testing.T) {
 		t.Errorf("ReadFile() error = %T, should NOT be *FileNotFoundError", err)
 	}
 }
+
+func TestDockerProvider_HydrateRun_Success(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
+	if err := os.MkdirAll(filepath.Join(resultsDir, "audit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(resultsDir, "artifacts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "audit", "run-result.json"), []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "artifacts", "output.txt"), []byte("bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	destBase := t.TempDir()
+	destAudit := filepath.Join(destBase, "audit")
+	destArtifacts := filepath.Join(destBase, "artifacts")
+
+	p := NewDockerProvider()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "abc123",
+		DestAuditDir:     destAudit,
+		DestArtifactsDir: destArtifacts,
+	})
+	if err != nil {
+		t.Fatalf("HydrateRun: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(destAudit, "run-result.json"))
+	if err != nil || string(got) != `{"ok":true}` {
+		t.Errorf("audit: got %q err=%v", got, err)
+	}
+	got, err = os.ReadFile(filepath.Join(destArtifacts, "output.txt"))
+	if err != nil || string(got) != "bytes" {
+		t.Errorf("artifacts: got %q err=%v", got, err)
+	}
+}
+
+func TestDockerProvider_HydrateRun_ResultsMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dest := t.TempDir()
+	p := NewDockerProvider()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "nope",
+		DestAuditDir:     filepath.Join(dest, "audit"),
+		DestArtifactsDir: filepath.Join(dest, "artifacts"),
+	})
+	var nf *FileNotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("want *FileNotFoundError, got %v", err)
+	}
+}
+
+func TestDockerProvider_HydrateRun_InvalidRunID(t *testing.T) {
+	t.Parallel()
+	p := NewDockerProvider()
+	for _, bad := range []string{"", "../etc", "a/b", "a\\b"} {
+		err := p.HydrateRun(context.Background(), HydrateOpts{
+			RunID:            bad,
+			DestAuditDir:     "/tmp/x/a",
+			DestArtifactsDir: "/tmp/x/b",
+		})
+		if err == nil {
+			t.Errorf("run id %q should be rejected", bad)
+		}
+	}
+}
+
+func TestDockerProvider_HydrateRun_MissingDestDirs(t *testing.T) {
+	t.Parallel()
+	p := NewDockerProvider()
+	cases := []HydrateOpts{
+		{RunID: "abc123", DestAuditDir: "", DestArtifactsDir: "/tmp/x"},
+		{RunID: "abc123", DestAuditDir: "/tmp/x", DestArtifactsDir: ""},
+		{RunID: "abc123", DestAuditDir: "", DestArtifactsDir: ""},
+	}
+	for i, opts := range cases {
+		if err := p.HydrateRun(context.Background(), opts); err == nil {
+			t.Errorf("case %d: empty dest dirs should be rejected", i)
+		}
+	}
+}
+
+func TestDockerProvider_HydrateRun_AuditOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
+	// Only audit/ exists — artifacts/ never created.
+	if err := os.MkdirAll(filepath.Join(resultsDir, "audit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "audit", "r.json"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	destBase := t.TempDir()
+	p := NewDockerProvider()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "abc123",
+		DestAuditDir:     filepath.Join(destBase, "audit"),
+		DestArtifactsDir: filepath.Join(destBase, "artifacts"),
+	})
+	if err != nil {
+		t.Fatalf("missing artifacts subdir should not fail: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destBase, "audit", "r.json")); err != nil {
+		t.Errorf("audit file not copied: %v", err)
+	}
+}

@@ -407,6 +407,51 @@ func (p *DockerProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error
 		return fmt.Errorf("hydrating artifacts: %w", err)
 	}
 
+	if opts.DestConfigDir != "" {
+		workspaceOrc := filepath.Join(WorkspacePath(homeDir, opts.RunID), ".orc")
+		if err := copyOrcConfig(workspaceOrc, opts.DestConfigDir); err != nil {
+			return fmt.Errorf("hydrating config: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// copyOrcConfig copies every entry under src (the run's workspace .orc/ dir)
+// into dst, except the reserved per-run dirs "audit" and "artifacts". A
+// missing src is not an error — the run's workspace may have been purged.
+func copyOrcConfig(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", src, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "audit" || name == "artifacts" {
+			continue
+		}
+		srcPath := filepath.Join(src, name)
+		dstPath := filepath.Join(dst, name)
+		info, err := e.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", srcPath, err)
+		}
+		if info.IsDir() {
+			if err := copyLocalTree(srcPath, dstPath); err != nil {
+				return fmt.Errorf("copying %s: %w", srcPath, err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			return fmt.Errorf("creating %s: %w", dst, err)
+		}
+		if err := copyRegularFile(srcPath, dstPath, info.Mode().Perm()); err != nil {
+			return fmt.Errorf("copying %s: %w", srcPath, err)
+		}
+	}
 	return nil
 }
 

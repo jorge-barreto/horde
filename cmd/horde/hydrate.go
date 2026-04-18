@@ -178,6 +178,7 @@ func hydrateOne(ctx context.Context, deps factoryDeps, provFlag, profile, runID,
 		Metadata:         run.Metadata,
 		DestAuditDir:     auditDir,
 		DestArtifactsDir: artifactsDir,
+		DestConfigDir:    filepath.Join(into, ".orc"),
 	}); err != nil {
 		var nf *provider.FileNotFoundError
 		if errors.As(err, &nf) {

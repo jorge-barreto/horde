@@ -527,6 +527,14 @@ func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
 	if audit == 0 && artifacts == 0 {
 		return &FileNotFoundError{Path: "s3://" + bucket + "/" + runPrefix}
 	}
+
+	// DestConfigDir is intentionally unhandled for ECS: the Fargate task is
+	// already gone by the time hydrate runs, so the run's .orc/ config surface
+	// is not retrievable live. To support this, the entrypoint must upload
+	// .orc/ (minus audit/ and artifacts/) to s3://<bucket>/horde-runs/<run-id>/config/
+	// at launch time, and this method would download that prefix to DestConfigDir.
+	// Tracked separately — Docker parity only for now.
+
 	return nil
 }
 

@@ -58,6 +58,17 @@ func TestHydrate_DockerSuccess(t *testing.T) {
 	if _, err := os.Stat(doubleNested); err == nil {
 		t.Errorf("audit tree is double-nested at %s — hydrate did not strip source workflow/ticket prefix", doubleNested)
 	}
+
+	// orc config surface (config.yaml + any user-defined folders) should be
+	// copied from the run's workspace into <into>/.orc/ so orc improve /
+	// orc doctor can find the project config alongside the per-run data.
+	// The test fixture is a multi-workflow project (no top-level config.yaml;
+	// workflows live in workflows/<name>.yaml), so we assert on the workflow
+	// file that drove this run.
+	workflowFile := filepath.Join(into, ".orc", "workflows", "quick-success.yaml")
+	if _, err := os.Stat(workflowFile); err != nil {
+		t.Errorf("workflow config not hydrated at %s: %v", workflowFile, err)
+	}
 }
 
 // TestHydrate_Idempotent hydrates the same run twice into the same dir and

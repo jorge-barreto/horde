@@ -1355,3 +1355,116 @@ func TestDockerProvider_HydrateRun_AuditOnly(t *testing.T) {
 		t.Errorf("audit file not copied: %v", err)
 	}
 }
+
+func TestDockerProvider_HydrateRun_CopiesOrcConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Minimum per-run data so HydrateRun returns success.
+	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
+	srcAuditRun := filepath.Join(resultsDir, "audit", "PROJ-1")
+	if err := os.MkdirAll(srcAuditRun, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcAuditRun, "run-result.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed the run's workspace .orc/ with a config surface mirroring orc's
+	// conventions: config file + user-named folders + the two reserved
+	// per-run dirs that MUST be excluded.
+	workspaceOrc := filepath.Join(home, ".horde", "workspaces", "abc123", ".orc")
+	for _, d := range []string{
+		filepath.Join(workspaceOrc, "phases"),
+		filepath.Join(workspaceOrc, "scripts"),
+		filepath.Join(workspaceOrc, "custom-folder-a"),
+		filepath.Join(workspaceOrc, "audit"),     // reserved — must NOT be copied
+		filepath.Join(workspaceOrc, "artifacts"), // reserved — must NOT be copied
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspaceOrc, "config.yaml"), []byte("name: project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceOrc, "phases", "plan.md"), []byte("plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceOrc, "custom-folder-a", "x.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Seed reserved dirs with files that would be catastrophic to copy —
+	// their presence at the destination would indicate a bug.
+	if err := os.WriteFile(filepath.Join(workspaceOrc, "audit", "leaked.txt"), []byte("leak"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceOrc, "artifacts", "leaked.txt"), []byte("leak"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	destBase := t.TempDir()
+	destConfig := filepath.Join(destBase, ".orc")
+
+	p := NewDockerProvider()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "abc123",
+		Ticket:           "PROJ-1",
+		DestAuditDir:     filepath.Join(destBase, ".orc", "audit", "PROJ-1-abc123"),
+		DestArtifactsDir: filepath.Join(destBase, ".orc", "artifacts", "PROJ-1-abc123"),
+		DestConfigDir:    destConfig,
+	})
+	if err != nil {
+		t.Fatalf("HydrateRun: %v", err)
+	}
+
+	// Expected: config surface copied.
+	if got, err := os.ReadFile(filepath.Join(destConfig, "config.yaml")); err != nil || string(got) != "name: project\n" {
+		t.Errorf("config.yaml: got %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(destConfig, "phases", "plan.md")); err != nil || string(got) != "plan" {
+		t.Errorf("phases/plan.md: got %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(destConfig, "custom-folder-a", "x.txt")); err != nil || string(got) != "x" {
+		t.Errorf("custom-folder-a/x.txt: got %q err=%v", got, err)
+	}
+
+	// Reserved per-run dirs must NOT be copied via the config path.
+	// (They'd collide with the per-run dest dirs and leak cross-run data.)
+	if _, err := os.Stat(filepath.Join(destConfig, "audit", "leaked.txt")); err == nil {
+		t.Error("audit/ should not be copied via config surface")
+	}
+	if _, err := os.Stat(filepath.Join(destConfig, "artifacts", "leaked.txt")); err == nil {
+		t.Error("artifacts/ should not be copied via config surface")
+	}
+}
+
+func TestDockerProvider_HydrateRun_ConfigMissingWorkspace(t *testing.T) {
+	// A purged/missing workspace must degrade gracefully — config hydration
+	// is optional and skipping it should not fail the whole hydrate.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resultsDir := filepath.Join(home, ".horde", "results", "abc123")
+	srcAuditRun := filepath.Join(resultsDir, "audit", "PROJ-1")
+	if err := os.MkdirAll(srcAuditRun, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcAuditRun, "run-result.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately do NOT create ~/.horde/workspaces/abc123/.
+
+	destBase := t.TempDir()
+	p := NewDockerProvider()
+	err := p.HydrateRun(context.Background(), HydrateOpts{
+		RunID:            "abc123",
+		Ticket:           "PROJ-1",
+		DestAuditDir:     filepath.Join(destBase, ".orc", "audit", "PROJ-1-abc123"),
+		DestArtifactsDir: filepath.Join(destBase, ".orc", "artifacts", "PROJ-1-abc123"),
+		DestConfigDir:    filepath.Join(destBase, ".orc"),
+	})
+	if err != nil {
+		t.Fatalf("missing workspace should not fail hydrate: %v", err)
+	}
+}

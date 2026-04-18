@@ -72,7 +72,8 @@ type StopOpts struct {
 }
 
 // HydrateOpts contains parameters for copying a run's audit and artifacts
-// trees to local destination directories.
+// trees — and the project's orc configuration — to local destination
+// directories.
 //
 // Providers locate the source tree using RunID plus the orc-native
 // (Workflow, Ticket) path components. Workflow may be empty — in which
@@ -80,7 +81,15 @@ type StopOpts struct {
 // DestArtifactsDir are the final on-disk destinations for the bytes
 // under the run's <workflow>/<ticket>/ subtree (caller-assembled).
 //
-// If the source data does not exist for this run, implementations return
+// DestConfigDir, if set, is where the provider copies the project's
+// orc configuration surface — i.e. everything under the run's .orc/
+// directory except audit/ and artifacts/ (those two are per-run and
+// reserved by orc). An empty DestConfigDir skips config hydration.
+// A missing config source is NOT an error; it degrades gracefully.
+// This lets orc improve / orc doctor find config.yaml, phases/,
+// scripts/, workflows/, prompts/, etc. alongside the per-run data.
+//
+// If the per-run source data does not exist, implementations return
 // *FileNotFoundError with Path set to a description of what was missing.
 type HydrateOpts struct {
 	RunID            string            // run ID (used to resolve the per-run source)
@@ -90,6 +99,7 @@ type HydrateOpts struct {
 	Metadata         map[string]string // provider-specific metadata from LaunchResult
 	DestAuditDir     string            // absolute destination for audit content
 	DestArtifactsDir string            // absolute destination for artifacts content
+	DestConfigDir    string            // absolute destination for orc config surface; "" skips
 }
 
 // FileNotFoundError is returned when a requested file does not exist in the provider's storage.

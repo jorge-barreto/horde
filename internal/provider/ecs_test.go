@@ -30,6 +30,7 @@ type fakeECSClient struct {
 	describeTasksInput   *ecs.DescribeTasksInput
 	describeTasksOutput  *ecs.DescribeTasksOutput
 	describeTasksErr     error
+	describeTasksErrs    []error // per-call errors; indexed by call number
 	describeTasksInputs  []*ecs.DescribeTasksInput
 	describeTasksOutputs []*ecs.DescribeTasksOutput
 
@@ -51,11 +52,14 @@ func (f *fakeECSClient) RunTask(ctx context.Context, params *ecs.RunTaskInput, o
 func (f *fakeECSClient) DescribeTasks(ctx context.Context, params *ecs.DescribeTasksInput, optFns ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 	f.describeTasksInput = params
 	f.describeTasksInputs = append(f.describeTasksInputs, params)
+	idx := len(f.describeTasksInputs) - 1
+	if idx < len(f.describeTasksErrs) && f.describeTasksErrs[idx] != nil {
+		return nil, f.describeTasksErrs[idx]
+	}
 	if f.describeTasksErr != nil {
 		return nil, f.describeTasksErr
 	}
 	if len(f.describeTasksOutputs) > 0 {
-		idx := len(f.describeTasksInputs) - 1
 		if idx < len(f.describeTasksOutputs) {
 			return f.describeTasksOutputs[idx], nil
 		}
@@ -1324,6 +1328,70 @@ func (c *cancellingCWClient) GetLogEvents(ctx context.Context, params *cloudwatc
 		return c.script[idx], nil
 	}
 	return &cloudwatchlogs.GetLogEventsOutput{}, nil
+}
+
+// TestECSProvider_Logs_Follow_DescribeFailuresResetOnSuccess verifies that
+// the describeFailures counter resets after a successful DescribeTasks
+// call, so that non-consecutive intermittent failures don't prematurely
+// terminate follow mode. Regression guard for horde-5du.
+func TestECSProvider_Logs_Follow_DescribeFailuresResetOnSuccess(t *testing.T) {
+	t.Parallel()
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("alive\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// Subsequent calls return empty (default).
+		},
+	}
+	transientErr := fmt.Errorf("ThrottlingException: Rate exceeded")
+
+	// Pattern: 4 errors, 1 success (RUNNING), 4 errors, then STOPPED.
+	// Without reset, cumulative failures hit 5 after call 6 and follow
+	// terminates early. With reset, consecutive failures never hit 5,
+	// so follow continues to the STOPPED signal on call 10.
+	describeErrs := []error{
+		transientErr, transientErr, transientErr, transientErr,
+		nil, // success — must reset counter
+		transientErr, transientErr, transientErr, transientErr,
+		nil, // STOPPED delivered here
+	}
+	describeOuts := []*ecs.DescribeTasksOutput{
+		nil, nil, nil, nil,
+		{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+		nil, nil, nil, nil,
+		{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+	}
+	fakeECS := &fakeECSClient{
+		describeTasksErrs:    describeErrs,
+		describeTasksOutputs: describeOuts,
+	}
+
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if !strings.Contains(string(data), "alive") {
+		t.Errorf("data = %q, want it to contain \"alive\"", string(data))
+	}
+	if strings.Contains(string(data), "unable to determine task completion") {
+		t.Errorf("data = %q, follow must not terminate early (counter should reset on success)", string(data))
+	}
+	// Must reach call #10 (STOPPED) — if follow terminated early at call 5,
+	// DescribeTasks would stop being invoked.
+	if len(fakeECS.describeTasksInputs) < 10 {
+		t.Errorf("DescribeTasks calls = %d, want >= 10 (follow terminated prematurely)", len(fakeECS.describeTasksInputs))
+	}
 }
 
 func TestECSProvider_Logs_Follow_GetLogEventsError(t *testing.T) {

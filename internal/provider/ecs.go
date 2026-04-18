@@ -430,11 +430,8 @@ func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {
 }
 
 func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
-	if opts.RunID == "" {
-		return nil, fmt.Errorf("reading file: run ID is required")
-	}
-	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
-		return nil, fmt.Errorf("reading file: invalid run ID")
+	if err := ValidateRunID(opts.RunID); err != nil {
+		return nil, fmt.Errorf("reading file: %w", err)
 	}
 	if opts.Path == "" {
 		return nil, fmt.Errorf("reading file: path is required")
@@ -487,11 +484,8 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 // into the caller-supplied destination directories. Returns *FileNotFoundError
 // if no objects are found under either prefix for this run.
 func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
-	if opts.RunID == "" {
-		return fmt.Errorf("hydrating run: run ID is required")
-	}
-	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
-		return fmt.Errorf("hydrating run: invalid run ID")
+	if err := ValidateRunID(opts.RunID); err != nil {
+		return fmt.Errorf("hydrating run: %w", err)
 	}
 	if opts.Ticket == "" {
 		return fmt.Errorf("hydrating run: ticket is required")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jorge-barreto/horde/internal/store"
@@ -37,6 +38,19 @@ type LaunchOpts struct {
 	Mounts   []string // volume mounts in docker format (host:container)
 	HomeDir  string   // home directory for workspace path resolution
 	OrcArgs  []string // extra orc flags passed through via -- (opaque)
+}
+
+// ValidateRunID rejects empty run IDs and IDs that would enable path
+// traversal when interpolated into filesystem paths or S3 keys. Providers
+// must call this before using a RunID to build any storage path.
+func ValidateRunID(id string) error {
+	if id == "" {
+		return fmt.Errorf("run ID is required")
+	}
+	if strings.ContainsAny(id, "/\\") || strings.Contains(id, "..") {
+		return fmt.Errorf("invalid run ID")
+	}
+	return nil
 }
 
 // WorkspacePath returns the host path for a run's persistent workspace.

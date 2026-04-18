@@ -1063,6 +1063,88 @@ esac
 	}
 }
 
+// TestStatus_LazyCompletion_NonZeroExit covers horde-15m: the stopped-case
+// mapExitCode paths (non-zero → failed, 5 → killed) were only exercised as
+// pure unit tests on mapExitCode, never end-to-end through Finalize + store
+// update. Drive a full status command for each and verify the store.
+func TestStatus_LazyCompletion_NonZeroExit(t *testing.T) {
+	cases := []struct {
+		name       string
+		exitCode   int
+		wantStatus store.Status
+		wantOut    string
+	}{
+		{"exit 1 maps to failed", 1, store.StatusFailed, "failed"},
+		{"exit 2 maps to failed", 2, store.StatusFailed, "failed"},
+		{"exit 5 maps to killed", 5, store.StatusKilled, "killed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dockerScript := fmt.Sprintf(`#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":false,"ExitCode":%d,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
+  cp) exit 0 ;;
+  logs) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`, tc.exitCode)
+			env := setupStatusEnv(t, dockerScript)
+			ctx := context.Background()
+
+			st, err := store.NewSQLiteStore(env.dbPath)
+			if err != nil {
+				t.Fatalf("opening store: %v", err)
+			}
+			now := time.Now()
+			runID := "lazy15m00001"
+			if err := st.CreateRun(ctx, &store.Run{
+				ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-15M",
+				Status: store.StatusRunning, InstanceID: "abc123",
+				Provider: "docker", LaunchedBy: "testuser",
+				StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute),
+			}); err != nil {
+				t.Fatalf("creating run: %v", err)
+			}
+			st.Close()
+
+			origStdout := os.Stdout
+			pr, pw, _ := os.Pipe()
+			os.Stdout = pw
+			defer func() { os.Stdout = origStdout }()
+			runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
+			pw.Close()
+			os.Stdout = origStdout
+			out, _ := io.ReadAll(pr)
+
+			if runErr != nil {
+				t.Fatalf("unexpected error: %v", runErr)
+			}
+			if !strings.Contains(string(out), tc.wantOut) {
+				t.Errorf("output missing %q: %s", tc.wantOut, string(out))
+			}
+
+			st2, err := store.NewSQLiteStore(env.dbPath)
+			if err != nil {
+				t.Fatalf("opening store: %v", err)
+			}
+			defer st2.Close()
+			r, err := st2.GetRun(ctx, runID)
+			if err != nil {
+				t.Fatalf("getting run: %v", err)
+			}
+			if r.Status != tc.wantStatus {
+				t.Errorf("store status = %q, want %q", r.Status, tc.wantStatus)
+			}
+			if r.ExitCode == nil || *r.ExitCode != tc.exitCode {
+				t.Errorf("store exit code = %v, want %d", r.ExitCode, tc.exitCode)
+			}
+			if r.CompletedAt == nil {
+				t.Error("store completed_at is nil after lazy finalize")
+			}
+		})
+	}
+}
+
 func TestStatus_LazyCompletion_ZeroFinishedAt(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

@@ -15,6 +15,7 @@ type Provider interface {
 	Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
 	Stop(ctx context.Context, opts StopOpts) error
 	ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
+	HydrateRun(ctx context.Context, opts HydrateOpts) error
 }
 
 // LaunchOpts contains parameters for launching a worker instance.
@@ -68,6 +69,24 @@ type ReadFileOpts struct {
 type StopOpts struct {
 	InstanceID string // container ID or ECS task ARN
 	ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
+}
+
+// HydrateOpts contains parameters for copying a run's audit and artifacts
+// trees to local destination directories.
+//
+// The caller is responsible for assembling DestAuditDir and DestArtifactsDir
+// (including any <ticket>-<run-id> or workflow-prefix segments). Providers
+// only move bytes — they do not interpret run fields.
+//
+// If the source data does not exist for this run, implementations return
+// *FileNotFoundError with Path set to a human-readable description of
+// what was missing (e.g. "results for run abc123").
+type HydrateOpts struct {
+	RunID            string            // run ID (used by ECS to resolve S3 prefix)
+	InstanceID       string            // container ID or ECS task ARN
+	Metadata         map[string]string // provider-specific metadata from LaunchResult
+	DestAuditDir     string            // absolute destination for .orc/audit/<ticket>-<run-id>
+	DestArtifactsDir string            // absolute destination for .orc/artifacts/<ticket>-<run-id>
 }
 
 // FileNotFoundError is returned when a requested file does not exist in the provider's storage.

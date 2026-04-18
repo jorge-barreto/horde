@@ -11,5 +11,4 @@ import (
 	_ "github.com/aws/aws-sdk-go-v2/service/ecs"
 	_ "github.com/aws/aws-sdk-go-v2/service/s3"
 	_ "github.com/aws/aws-sdk-go-v2/service/ssm"
-	_ "github.com/aws/aws-sdk-go-v2/service/sts"
 )

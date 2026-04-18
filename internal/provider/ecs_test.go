@@ -306,6 +306,26 @@ func TestECSProvider_Launch_Failure(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Launch_FailureNilReason(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Failures: []ecstypes.Failure{{}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	_, err := p.Launch(context.Background(), LaunchOpts{})
+	if err == nil {
+		t.Fatal("Launch() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "launching ECS task") {
+		t.Errorf("error = %q, want it to contain \"launching ECS task\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "unknown reason") {
+		t.Errorf("error = %q, want it to contain \"unknown reason\"", err.Error())
+	}
+}
+
 func TestECSProvider_Launch_NoTasks(t *testing.T) {
 	t.Parallel()
 	fake := &fakeECSClient{
@@ -676,6 +696,9 @@ func TestECSProvider_Status_FailureNilReason(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "describing ECS task") {
 		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
+	}
+	if !strings.Contains(err.Error(), "unknown reason") {
+		t.Errorf("error = %q, want it to contain \"unknown reason\"", err.Error())
 	}
 }
 

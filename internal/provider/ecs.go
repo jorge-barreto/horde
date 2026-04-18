@@ -130,7 +130,7 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 
 	if len(out.Failures) > 0 {
 		f := out.Failures[0]
-		reason := ""
+		reason := "unknown reason"
 		if f.Reason != nil {
 			reason = *f.Reason
 		}
@@ -170,7 +170,7 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 
 	if len(out.Failures) > 0 {
 		f := out.Failures[0]
-		reason := ""
+		reason := "unknown reason"
 		if f.Reason != nil {
 			reason = *f.Reason
 		}

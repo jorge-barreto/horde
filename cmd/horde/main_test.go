@@ -849,6 +849,46 @@ func TestStatus_MissingRunID(t *testing.T) {
 	}
 }
 
+// TestStatus_LazyCheck_StatusError covers horde-kx2: when the provider's
+// Status() fails with a non-"No such container" error during Finalize (the
+// "lazy check" path for pending/running runs), statusCmd must surface the
+// wrapped error rather than mask it.
+func TestStatus_LazyCheck_StatusError(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) echo "Error response from daemon: connection refused" >&2; exit 1 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+	runID := "statuskx20001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser",
+		StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute),
+		Status: store.StatusRunning, InstanceID: "abc123",
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "status", runID})
+	if runErr == nil {
+		t.Fatal("expected error from status when Finalize's Status() call fails, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "checking instance status") {
+		t.Errorf("expected error to wrap 'checking instance status', got: %v", runErr)
+	}
+	if !strings.Contains(runErr.Error(), "connection refused") {
+		t.Errorf("expected underlying docker stderr 'connection refused' in error, got: %v", runErr)
+	}
+}
+
 func TestStatus_LazyCompletion(t *testing.T) {
 	dockerScript := `#!/bin/sh
 case "$1" in

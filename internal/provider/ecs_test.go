@@ -330,6 +330,43 @@ func TestECSProvider_Launch_FailureNilReason(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Launch_AssignPublicIp(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configVal  string
+		wantAssign ecstypes.AssignPublicIp
+	}{
+		{"default empty maps to ENABLED", "", ecstypes.AssignPublicIpEnabled},
+		{"explicit ENABLED", "ENABLED", ecstypes.AssignPublicIpEnabled},
+		{"DISABLED for private subnets", "DISABLED", ecstypes.AssignPublicIpDisabled},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := testHordeConfig()
+			cfg.AssignPublicIp = tc.configVal
+			fake := &fakeECSClient{
+				runTaskOutput: &ecs.RunTaskOutput{
+					Tasks: []ecstypes.Task{{TaskArn: aws.String("arn:aws:ecs:us-east-1:123:task/horde/abc")}},
+				},
+			}
+			p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, cfg)
+			if _, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc", Ticket: "T"}); err != nil {
+				t.Fatalf("Launch() error = %v", err)
+			}
+			if fake.runTaskInput == nil {
+				t.Fatal("RunTask was not called")
+			}
+			got := fake.runTaskInput.NetworkConfiguration.AwsvpcConfiguration.AssignPublicIp
+			if got != tc.wantAssign {
+				t.Errorf("AssignPublicIp = %q, want %q", got, tc.wantAssign)
+			}
+		})
+	}
+}
+
 func TestECSProvider_Launch_FailureIncludesArnAndDetail(t *testing.T) {
 	t.Parallel()
 	fake := &fakeECSClient{

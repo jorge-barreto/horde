@@ -112,6 +112,11 @@ type HordeConfig struct {
 	TaskDefinitionARN     string   `json:"task_definition_arn"`
 	Subnets               []string `json:"subnets"`
 	SecurityGroup         string   `json:"security_group"`
+	// AssignPublicIp controls whether Fargate tasks get a public IP on their ENI.
+	// Valid values: "ENABLED", "DISABLED", or "" (defaults to "ENABLED" for
+	// backward-compatible public-subnet topology). Set to "DISABLED" for
+	// private-subnet deployments that route egress through a NAT gateway.
+	AssignPublicIp        string   `json:"assign_public_ip,omitempty"`
 	LogGroup              string   `json:"log_group"`
 	LogStreamPrefix       string   `json:"log_stream_prefix"`
 	ArtifactsBucket       string   `json:"artifacts_bucket"`
@@ -155,6 +160,11 @@ func (c *HordeConfig) Validate() error {
 	}
 	if c.DefaultTimeoutMinutes < 1 {
 		return fmt.Errorf("validating horde config: default_timeout_minutes must be at least 1, got %d", c.DefaultTimeoutMinutes)
+	}
+	switch c.AssignPublicIp {
+	case "", "ENABLED", "DISABLED":
+	default:
+		return fmt.Errorf("validating horde config: assign_public_ip must be \"ENABLED\" or \"DISABLED\", got %q", c.AssignPublicIp)
 	}
 	return nil
 }

@@ -492,3 +492,48 @@ func TestHordeConfig_Validate_AllFieldsPresent(t *testing.T) {
 		t.Fatalf("Validate() unexpected error: %v", err)
 	}
 }
+
+func TestHordeConfig_Validate_AssignPublicIp(t *testing.T) {
+	t.Parallel()
+	base := HordeConfig{
+		ClusterARN:            "arn:aws:ecs:us-east-1:123:cluster/horde",
+		TaskDefinitionARN:     "arn:aws:ecs:us-east-1:123:task-definition/horde-worker:1",
+		Subnets:               []string{"subnet-abc"},
+		SecurityGroup:         "sg-123",
+		LogGroup:              "/ecs/horde-worker",
+		LogStreamPrefix:       "ecs",
+		ArtifactsBucket:       "my-bucket",
+		RunsTable:             "horde-runs",
+		MaxConcurrent:         1,
+		DefaultTimeoutMinutes: 1,
+	}
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"empty defaults to enabled", "", false},
+		{"explicit ENABLED", "ENABLED", false},
+		{"DISABLED for private subnets", "DISABLED", false},
+		{"lowercase rejected", "enabled", true},
+		{"garbage rejected", "yes", true},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := base
+			cfg.AssignPublicIp = tc.value
+			err := cfg.Validate()
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("Validate() with AssignPublicIp=%q error = nil, want non-nil", tc.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Validate() with AssignPublicIp=%q error = %v, want nil", tc.value, err)
+			}
+		})
+	}
+}

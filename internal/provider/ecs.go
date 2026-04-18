@@ -30,6 +30,16 @@ const containerName = "horde-worker"
 // errors tolerated in follow mode before stopping the log poll loop.
 const maxConsecutiveDescribeFailures = 5
 
+// assignPublicIp maps a HordeConfig.AssignPublicIp string to the AWS enum.
+// Empty string defaults to ENABLED for backward-compatible public-subnet
+// topology; "DISABLED" is required for private-subnet deployments.
+func assignPublicIp(v string) ecstypes.AssignPublicIp {
+	if v == "DISABLED" {
+		return ecstypes.AssignPublicIpDisabled
+	}
+	return ecstypes.AssignPublicIpEnabled
+}
+
 // ecsFailureReason renders an ECS Failure struct as a human-readable
 // error fragment. Empty Reason defaults to "unknown failure". When
 // present, Arn and Detail are appended for debuggability.
@@ -129,7 +139,7 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
 				Subnets:        p.config.Subnets,
 				SecurityGroups: []string{p.config.SecurityGroup},
-				AssignPublicIp: ecstypes.AssignPublicIpEnabled,
+				AssignPublicIp: assignPublicIp(p.config.AssignPublicIp),
 			},
 		},
 		Overrides: &ecstypes.TaskOverride{

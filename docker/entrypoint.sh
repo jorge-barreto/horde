@@ -1,6 +1,12 @@
 #!/bin/bash
 set -uo pipefail
 
+# Explicit guards before set -u would trip with exit 1: horde uses exit 3
+# to distinguish setup errors from run failures when mapping status.
+if [ -z "${REPO_URL:-}" ]; then echo "ERROR: REPO_URL not set" >&2; exit 3; fi
+if [ -z "${TICKET:-}" ]; then echo "ERROR: TICKET not set" >&2; exit 3; fi
+if [ -z "${GIT_TOKEN:-}" ]; then echo "ERROR: GIT_TOKEN not set" >&2; exit 3; fi
+
 # GIT_ASKPASS is set in the Dockerfile for container-wide availability.
 # gh CLI uses the same token as git push.
 export GH_TOKEN="${GIT_TOKEN:-}"

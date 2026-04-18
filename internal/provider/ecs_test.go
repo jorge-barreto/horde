@@ -217,6 +217,9 @@ func TestECSProvider_Launch_Success(t *testing.T) {
 	if result.Metadata["artifacts_bucket"] != "my-horde-artifacts" {
 		t.Errorf("Metadata[artifacts_bucket] = %q", result.Metadata["artifacts_bucket"])
 	}
+	if result.Metadata["log_stream_prefix"] != "ecs" {
+		t.Errorf("Metadata[log_stream_prefix] = %q, want %q", result.Metadata["log_stream_prefix"], "ecs")
+	}
 
 	// Verify RunTaskInput construction
 	in := fake.runTaskInput

@@ -200,9 +200,10 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 	return &LaunchResult{
 		InstanceID: *task.TaskArn,
 		Metadata: map[string]string{
-			"cluster_arn":      p.config.ClusterARN,
-			"log_group":        p.config.LogGroup,
-			"artifacts_bucket": p.config.ArtifactsBucket,
+			"cluster_arn":       p.config.ClusterARN,
+			"log_group":         p.config.LogGroup,
+			"log_stream_prefix": p.config.LogStreamPrefix,
+			"artifacts_bucket":  p.config.ArtifactsBucket,
 		},
 	}, nil
 }

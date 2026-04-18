@@ -143,12 +143,12 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 	case "":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %w\nhint: use --provider docker for local mode", err)
+			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
 		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %s\nhint: use --provider docker for local mode", config.Diagnostic(err))
+			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %s\n\nhint: use --provider docker for local mode", config.Diagnostic(err))
 		}
 		st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
 		if err != nil {

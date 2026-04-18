@@ -250,6 +250,55 @@ func TestNewProviderWith(t *testing.T) {
 	})
 }
 
+func TestAutoDetect_HintBlocksSeparatedByBlankLine(t *testing.T) {
+	t.Parallel()
+
+	// When the SSM Diagnostic emits its own hint block, the factory's
+	// trailing "--provider docker" hint must be separated from it by a
+	// blank line so the two hint: prefixes don't collide visually.
+	t.Run("ssm NotFound diagnostic", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				return aws.Config{}, nil
+			},
+			newSSMClient: func(_ aws.Config) config.SSMClient {
+				return &fakeSSMClient{
+					err: &ssmtypes.ParameterNotFound{Message: aws.String("not found")},
+				}
+			},
+		}
+		_, _, _, _, _, err := initProviderAndStoreWith(context.Background(), "", "", deps)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "\n\nhint: use --provider docker for local mode") {
+			t.Errorf("expected blank line before fallback hint, got:\n%s", msg)
+		}
+	})
+
+	// When loadAWSConfig itself fails (no Diagnostic block), the fallback
+	// hint still renders with the blank-line separator — harmless when
+	// there is no preceding hint block.
+	t.Run("loadAWSConfig failure", func(t *testing.T) {
+		t.Parallel()
+		deps := factoryDeps{
+			loadAWSConfig: func(_ context.Context, _ string) (aws.Config, error) {
+				return aws.Config{}, fmt.Errorf("no AWS credentials")
+			},
+		}
+		_, _, _, _, _, err := initProviderAndStoreWith(context.Background(), "", "", deps)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "\n\nhint: use --provider docker for local mode") {
+			t.Errorf("expected blank line before fallback hint, got:\n%s", msg)
+		}
+	})
+}
+
 func TestInitFromRunID(t *testing.T) {
 	t.Parallel()
 

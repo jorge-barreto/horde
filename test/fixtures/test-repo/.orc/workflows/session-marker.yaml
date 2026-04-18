@@ -4,8 +4,8 @@ phases:
   - name: write-marker
     type: script
     run: |
-      mkdir -p /root/.claude/projects/horde-test
-      echo "hello-from-phase-1" > /root/.claude/projects/horde-test/marker
+      mkdir -p /home/horde/.claude/projects/horde-test
+      echo "hello-from-phase-1" > /home/horde/.claude/projects/horde-test/marker
     timeout: 5
   - name: fail
     type: script

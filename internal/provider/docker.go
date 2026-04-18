@@ -85,7 +85,7 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	// Create persistent workspace and sessions directories and prepend them
 	// to mounts. Both dirs are per-run and persist across retries so orc can
 	// resume the workspace tree AND the agent's session history from
-	// /root/.claude (Claude CLI writes session JSON there). If the dirs
+	// /home/horde/.claude (Claude CLI writes session JSON there). If the dirs
 	// already exist (retry), MkdirAll is a no-op.
 	var allMounts []string
 	if opts.HomeDir != "" && opts.RunID != "" {
@@ -99,7 +99,7 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 		if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating sessions directory: %w", err)
 		}
-		allMounts = append(allMounts, sessionsDir+":/root/.claude")
+		allMounts = append(allMounts, sessionsDir+":/home/horde/.claude")
 	}
 	allMounts = append(allMounts, opts.Mounts...)
 

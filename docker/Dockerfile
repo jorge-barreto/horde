@@ -20,12 +20,24 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awsc
 COPY --from=builder /out/orc /usr/local/bin/orc
 COPY --from=builder /out/bd /usr/local/bin/bd
 
-RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/root/.local/bin:${PATH}"
+# Non-root user for reduced blast radius if orc or a tool is compromised.
+# UID 1000 matches common host-user defaults so bind-mounted workspaces
+# aren't left owned by an unexpected UID.
+RUN useradd -m -u 1000 -s /bin/bash horde \
+    && mkdir -p /workspace \
+    && chown -R horde:horde /workspace
 
+USER horde
+WORKDIR /home/horde
+
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/horde/.local/bin:${PATH}"
+
+USER root
 COPY entrypoint.sh /entrypoint.sh
 COPY git-askpass.sh /usr/local/bin/git-askpass.sh
 RUN chmod +x /entrypoint.sh /usr/local/bin/git-askpass.sh
 ENV GIT_ASKPASS="/usr/local/bin/git-askpass.sh"
 
+USER horde
 ENTRYPOINT ["/entrypoint.sh"]

@@ -536,7 +536,7 @@ func (h *harness) WorkspaceExists(runID string) bool {
 }
 
 // SessionsDir returns the host path to a run's sessions directory
-// (bind-mounted to /root/.claude in the container).
+// (bind-mounted to /home/horde/.claude in the container).
 func (h *harness) SessionsDir(runID string) string {
 	return filepath.Join(h.homeDir, ".horde", "workspaces", runID+"-sessions")
 }

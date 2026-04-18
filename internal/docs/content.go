@@ -233,7 +233,7 @@ How it works:
        and mounts it into the container at /workspace.
     2. Creates a persistent sessions dir at
        ~/.horde/workspaces/<run-id>-sessions/ and mounts it into the
-       container at /root/.claude so agent session history survives
+       container at /home/horde/.claude so agent session history survives
        across retries (orc --resume needs these files).
     3. Runs the container in detached mode with environment variables
        for repo URL, ticket, branch, workflow, and run ID.
@@ -343,7 +343,7 @@ Workspace Persistence
 Each run's workspace lives at ~/.horde/workspaces/<run-id>/ on the host,
 mounted into the container at /workspace. Agent session state lives
 alongside it at ~/.horde/workspaces/<run-id>-sessions/, mounted at
-/root/.claude. This means:
+/home/horde/.claude. This means:
 
     - Container crashes: workspace survives, retry launches fresh compute
     - Docker restarts: same — workspace is on the host filesystem

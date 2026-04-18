@@ -9,7 +9,7 @@ import (
 )
 
 // TestRetryPreservesSessionState verifies that files written into
-// /root/.claude/ during a run survive into the retried container. This is
+// /home/horde/.claude/ during a run survive into the retried container. This is
 // the invariant orc --resume relies on: Claude CLI writes session JSON
 // under ~/.claude/projects/ inside the container, and retry launches a
 // fresh container — so the directory must be bind-mounted to a per-run
@@ -21,7 +21,7 @@ func TestRetryPreservesSessionState(t *testing.T) {
 
 	h := newHarness(t)
 
-	// session-marker workflow: phase 1 writes /root/.claude/projects/horde-test/marker,
+	// session-marker workflow: phase 1 writes /home/horde/.claude/projects/horde-test/marker,
 	// phase 2 fails (so the run is eligible for retry).
 	runID := h.Launch("TEST-sessions", "session-marker", 2*time.Minute)
 	h.WaitForOrc(runID, 2*time.Minute)

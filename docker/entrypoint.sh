@@ -65,8 +65,8 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     # First-run prefix is empty; sync handles that as a no-op. Failures are
     # non-fatal — a missing prior session means orc --resume falls back to a
     # fresh start, which is better than aborting the run.
-    mkdir -p /root/.claude
-    aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" /root/.claude/ \
+    mkdir -p /home/horde/.claude
+    aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" /home/horde/.claude/ \
         || echo "WARNING: session restore failed (continuing)" >&2
 
     # Run orc in the background so a SIGTERM/SIGINT (ECS StopTask) can be
@@ -80,8 +80,8 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     trap - TERM INT
 
     # Always persist session state, even on failure, so retry can resume.
-    if [ -d /root/.claude ]; then
-        aws s3 sync /root/.claude/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" \
+    if [ -d /home/horde/.claude ]; then
+        aws s3 sync /home/horde/.claude/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" \
             || echo "WARNING: session upload failed" >&2
     fi
     if [ -d .orc/artifacts/ ]; then

@@ -120,7 +120,7 @@ func AuditRelPath(workflow, ticket, filename string) string {
 }
 
 // SessionsPath returns the host path for a run's persistent agent session
-// state (bind-mounted to /root/.claude inside the container). Keeping it
+// state (bind-mounted to /home/horde/.claude inside the container). Keeping it
 // beside the workspace dir mirrors the per-run lifecycle.
 func SessionsPath(homeDir, runID string) string {
 	return filepath.Join(homeDir, ".horde", "workspaces", runID+"-sessions")

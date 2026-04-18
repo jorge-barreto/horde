@@ -32,6 +32,14 @@ func getS(item map[string]types.AttributeValue, key string) string {
 func copyItem(item map[string]types.AttributeValue) map[string]types.AttributeValue {
 	out := make(map[string]types.AttributeValue, len(item))
 	for k, v := range item {
+		if m, ok := v.(*types.AttributeValueMemberM); ok {
+			inner := make(map[string]types.AttributeValue, len(m.Value))
+			for ik, iv := range m.Value {
+				inner[ik] = iv
+			}
+			out[k] = &types.AttributeValueMemberM{Value: inner}
+			continue
+		}
 		out[k] = v
 	}
 	return out
@@ -985,6 +993,27 @@ func TestSQLiteStore_Conformance(t *testing.T) {
 		t.Cleanup(func() { s.Close() })
 		return s
 	})
+}
+
+// TestCopyItem_DeepCopiesMetadata pins that mutating a returned metadata map
+// does not corrupt subsequent reads. A shallow copy would silently alias the
+// inner map[string]AttributeValue.
+func TestCopyItem_DeepCopiesMetadata(t *testing.T) {
+	t.Parallel()
+	orig := map[string]types.AttributeValue{
+		"id": &types.AttributeValueMemberS{Value: "x"},
+		"metadata": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+			"cluster_arn": &types.AttributeValueMemberS{Value: "arn:original"},
+		}},
+	}
+	got := copyItem(orig)
+	// Mutate the returned metadata.
+	got["metadata"].(*types.AttributeValueMemberM).Value["cluster_arn"] = &types.AttributeValueMemberS{Value: "arn:mutated"}
+	// Original must be untouched.
+	origMeta := orig["metadata"].(*types.AttributeValueMemberM).Value["cluster_arn"].(*types.AttributeValueMemberS).Value
+	if origMeta != "arn:original" {
+		t.Errorf("original metadata mutated: got %q, want %q", origMeta, "arn:original")
+	}
 }
 
 // TestFunctionalDynamo_ScanIndexForwardDefault pins the fake's sort behavior

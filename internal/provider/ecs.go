@@ -30,6 +30,26 @@ const containerName = "horde-worker"
 // errors tolerated in follow mode before stopping the log poll loop.
 const maxConsecutiveDescribeFailures = 5
 
+// writeLogEvents writes CloudWatch log events to w, skipping events
+// with a nil Message pointer and appending a trailing newline when
+// absent. Returns the first write error encountered so follow-mode
+// callers can stop the poll loop.
+func writeLogEvents(w io.Writer, events []cwltypes.OutputLogEvent) error {
+	for _, event := range events {
+		if event.Message == nil {
+			continue
+		}
+		msg := *event.Message
+		if !strings.HasSuffix(msg, "\n") {
+			msg += "\n"
+		}
+		if _, err := io.WriteString(w, msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // assignPublicIp maps a HordeConfig.AssignPublicIp string to the AWS enum.
 // Empty string defaults to ENABLED for backward-compatible public-subnet
 // topology; "DISABLED" is required for private-subnet deployments.
@@ -282,13 +302,8 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 				return nil, fmt.Errorf("reading logs: nil response")
 			}
 
-			for _, event := range out.Events {
-				if event.Message != nil {
-					buf.WriteString(*event.Message)
-					if !strings.HasSuffix(*event.Message, "\n") {
-						buf.WriteByte('\n')
-					}
-				}
+			if err := writeLogEvents(&buf, out.Events); err != nil {
+				return nil, fmt.Errorf("reading logs: %w", err)
 			}
 
 			if out.NextForwardToken == nil || (nextToken != nil && *out.NextForwardToken == *nextToken) {
@@ -338,16 +353,8 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 				pw.CloseWithError(fmt.Errorf("reading logs: nil response"))
 				return
 			} else {
-				for _, event := range out.Events {
-					if event.Message != nil {
-						msg := *event.Message
-						if !strings.HasSuffix(msg, "\n") {
-							msg += "\n"
-						}
-						if _, err := io.WriteString(pw, msg); err != nil {
-							return
-						}
-					}
+				if err := writeLogEvents(pw, out.Events); err != nil {
+					return
 				}
 
 				if out.NextForwardToken != nil {
@@ -413,16 +420,8 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 							if drainOut == nil {
 								return
 							}
-							for _, event := range drainOut.Events {
-								if event.Message != nil {
-									msg := *event.Message
-									if !strings.HasSuffix(msg, "\n") {
-										msg += "\n"
-									}
-									if _, err := io.WriteString(pw, msg); err != nil {
-										return
-									}
-								}
+							if err := writeLogEvents(pw, drainOut.Events); err != nil {
+								return
 							}
 							if drainOut.NextForwardToken == nil || (nextToken != nil && *drainOut.NextForwardToken == *nextToken) {
 								return

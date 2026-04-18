@@ -3948,3 +3948,75 @@ esac
 		t.Errorf("got .env-related error for aws-ecs retry: %v", err)
 	}
 }
+
+// TestClean_All_RemoveFailureWarns covers horde-jdu: the bulk clean path
+// (`horde clean` with no args) must emit a stderr warning when docker rm
+// fails for a container, rather than silently leaking it.
+func TestClean_All_RemoveFailureWarns(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dockerScript := `#!/bin/sh
+case "$1" in
+  rm)
+    # Fail for 'badcid', succeed otherwise
+    for a in "$@"; do
+      if [ "$a" = "badcid" ]; then
+        echo "Error: cannot remove badcid: container in use" >&2
+        exit 1
+      fi
+    done
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing docker script: %v", err)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-1 * time.Hour)
+	for _, r := range []*store.Run{
+		{ID: "badrun000001", Ticket: "T-1", Status: store.StatusFailed, InstanceID: "badcid", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-2 * time.Hour), CompletedAt: &completedAt, TimeoutAt: now.Add(24 * time.Hour)},
+		{ID: "goodrun00001", Ticket: "T-2", Status: store.StatusSuccess, InstanceID: "goodcid", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-2 * time.Hour), CompletedAt: &completedAt, TimeoutAt: now.Add(24 * time.Hour)},
+	} {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	origStderr := os.Stderr
+	prErr, pwErr, _ := os.Pipe()
+	os.Stderr = pwErr
+	defer func() { os.Stderr = origStderr }()
+
+	origStdout := os.Stdout
+	prOut, pwOut, _ := os.Pipe()
+	os.Stdout = pwOut
+	defer func() { os.Stdout = origStdout }()
+
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "clean"})
+
+	pwErr.Close()
+	pwOut.Close()
+	os.Stderr = origStderr
+	os.Stdout = origStdout
+	stderr, _ := io.ReadAll(prErr)
+	stdout, _ := io.ReadAll(prOut)
+
+	if runErr != nil {
+		t.Fatalf("clean returned error: %v", runErr)
+	}
+	if !strings.Contains(string(stderr), "warning: removing container") || !strings.Contains(string(stderr), "badrun000001") {
+		t.Errorf("stderr missing RemoveContainer warning for badrun000001: %s", string(stderr))
+	}
+	if !strings.Contains(string(stdout), "Removed 1 container") {
+		t.Errorf("stdout should report 1 successful removal, got: %s", string(stdout))
+	}
+}

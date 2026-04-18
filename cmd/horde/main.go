@@ -885,18 +885,18 @@ directories (all code changes will be lost).`,
 			if err != nil {
 				return err
 			}
-			runs, err := st.ListByRepo(ctx, repo, false)
+			allRuns, err := st.ListByRepo(ctx, repo, false)
 			if err != nil {
 				return fmt.Errorf("listing runs: %w", err)
 			}
-			allRuns, err := st.ListByRepo(ctx, repo, true)
+			activeRuns, err := st.ListByRepo(ctx, repo, true)
 			if err != nil {
 				return fmt.Errorf("listing runs: %w", err)
 			}
 
 			// Terminal runs = all minus active
 			activeIDs := make(map[string]bool)
-			for _, r := range runs {
+			for _, r := range activeRuns {
 				activeIDs[r.ID] = true
 			}
 			var cleaned int
@@ -905,7 +905,9 @@ directories (all code changes will be lost).`,
 					continue
 				}
 				if dp, ok := prov.(*provider.DockerProvider); ok && r.InstanceID != "" {
-					if err := dp.RemoveContainer(ctx, r.InstanceID); err == nil {
+					if err := dp.RemoveContainer(ctx, r.InstanceID); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: removing container for run %s: %v\n", r.ID, err)
+					} else {
 						cleaned++
 					}
 				}

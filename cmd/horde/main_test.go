@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -2184,6 +2185,114 @@ func TestLogs_Follow_Success(t *testing.T) {
 			t.Errorf("output missing %q: %s", want, outStr)
 		}
 	}
+}
+
+// TestLogs_Follow_ContextCancel_ClosesCleanly covers horde-eqc: when the
+// parent context is cancelled mid-stream (the same code path SIGINT takes via
+// signal.NotifyContext), logs --follow must close the docker reader, return
+// without a "streaming logs" error, and the command must complete promptly.
+func TestLogs_Follow_ContextCancel_ClosesCleanly(t *testing.T) {
+	// Fake docker that streams forever on --follow, matching real `docker logs -f` behavior.
+	script := `#!/bin/sh
+case "$1" in
+  inspect) echo abc123 ;;
+  logs)
+    case "$@" in
+      *--follow*)
+        printf 'follow line 1\n'
+        # stream a line every 50ms forever; exits when the parent closes the pipe (SIGPIPE) or is killed
+        while true; do
+          printf 'follow line N\n' 2>/dev/null || exit 0
+          sleep 0.05
+        done
+        ;;
+      *) echo "ERROR: --follow not passed" >&2; exit 1 ;;
+    esac ;;
+esac
+`
+	env := setupStatusEnv(t, script)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runID := "logsrun_eqc1"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- newApp().Run(ctx, []string{"horde", "--provider", "docker", "logs", "--follow", runID})
+	}()
+
+	// Read until we see at least one line to confirm streaming started.
+	buf := make([]byte, 256)
+	readDone := make(chan struct{})
+	go func() {
+		for {
+			n, err := pr.Read(buf)
+			if n > 0 && strings.Contains(string(buf[:n]), "follow line") {
+				close(readDone)
+				// Drain the rest in the background so the writer doesn't block on pipe-full.
+				go io.Copy(io.Discard, pr)
+				return
+			}
+			if err != nil {
+				close(readDone)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-readDone:
+	case <-time.After(3 * time.Second):
+		cancel()
+		pw.Close()
+		t.Fatal("timed out waiting for first log line")
+	}
+
+	// Cancel the parent context — this is what SIGINT would do via signal.NotifyContext.
+	cancel()
+
+	// The command must return within a reasonable window, with no "streaming logs" error.
+	select {
+	case runErr := <-done:
+		if runErr != nil && !errors.Is(runErr, context.Canceled) {
+			// Accept nil or context.Canceled; anything else is a real error like "streaming logs".
+			if strings.Contains(runErr.Error(), "streaming logs") {
+				t.Errorf("expected clean shutdown on ctx cancel, got streaming error: %v", runErr)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		pw.Close()
+		t.Fatal("logs --follow did not return within 3s after ctx cancel — reader not closed on signal")
+	}
+
+	pw.Close()
+	os.Stdout = origStdout
 }
 
 func TestLogs_MissingRunID(t *testing.T) {

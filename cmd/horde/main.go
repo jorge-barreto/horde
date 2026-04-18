@@ -9,7 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -479,8 +482,9 @@ func logsCmd() *cli.Command {
 		Usage:     "Show logs for a run",
 		ArgsUsage: "<run-id>",
 		Description: `Streams container stdout/stderr. With --follow, tails in real time
-until the run completes. For completed runs whose container has been
-removed, falls back to the saved container.log in the results directory.`,
+until the run completes; press Ctrl+C to detach. For completed runs
+whose container has been removed, falls back to the saved container.log
+in the results directory.`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "follow",
@@ -517,13 +521,34 @@ removed, falls back to the saved container.log in the results directory.`,
 			if run.InstanceID == "" {
 				return fmt.Errorf("logs unavailable: run %s has no container yet", runID)
 			}
+			if follow {
+				// Catch SIGINT/SIGTERM so Ctrl+C closes the reader cleanly
+				// rather than killing the process mid-stream and orphaning
+				// the `docker logs --follow` child.
+				sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				reader, err := prov.Logs(sigCtx, run.InstanceID, follow)
+				if err != nil {
+					return fmt.Errorf("reading logs: %w", err)
+				}
+				var once sync.Once
+				closeReader := func() { once.Do(func() { reader.Close() }) }
+				defer closeReader()
+				go func() {
+					<-sigCtx.Done()
+					closeReader()
+				}()
+				if _, err := io.Copy(os.Stdout, reader); err != nil && sigCtx.Err() == nil {
+					return fmt.Errorf("streaming logs: %w", err)
+				}
+				return nil
+			}
 			reader, err := prov.Logs(ctx, run.InstanceID, follow)
 			if err != nil {
 				return fmt.Errorf("reading logs: %w", err)
 			}
 			defer reader.Close()
-			_, err = io.Copy(os.Stdout, reader)
-			if err != nil {
+			if _, err := io.Copy(os.Stdout, reader); err != nil {
 				return fmt.Errorf("streaming logs: %w", err)
 			}
 			return nil

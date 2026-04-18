@@ -2740,6 +2740,88 @@ esac
 	}
 }
 
+// TestKill_ReadFileContract exercises the directory-layout contract between
+// the kill command (which populates ~/.horde/results/<runID>/) and
+// DockerProvider.ReadFile (which reads from that same tree under the ".orc/"
+// logical prefix). Both sides are unit-tested in isolation; this test covers
+// the handshake so a future rename of e.g. "audit/" to "audits/" on one side
+// fails loudly.
+func TestKill_ReadFileContract(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
+  stop) exit 0 ;;
+  logs) printf 'fake-container-log-line\n' ;;
+  cp)
+    case "$2" in
+      *audit*)     mkdir -p "$3/TICKET-1" && printf '{"total_cost_usd": 1.5, "exit_code": 0}' > "$3/TICKET-1/run-result.json" ;;
+      *artifacts*) mkdir -p "$3"           && printf 'hello-artifact'                          > "$3/out.txt"             ;;
+    esac
+    ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "killrfc0001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Workflow:   "",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now(),
+		TimeoutAt:  time.Now().Add(60 * time.Minute),
+		Status:     store.StatusRunning,
+		InstanceID: "abc123",
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	if err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "kill", runID}); err != nil {
+		t.Fatalf("kill failed: %v", err)
+	}
+
+	p := provider.NewDockerProvider()
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"audit run-result.json", ".orc/audit/TICKET-1/run-result.json", `{"total_cost_usd": 1.5, "exit_code": 0}`},
+		{"artifacts out.txt", ".orc/artifacts/out.txt", "hello-artifact"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := p.ReadFile(ctx, provider.ReadFileOpts{RunID: runID, Path: tc.path})
+			if err != nil {
+				t.Fatalf("ReadFile(%q) failed: %v", tc.path, err)
+			}
+			if string(data) != tc.want {
+				t.Errorf("ReadFile(%q) = %q, want %q", tc.path, string(data), tc.want)
+			}
+		})
+	}
+
+	// container.log is written by kill directly, not via docker cp. It lives
+	// outside the ".orc/" prefix, so ReadFile cannot reach it — verify it via
+	// direct stat. This documents where the Kill→ReadFile contract stops.
+	logPath := filepath.Join(env.tmpHome, ".horde", "results", runID, "container.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Errorf("container.log missing after kill: %v", err)
+	} else if !strings.Contains(string(data), "fake-container-log-line") {
+		t.Errorf("container.log contents unexpected: %q", string(data))
+	}
+}
+
 // --- Results tests ---
 
 func TestResults_MissingRunID(t *testing.T) {

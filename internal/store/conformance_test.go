@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -184,8 +185,9 @@ func (f *functionalDynamo) Query(_ context.Context, params *dynamodb.QueryInput,
 		}
 	}
 
-	// Sort by started_at; descending unless ScanIndexForward is explicitly true.
-	descending := params.ScanIndexForward == nil || !*params.ScanIndexForward
+	// Sort by started_at. Match real DynamoDB: ascending by default, descending
+	// only when ScanIndexForward is explicitly false.
+	descending := params.ScanIndexForward != nil && !*params.ScanIndexForward
 	sort.Slice(matching, func(i, j int) bool {
 		a := getS(matching[i], "started_at")
 		b := getS(matching[j], "started_at")
@@ -988,6 +990,59 @@ func TestSQLiteStore_Conformance(t *testing.T) {
 		return s
 	})
 }
+
+// TestFunctionalDynamo_ScanIndexForwardDefault pins the fake's sort behavior
+// to match real DynamoDB: unset ScanIndexForward means ascending. A wrong
+// default here would let future query methods pass tests while producing
+// backwards-ordered results in production.
+func TestFunctionalDynamo_ScanIndexForwardDefault(t *testing.T) {
+	t.Parallel()
+	f := &functionalDynamo{}
+	for _, started := range []string{"2026-01-03T00:00:00Z", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"} {
+		f.items = append(f.items, map[string]types.AttributeValue{
+			"id":         &types.AttributeValueMemberS{Value: started},
+			"repo":       &types.AttributeValueMemberS{Value: "r"},
+			"started_at": &types.AttributeValueMemberS{Value: started},
+		})
+	}
+	indexName := GSIByRepo
+	keyExpr := "repo = :r"
+	cases := []struct {
+		name    string
+		forward *bool
+		want    []string
+	}{
+		{"nil defaults to ascending", nil, []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z"}},
+		{"explicit true ascends", boolPtr(true), []string{"2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z"}},
+		{"explicit false descends", boolPtr(false), []string{"2026-01-03T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z"}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out, err := f.Query(context.Background(), &dynamodb.QueryInput{
+				IndexName:              &indexName,
+				KeyConditionExpression: &keyExpr,
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":r": &types.AttributeValueMemberS{Value: "r"},
+				},
+				ScanIndexForward: tc.forward,
+			})
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			var got []string
+			for _, it := range out.Items {
+				got = append(got, getS(it, "started_at"))
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("order = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 func TestDynamoStore_Conformance(t *testing.T) {
 	t.Parallel()

@@ -435,6 +435,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Fatalf("CreateRun: %v", err)
 		}
 		completedAt := time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC)
+		timeoutAt := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 		update := &RunUpdate{
 			Status:       ptr(StatusSuccess),
 			InstanceID:   ptr("new-container"),
@@ -442,6 +443,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			CompletedAt:  ptr(completedAt),
 			TotalCostUSD: ptr(9.99),
 			Metadata:     map[string]string{"updated": "true"},
+			TimeoutAt:    ptr(timeoutAt),
 		}
 		if err := s.UpdateRun(ctx, "r1", update); err != nil {
 			t.Fatalf("UpdateRun: %v", err)
@@ -467,6 +469,9 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if got.Metadata["updated"] != "true" {
 			t.Errorf("Metadata[updated]: got %q, want %q", got.Metadata["updated"], "true")
+		}
+		if !got.TimeoutAt.Equal(timeoutAt) {
+			t.Errorf("TimeoutAt: got %v, want %v", got.TimeoutAt, timeoutAt)
 		}
 	})
 
@@ -619,6 +624,21 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if !got.CompletedAt.Equal(someTime) {
 			t.Errorf("CompletedAt: got %v, want %v", got.CompletedAt, someTime)
+		}
+
+		newTimeout := time.Date(2026, 4, 16, 2, 0, 0, 0, est)
+		if err := s.UpdateRun(ctx, "r1", &RunUpdate{TimeoutAt: ptr(newTimeout)}); err != nil {
+			t.Fatalf("UpdateRun TimeoutAt: %v", err)
+		}
+		got, err = s.GetRun(ctx, "r1")
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		if got.TimeoutAt.Location() != time.UTC {
+			t.Errorf("TimeoutAt.Location(): got %v, want UTC", got.TimeoutAt.Location())
+		}
+		if !got.TimeoutAt.Equal(newTimeout) {
+			t.Errorf("TimeoutAt: got %v, want %v", got.TimeoutAt, newTimeout)
 		}
 	})
 

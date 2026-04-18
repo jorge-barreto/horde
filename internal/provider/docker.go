@@ -212,7 +212,7 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 		if err != nil {
 			outStr := strings.TrimSpace(string(out))
 			if strings.Contains(strings.ToLower(outStr), "no such") {
-				return nil, fmt.Errorf("container not found: %s", instanceID)
+				return nil, fmt.Errorf("reading container logs: container not found: %s", instanceID)
 			}
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
@@ -229,7 +229,7 @@ func (p *DockerProvider) Logs(ctx context.Context, instanceID string, follow boo
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if strings.Contains(strings.ToLower(string(exitErr.Stderr)), "no such") {
-				return nil, fmt.Errorf("container not found: %s", instanceID)
+				return nil, fmt.Errorf("reading container logs: container not found: %s", instanceID)
 			}
 			return nil, fmt.Errorf("reading container logs: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}

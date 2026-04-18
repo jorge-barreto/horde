@@ -582,6 +582,9 @@ fi
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if !strings.Contains(err.Error(), "reading container logs:") {
+		t.Errorf("expected 'reading container logs:' prefix, got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "container not found") {
 		t.Errorf("expected 'container not found' in error, got: %v", err)
 	}
@@ -699,6 +702,9 @@ fi
 	_, err := NewDockerProvider().Logs(context.Background(), "abc123", true)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading container logs:") {
+		t.Errorf("expected 'reading container logs:' prefix, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "container not found") {
 		t.Errorf("expected 'container not found' in error, got: %v", err)

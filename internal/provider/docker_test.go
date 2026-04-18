@@ -336,6 +336,24 @@ fi
 	}
 }
 
+func TestDockerProvider_Status_MalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeDocker(t, dir, `
+if [ "$1" = "inspect" ]; then
+  echo '{invalid json'
+fi
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Status(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parsing container state") {
+		t.Errorf("expected 'parsing container state' in error, got: %v", err)
+	}
+}
+
 func TestDockerProvider_Status_Nonexistent(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, `

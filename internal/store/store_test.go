@@ -7,6 +7,7 @@ import (
 )
 
 func TestRunMetadata_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	run := Run{
 		Metadata: map[string]string{
 			"cluster_arn":      "arn:aws:ecs:us-east-1:123456789012:cluster/horde",
@@ -38,6 +39,7 @@ func TestRunMetadata_JSONRoundTrip(t *testing.T) {
 }
 
 func TestRunMetadata_NilRoundTrip(t *testing.T) {
+	t.Parallel()
 	run := Run{}
 
 	b, err := json.Marshal(run.Metadata)
@@ -58,6 +60,7 @@ func TestRunMetadata_NilRoundTrip(t *testing.T) {
 }
 
 func TestRunMetadata_EmptyMapRoundTrip(t *testing.T) {
+	t.Parallel()
 	run := Run{
 		Metadata: map[string]string{},
 	}
@@ -83,6 +86,7 @@ func TestRunMetadata_EmptyMapRoundTrip(t *testing.T) {
 }
 
 func TestRunUpdate_ZeroValue(t *testing.T) {
+	t.Parallel()
 	var u RunUpdate
 	if u.Status != nil {
 		t.Errorf("zero RunUpdate.Status: got %v, want nil", u.Status)
@@ -105,6 +109,7 @@ func TestRunUpdate_ZeroValue(t *testing.T) {
 }
 
 func TestRunUpdate_PartialUpdate(t *testing.T) {
+	t.Parallel()
 	status := StatusRunning
 	instanceID := "container-abc123"
 	u := RunUpdate{
@@ -129,6 +134,7 @@ func TestRunUpdate_PartialUpdate(t *testing.T) {
 }
 
 func TestRunUpdate_CompletionUpdate(t *testing.T) {
+	t.Parallel()
 	status := StatusSuccess
 	exitCode := 0
 	now := time.Now()

@@ -9,6 +9,7 @@ import (
 )
 
 func TestValidateEnvFile(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		content string
@@ -20,6 +21,7 @@ func TestValidateEnvFile(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(tc.content), 0644); err != nil {
 				t.Fatalf("WriteFile: %v", err)
@@ -37,6 +39,7 @@ func TestValidateEnvFile(t *testing.T) {
 }
 
 func TestValidateEnvFile_Errors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		write   bool
@@ -50,6 +53,7 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			if tc.write {
 				if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(tc.content), 0644); err != nil {
@@ -68,6 +72,7 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 }
 
 func TestValidateEnvFile_PreservesNotExistError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// dir exists but contains no .env file
 	_, err := ValidateEnvFile(dir)

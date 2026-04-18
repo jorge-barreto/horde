@@ -1216,6 +1216,92 @@ func TestECSProvider_Logs_Follow_ContextCancel(t *testing.T) {
 	reader.Close()
 }
 
+// TestECSProvider_Logs_Follow_DrainSurvivesContextCancel verifies that
+// when the follow context is cancelled after STOPPED detection (e.g. the
+// user hits Ctrl-C), the final-drain phase still completes and delivers
+// late-arriving log events. Regression guard for horde-g86.
+func TestECSProvider_Logs_Follow_DrainSurvivesContextCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Custom CloudWatch fake: cancels the follow ctx on the first drain
+	// call, then continues to return late-arriving events. If the drain
+	// loop used followCtx, the cancel would abort it and the late lines
+	// would be lost.
+	script := []*cloudwatchlogs.GetLogEventsOutput{
+		// Call 0 (main loop): initial line, token advances.
+		{
+			Events:           []cwltypes.OutputLogEvent{{Message: aws.String("before stop\n")}},
+			NextForwardToken: aws.String("tok1"),
+		},
+		// Call 1 (main loop): no new data, same token.
+		{NextForwardToken: aws.String("tok1")},
+		// Call 2 (drain, 1st): late line AND we cancel the follow ctx here.
+		{
+			Events:           []cwltypes.OutputLogEvent{{Message: aws.String("late 1\n")}},
+			NextForwardToken: aws.String("tok2"),
+		},
+		// Call 3 (drain, 2nd): another late line, token advances.
+		{
+			Events:           []cwltypes.OutputLogEvent{{Message: aws.String("late 2\n")}},
+			NextForwardToken: aws.String("tok3"),
+		},
+		// Call 4 (drain, 3rd): same token → drain exits.
+		{NextForwardToken: aws.String("tok3")},
+	}
+	fakeLogs := &cancellingCWClient{script: script, cancelOnCall: 2, cancel: cancel}
+
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("RUNNING")}}},
+			{Tasks: []ecstypes.Task{{LastStatus: aws.String("STOPPED")}}},
+		},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(ctx, "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	want := "before stop\nlate 1\nlate 2\n"
+	if string(data) != want {
+		t.Errorf("Logs output = %q, want %q (drain must survive follow-ctx cancel)", string(data), want)
+	}
+}
+
+type cancellingCWClient struct {
+	script       []*cloudwatchlogs.GetLogEventsOutput
+	cancelOnCall int
+	cancel       context.CancelFunc
+	calls        int
+}
+
+func (c *cancellingCWClient) GetLogEvents(ctx context.Context, params *cloudwatchlogs.GetLogEventsInput, optFns ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetLogEventsOutput, error) {
+	// Respect ctx cancellation (mirrors real AWS SDK behavior). This
+	// ensures the regression test fails if the drain loop uses the
+	// cancelled follow ctx instead of an independent drain ctx.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	idx := c.calls
+	c.calls++
+	if idx == c.cancelOnCall {
+		c.cancel()
+	}
+	if idx < len(c.script) {
+		return c.script[idx], nil
+	}
+	return &cloudwatchlogs.GetLogEventsOutput{}, nil
+}
+
 func TestECSProvider_Logs_Follow_GetLogEventsError(t *testing.T) {
 	t.Parallel()
 	fakeLogs := &fakeCloudWatchLogsClient{

@@ -30,6 +30,11 @@ const containerName = "horde-worker"
 // errors tolerated in follow mode before stopping the log poll loop.
 const maxConsecutiveDescribeFailures = 5
 
+// drainTimeout bounds the final-drain phase after STOPPED detection.
+// The drain uses an independent context (not the follow context) so that
+// Ctrl-C while following does not abort drain and lose final output.
+const drainTimeout = 30 * time.Second
+
 // ECSClient is the subset of the ECS API used by ECSProvider.
 type ECSClient interface {
 	RunTask(ctx context.Context, params *ecs.RunTaskInput, optFns ...func(*ecs.Options)) (*ecs.RunTaskOutput, error)
@@ -349,6 +354,11 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 						// Final drain: CloudWatch ingestion can lag task
 						// termination by several seconds. Fetch remaining
 						// events until NextForwardToken stops changing.
+						// Use an independent, bounded context so Ctrl-C
+						// during follow does not abort drain and lose
+						// final output.
+						drainCtx, drainCancel := context.WithTimeout(context.Background(), drainTimeout)
+						defer drainCancel()
 						for {
 							drainInput := &cloudwatchlogs.GetLogEventsInput{
 								LogGroupName:  aws.String(p.config.LogGroup),
@@ -358,7 +368,7 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 							if nextToken != nil {
 								drainInput.NextToken = nextToken
 							}
-							drainOut, drainErr := p.logs.GetLogEvents(followCtx, drainInput)
+							drainOut, drainErr := p.logs.GetLogEvents(drainCtx, drainInput)
 							if drainErr != nil {
 								var rnf *cwltypes.ResourceNotFoundException
 								if errors.As(drainErr, &rnf) {
@@ -366,11 +376,11 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 								}
 								// Transient error — retry once after a short backoff.
 								select {
-								case <-followCtx.Done():
+								case <-drainCtx.Done():
 									return
 								case <-time.After(interval):
 								}
-								drainOut, drainErr = p.logs.GetLogEvents(followCtx, drainInput)
+								drainOut, drainErr = p.logs.GetLogEvents(drainCtx, drainInput)
 								if drainErr != nil {
 									fmt.Fprintf(pw, "WARNING: output may be incomplete: %v\n", drainErr)
 									pw.CloseWithError(fmt.Errorf("reading logs: %w", drainErr))

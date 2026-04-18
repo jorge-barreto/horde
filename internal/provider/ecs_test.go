@@ -2211,6 +2211,16 @@ func TestECSProvider_ReadFile_NoSuchKey(t *testing.T) {
 	if notFound.Path != ".orc/audit/foo.json" {
 		t.Errorf("FileNotFoundError.Path = %q, want %q", notFound.Path, ".orc/audit/foo.json")
 	}
+	// horde-f2k: verify the full error chain is preserved so callers
+	// can programmatically recover the SDK-specific error if needed.
+	unwrapped := errors.Unwrap(notFound)
+	if unwrapped == nil {
+		t.Fatal("Unwrap(*FileNotFoundError) = nil, want the underlying *s3types.NoSuchKey")
+	}
+	var noSuchKey *s3types.NoSuchKey
+	if !errors.As(unwrapped, &noSuchKey) {
+		t.Errorf("unwrapped error type = %T, want *s3types.NoSuchKey", unwrapped)
+	}
 }
 
 func TestECSProvider_ReadFile_S3Error(t *testing.T) {

@@ -25,3 +25,4 @@ docker-build:
 check: vet
 	bash -n docker/entrypoint.sh
 	bash -n docker/git-askpass.sh
+	bash docker/entrypoint_test.sh

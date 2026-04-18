@@ -3,7 +3,7 @@ package awscfg
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"reflect"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,116 +11,221 @@ import (
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 )
 
-func TestDiagnoseError_ProfileNotFound(t *testing.T) {
+func TestDiagnosticError_ImplementsError(t *testing.T) {
+	t.Parallel()
+	var _ error = (*DiagnosticError)(nil)
+}
+
+func TestDiagnose_ProfileNotFound_Fields(t *testing.T) {
 	t.Parallel()
 	err := fmt.Errorf("wrapped: %w", config.SharedConfigProfileNotExistError{Profile: "staging"})
-	result := DiagnoseError(err, "staging")
-	if !strings.Contains(result, `profile "staging" not found`) {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, `profile "staging" not found`)
+	got := Diagnose(err, "staging")
+	wantSummary := `profile "staging" not found in ~/.aws/config`
+	wantHints := []string{"aws configure --profile staging"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
 	}
-	if !strings.Contains(result, "aws configure --profile staging") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure --profile staging")
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
 	}
 }
 
-func TestDiagnoseError_ExpiredToken(t *testing.T) {
+func TestDiagnose_ProfileNotFound_Error(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("wrapped: %w", config.SharedConfigProfileNotExistError{Profile: "staging"})
+	got := Diagnose(err, "staging").Error()
+	want := `profile "staging" not found in ~/.aws/config; run: aws configure --profile staging`
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnose_ExpiredToken_Fields(t *testing.T) {
 	t.Parallel()
 	err := fmt.Errorf("wrapped: %w", &ststypes.ExpiredTokenException{Message: aws.String("token expired")})
-	result := DiagnoseError(err, "prod")
-	if !strings.Contains(result, "security token expired") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "security token expired")
+	got := Diagnose(err, "prod")
+	wantSummary := "security token expired"
+	wantHints := []string{"aws sso login --profile prod"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
 	}
-	if !strings.Contains(result, "aws sso login --profile prod") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws sso login --profile prod")
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
 	}
 }
 
-func TestDiagnoseError_ExpiredToken_NoProfile(t *testing.T) {
+func TestDiagnose_ExpiredToken_Error(t *testing.T) {
 	t.Parallel()
 	err := fmt.Errorf("wrapped: %w", &ststypes.ExpiredTokenException{Message: aws.String("token expired")})
-	result := DiagnoseError(err, "")
-	if !strings.Contains(result, "aws sso login") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws sso login")
-	}
-	if strings.Contains(result, "--profile") {
-		t.Errorf("DiagnoseError() = %q, want it NOT to contain %q", result, "--profile")
+	got := Diagnose(err, "prod").Error()
+	want := "security token expired; run: aws sso login --profile prod"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
 
-func TestDiagnoseError_NoCredentials(t *testing.T) {
+func TestDiagnose_ExpiredTokenNoProfile_Fields(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("wrapped: %w", &ststypes.ExpiredTokenException{Message: aws.String("token expired")})
+	got := Diagnose(err, "")
+	wantSummary := "security token expired"
+	wantHints := []string{"aws sso login"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
+	}
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
+	}
+}
+
+func TestDiagnose_ExpiredTokenNoProfile_Error(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("wrapped: %w", &ststypes.ExpiredTokenException{Message: aws.String("token expired")})
+	got := Diagnose(err, "").Error()
+	want := "security token expired; run: aws sso login"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnose_NoCredentialsWithProfile_Fields(t *testing.T) {
 	t.Parallel()
 	err := errors.New("failed to refresh cached credentials, no credential providers")
-	result := DiagnoseError(err, "")
-	if !strings.Contains(result, "no AWS credentials found") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "no AWS credentials found")
+	got := Diagnose(err, "staging")
+	wantSummary := "no AWS credentials found"
+	wantHints := []string{"aws configure --profile staging"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
 	}
-	if !strings.Contains(result, "aws configure") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure")
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
 	}
 }
 
-func TestDiagnoseError_NoCredentials_WithProfile(t *testing.T) {
+func TestDiagnose_NoCredentialsWithProfile_Error(t *testing.T) {
 	t.Parallel()
 	err := errors.New("failed to refresh cached credentials, no credential providers")
-	result := DiagnoseError(err, "staging")
-	if !strings.Contains(result, "no AWS credentials found") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "no AWS credentials found")
-	}
-	if !strings.Contains(result, "aws configure --profile staging") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure --profile staging")
+	got := Diagnose(err, "staging").Error()
+	want := "no AWS credentials found; run: aws configure --profile staging"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
 
-func TestDiagnoseError_AccessDenied(t *testing.T) {
+func TestDiagnose_NoCredentialsNoProfile_Fields(t *testing.T) {
+	t.Parallel()
+	err := errors.New("failed to refresh cached credentials, no credential providers")
+	got := Diagnose(err, "")
+	wantSummary := "no AWS credentials found"
+	wantHints := []string{"aws configure, or set --profile"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
+	}
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
+	}
+}
+
+func TestDiagnose_NoCredentialsNoProfile_Error(t *testing.T) {
+	t.Parallel()
+	err := errors.New("failed to refresh cached credentials, no credential providers")
+	got := Diagnose(err, "").Error()
+	want := "no AWS credentials found; run: aws configure, or set --profile"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnose_AccessDenied_Fields(t *testing.T) {
 	t.Parallel()
 	err := errors.New("operation error STS: GetCallerIdentity, AccessDeniedException: not authorized")
-	result := DiagnoseError(err, "dev")
-	if !strings.Contains(result, "credentials lack required permissions") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "credentials lack required permissions")
+	got := Diagnose(err, "dev")
+	wantSummary := "credentials lack required permissions; ensure the horde CLI managed policy is attached to your IAM user or role"
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
 	}
-	if !strings.Contains(result, "managed policy") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "managed policy")
+	if got.Hints != nil {
+		t.Errorf("Hints = %#v, want nil", got.Hints)
 	}
 }
 
-func TestDiagnoseError_NetworkError(t *testing.T) {
+func TestDiagnose_AccessDenied_Error(t *testing.T) {
+	t.Parallel()
+	err := errors.New("operation error STS: GetCallerIdentity, AccessDeniedException: not authorized")
+	got := Diagnose(err, "dev").Error()
+	want := "credentials lack required permissions; ensure the horde CLI managed policy is attached to your IAM user or role"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnose_Network_Fields(t *testing.T) {
 	t.Parallel()
 	err := errors.New("dial tcp: lookup sts.us-east-1.amazonaws.com: no such host")
-	result := DiagnoseError(err, "")
-	if !strings.Contains(result, "cannot reach AWS") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "cannot reach AWS")
+	got := Diagnose(err, "")
+	wantSummary := "cannot reach AWS; check network connectivity and region configuration"
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
+	}
+	if got.Hints != nil {
+		t.Errorf("Hints = %#v, want nil", got.Hints)
 	}
 }
 
-func TestDiagnoseError_UnknownError_WithProfile(t *testing.T) {
+func TestDiagnose_Network_Error(t *testing.T) {
 	t.Parallel()
-	err := errors.New("some unknown failure")
-	result := DiagnoseError(err, "myprofile")
-	if !strings.Contains(result, "check AWS credentials") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "check AWS credentials")
-	}
-	if !strings.Contains(result, "aws configure") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure")
-	}
-	if strings.Contains(result, "set --profile") {
-		t.Errorf("DiagnoseError() = %q, want it NOT to contain %q", result, "set --profile")
-	}
-	if !strings.Contains(result, "aws configure --profile myprofile") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure --profile myprofile")
+	err := errors.New("dial tcp: lookup sts.us-east-1.amazonaws.com: no such host")
+	got := Diagnose(err, "").Error()
+	want := "cannot reach AWS; check network connectivity and region configuration"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
 
-func TestDiagnoseError_UnknownError_NoProfile(t *testing.T) {
+func TestDiagnose_FallbackWithProfile_Fields(t *testing.T) {
 	t.Parallel()
 	err := errors.New("some unknown failure")
-	result := DiagnoseError(err, "")
-	if !strings.Contains(result, "check AWS credentials") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "check AWS credentials")
+	got := Diagnose(err, "myprofile")
+	wantSummary := "check AWS credentials and configuration"
+	wantHints := []string{"aws configure --profile myprofile"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
 	}
-	if !strings.Contains(result, "aws configure") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "aws configure")
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
 	}
-	if !strings.Contains(result, "set --profile") {
-		t.Errorf("DiagnoseError() = %q, want it to contain %q", result, "set --profile")
+}
+
+func TestDiagnose_FallbackWithProfile_Error(t *testing.T) {
+	t.Parallel()
+	err := errors.New("some unknown failure")
+	got := Diagnose(err, "myprofile").Error()
+	want := "check AWS credentials and configuration; run: aws configure --profile myprofile"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnose_FallbackNoProfile_Fields(t *testing.T) {
+	t.Parallel()
+	err := errors.New("some unknown failure")
+	got := Diagnose(err, "")
+	wantSummary := "check AWS credentials and configuration"
+	wantHints := []string{"aws configure, or set --profile"}
+	if got.Summary != wantSummary {
+		t.Errorf("Summary = %q, want %q", got.Summary, wantSummary)
+	}
+	if !reflect.DeepEqual(got.Hints, wantHints) {
+		t.Errorf("Hints = %#v, want %#v", got.Hints, wantHints)
+	}
+}
+
+func TestDiagnose_FallbackNoProfile_Error(t *testing.T) {
+	t.Parallel()
+	err := errors.New("some unknown failure")
+	got := Diagnose(err, "").Error()
+	want := "check AWS credentials and configuration; run: aws configure, or set --profile"
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }

@@ -18,7 +18,7 @@ func Load(ctx context.Context, profile string) (aws.Config, error) {
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
-		return aws.Config{}, fmt.Errorf("loading AWS config: %w\nhint: %s", err, DiagnoseError(err, profile))
+		return aws.Config{}, fmt.Errorf("loading AWS config: %w\nhint: %s", err, Diagnose(err, profile))
 	}
 	return cfg, nil
 }
@@ -27,7 +27,7 @@ func Load(ctx context.Context, profile string) (aws.Config, error) {
 func CallerIdentity(ctx context.Context, cfg aws.Config, profile string) (string, error) {
 	out, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
-		return "", fmt.Errorf("getting caller identity: %w\nhint: %s", err, DiagnoseError(err, profile))
+		return "", fmt.Errorf("getting caller identity: %w\nhint: %s", err, Diagnose(err, profile))
 	}
 	if out.Arn == nil {
 		return "", fmt.Errorf("getting caller identity: ARN not present in response")

@@ -1665,6 +1665,62 @@ func TestECSProvider_Logs_Follow_DrainRNFBreaksCleanly(t *testing.T) {
 	}
 }
 
+// TestECSProvider_Logs_Follow_DescribeTasksNilResponse verifies the
+// nil-guard in the follow-mode poll loop when DescribeTasks returns
+// (nil, nil). The goroutine must not panic; it treats nil as "no
+// information this tick" and continues polling until context is
+// cancelled. Covers horde-l2g.
+func TestECSProvider_Logs_Follow_DescribeTasksNilResponse(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fakeLogs := &fakeCloudWatchLogsClient{
+		getLogEventsOutputs: []*cloudwatchlogs.GetLogEventsOutput{
+			{
+				Events:           []cwltypes.OutputLogEvent{{Message: aws.String("line 1\n")}},
+				NextForwardToken: aws.String("tok1"),
+			},
+			// Subsequent calls default to empty output.
+		},
+	}
+	// describeTasksOutputs are all nil — each poll tick's DescribeTasks
+	// returns (nil, nil). Follow must keep running (no panic, no
+	// premature stop) until we cancel.
+	fakeECS := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{nil, nil, nil},
+	}
+	p := NewECSProvider(fakeECS, fakeLogs, &fakeS3Client{}, testHordeConfig())
+	p.pollInterval = time.Millisecond
+
+	reader, err := p.Logs(ctx, "arn:aws:ecs:us-east-1:123456789012:task/horde/abc123", true)
+	if err != nil {
+		t.Fatalf("Logs() error = %v, want nil", err)
+	}
+
+	buf := make([]byte, 64)
+	n, err := reader.Read(buf)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !strings.Contains(string(buf[:n]), "line 1") {
+		t.Errorf("Read() = %q, want it to contain \"line 1\"", string(buf[:n]))
+	}
+
+	// Let the goroutine iterate a few times with nil DescribeTasks
+	// before we cancel. If the nil guard were missing, any of these
+	// iterations would panic.
+	time.Sleep(10 * time.Millisecond)
+
+	cancel()
+	_, _ = io.ReadAll(reader)
+	reader.Close()
+
+	if len(fakeECS.describeTasksInputs) < 1 {
+		t.Error("DescribeTasks was never called")
+	}
+}
+
 // TestECSProvider_Logs_Follow_DrainNilResponse verifies the nil-output
 // guard in the drain loop after STOPPED detection. If GetLogEvents
 // returns (nil, nil) during drain, the goroutine must exit cleanly

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -464,30 +463,10 @@ func (p *ECSProvider) Stop(ctx context.Context, opts StopOpts) error {
 }
 
 func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
-	if err := ValidateRunID(opts.RunID); err != nil {
+	relPath, err := validateReadFileOpts(opts)
+	if err != nil {
 		return nil, fmt.Errorf("reading file: %w", err)
 	}
-	if opts.Path == "" {
-		return nil, fmt.Errorf("reading file: path is required")
-	}
-
-	const orcPrefix = ".orc/"
-	if !strings.HasPrefix(opts.Path, orcPrefix) {
-		return nil, fmt.Errorf("reading file: path must start with %q", orcPrefix)
-	}
-	relPath := strings.TrimPrefix(opts.Path, orcPrefix)
-	if relPath == "" {
-		return nil, fmt.Errorf("reading file: path must include a filename after %q", orcPrefix)
-	}
-	// Defense-in-depth: reject paths that traverse outside .orc/ once
-	// path.Clean collapses "..". This mirrors the Docker provider's
-	// prefix-containment check. S3 flat keys don't interpret "..", but
-	// we validate against the logical path the caller supplied.
-	cleanedRel := path.Clean(relPath)
-	if cleanedRel == ".." || strings.HasPrefix(cleanedRel, "../") || cleanedRel == "." || strings.HasPrefix(cleanedRel, "/") {
-		return nil, fmt.Errorf("reading file: path escapes %q prefix", orcPrefix)
-	}
-	relPath = cleanedRel
 
 	bucket := ""
 	if opts.Metadata != nil {

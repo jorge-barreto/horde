@@ -1102,8 +1102,8 @@ func TestDockerProvider_ReadFile_PathTraversal(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "path escapes results directory") {
-		t.Errorf("expected error to contain %q, got: %v", "path escapes results directory", err)
+	if !strings.Contains(err.Error(), "escapes") {
+		t.Errorf("expected error to contain %q, got: %v", "escapes", err)
 	}
 }
 

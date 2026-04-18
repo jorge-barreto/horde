@@ -307,20 +307,9 @@ func (p *DockerProvider) ExecInContainer(ctx context.Context, instanceID, script
 }
 
 func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error) {
-	if err := ValidateRunID(opts.RunID); err != nil {
+	relPath, err := validateReadFileOpts(opts)
+	if err != nil {
 		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	if opts.Path == "" {
-		return nil, fmt.Errorf("reading file: path is required")
-	}
-
-	const orcPrefix = ".orc/"
-	if !strings.HasPrefix(opts.Path, orcPrefix) {
-		return nil, fmt.Errorf("reading file: path must start with %q", orcPrefix)
-	}
-	relPath := strings.TrimPrefix(opts.Path, orcPrefix)
-	if relPath == "" {
-		return nil, fmt.Errorf("reading file: path must include a filename after %q", orcPrefix)
 	}
 
 	homeDir, err := os.UserHomeDir()

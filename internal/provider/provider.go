@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -58,6 +59,39 @@ func ValidateRunID(id string) error {
 		return fmt.Errorf("invalid run ID")
 	}
 	return nil
+}
+
+// orcPathPrefix is the single allowed logical prefix for ReadFile paths.
+// All readable files live under the .orc/ tree rooted at the workspace.
+const orcPathPrefix = ".orc/"
+
+// validateReadFileOpts centralizes the input validation shared between
+// Docker and ECS ReadFile implementations: RunID sanity, Path
+// non-emptiness, required .orc/ prefix, non-empty filename, and
+// logical-path traversal check. Returns the cleaned relative path
+// (stripped of the .orc/ prefix) on success. Callers still wrap any
+// returned error with their own action verb ("reading file: ...").
+func validateReadFileOpts(opts ReadFileOpts) (relPath string, err error) {
+	if err := ValidateRunID(opts.RunID); err != nil {
+		return "", err
+	}
+	if opts.Path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if !strings.HasPrefix(opts.Path, orcPathPrefix) {
+		return "", fmt.Errorf("path must start with %q", orcPathPrefix)
+	}
+	rel := strings.TrimPrefix(opts.Path, orcPathPrefix)
+	if rel == "" {
+		return "", fmt.Errorf("path must include a filename after %q", orcPathPrefix)
+	}
+	// Logical-path traversal check: forward-slash path.Clean is the
+	// right call for both flat S3 keys and filesystem sub-paths.
+	cleaned := path.Clean(rel)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || cleaned == "." || strings.HasPrefix(cleaned, "/") {
+		return "", fmt.Errorf("path escapes %q prefix", orcPathPrefix)
+	}
+	return cleaned, nil
 }
 
 // WorkspacePath returns the host path for a run's persistent workspace.

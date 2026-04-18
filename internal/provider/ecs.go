@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +44,7 @@ type CloudWatchLogsClient interface {
 // S3Client is the subset of the S3 API used by ECSProvider.
 type S3Client interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
 // ECSProvider implements Provider using AWS ECS Fargate.
@@ -476,4 +479,124 @@ func (p *ECSProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, 
 		return nil, fmt.Errorf("reading file from s3: %w", err)
 	}
 	return data, nil
+}
+
+// HydrateRun downloads the run's audit and artifacts trees from
+// s3://<artifacts_bucket>/horde-runs/<run-id>/{audit,artifacts}/[<workflow>/]<ticket>/
+// into the caller-supplied destination directories. Returns *FileNotFoundError
+// if no objects are found under either prefix for this run.
+func (p *ECSProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
+	if opts.RunID == "" {
+		return fmt.Errorf("hydrating run: run ID is required")
+	}
+	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
+		return fmt.Errorf("hydrating run: invalid run ID")
+	}
+	if opts.Ticket == "" {
+		return fmt.Errorf("hydrating run: ticket is required")
+	}
+	if strings.ContainsAny(opts.Ticket, "/\\") || strings.Contains(opts.Ticket, "..") {
+		return fmt.Errorf("hydrating run: invalid ticket")
+	}
+	if strings.ContainsAny(opts.Workflow, "/\\") || strings.Contains(opts.Workflow, "..") {
+		return fmt.Errorf("hydrating run: invalid workflow")
+	}
+	if opts.DestAuditDir == "" || opts.DestArtifactsDir == "" {
+		return fmt.Errorf("hydrating run: destination directories are required")
+	}
+	bucket := ""
+	if opts.Metadata != nil {
+		bucket = opts.Metadata["artifacts_bucket"]
+	}
+	if bucket == "" {
+		return fmt.Errorf("hydrating run: artifacts_bucket not found in metadata")
+	}
+
+	runPrefix := "horde-runs/" + opts.RunID + "/"
+	auditPrefix := runPrefix + "audit/" + orcKeySuffix(opts.Workflow, opts.Ticket)
+	artifactsPrefix := runPrefix + "artifacts/" + orcKeySuffix(opts.Workflow, opts.Ticket)
+
+	audit, err := p.downloadS3Prefix(ctx, bucket, auditPrefix, opts.DestAuditDir)
+	if err != nil {
+		return fmt.Errorf("hydrating audit: %w", err)
+	}
+	artifacts, err := p.downloadS3Prefix(ctx, bucket, artifactsPrefix, opts.DestArtifactsDir)
+	if err != nil {
+		return fmt.Errorf("hydrating artifacts: %w", err)
+	}
+	if audit == 0 && artifacts == 0 {
+		return &FileNotFoundError{Path: "s3://" + bucket + "/" + runPrefix}
+	}
+	return nil
+}
+
+// orcKeySuffix returns the "<workflow>/<ticket>/" (or "<ticket>/") suffix
+// that orc uses for per-run audit/artifact paths.
+func orcKeySuffix(workflow, ticket string) string {
+	if workflow == "" {
+		return ticket + "/"
+	}
+	return workflow + "/" + ticket + "/"
+}
+
+// downloadS3Prefix lists all objects under prefix and writes each to
+// destDir, preserving the path layout under the prefix. Returns the number
+// of objects downloaded. A prefix with no objects is not an error here —
+// the caller decides how to treat an empty result.
+func (p *ECSProvider) downloadS3Prefix(ctx context.Context, bucket, prefix, destDir string) (int, error) {
+	var token *string
+	count := 0
+	for {
+		out, err := p.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return count, fmt.Errorf("listing s3 prefix %q: %w", prefix, err)
+		}
+		for _, obj := range out.Contents {
+			key := aws.ToString(obj.Key)
+			rel := strings.TrimPrefix(key, prefix)
+			if rel == "" || strings.HasSuffix(rel, "/") {
+				continue
+			}
+			if err := p.downloadS3Object(ctx, bucket, key, filepath.Join(destDir, rel)); err != nil {
+				return count, err
+			}
+			count++
+		}
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			break
+		}
+		token = out.NextContinuationToken
+	}
+	return count, nil
+}
+
+func (p *ECSProvider) downloadS3Object(ctx context.Context, bucket, key, destPath string) error {
+	out, err := p.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("getting s3://%s/%s: %w", bucket, key, err)
+	}
+	if out == nil || out.Body == nil {
+		return fmt.Errorf("getting s3://%s/%s: nil response", bucket, key)
+	}
+	defer out.Body.Close()
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return fmt.Errorf("creating parent dir for %s: %w", destPath, err)
+	}
+	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", destPath, err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, out.Body); err != nil {
+		return fmt.Errorf("writing %s: %w", destPath, err)
+	}
+	return nil
 }

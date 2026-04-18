@@ -15,6 +15,7 @@ type Provider interface {
 	Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
 	Stop(ctx context.Context, opts StopOpts) error
 	ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
+	HydrateRun(ctx context.Context, opts HydrateOpts) error
 }
 
 // LaunchOpts contains parameters for launching a worker instance.
@@ -68,6 +69,27 @@ type ReadFileOpts struct {
 type StopOpts struct {
 	InstanceID string // container ID or ECS task ARN
 	ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
+}
+
+// HydrateOpts contains parameters for copying a run's audit and artifacts
+// trees to local destination directories.
+//
+// Providers locate the source tree using RunID plus the orc-native
+// (Workflow, Ticket) path components. Workflow may be empty — in which
+// case the source path omits the workflow segment. DestAuditDir and
+// DestArtifactsDir are the final on-disk destinations for the bytes
+// under the run's <workflow>/<ticket>/ subtree (caller-assembled).
+//
+// If the source data does not exist for this run, implementations return
+// *FileNotFoundError with Path set to a description of what was missing.
+type HydrateOpts struct {
+	RunID            string            // run ID (used to resolve the per-run source)
+	Workflow         string            // orc workflow name, or "" for default workflow
+	Ticket           string            // orc ticket name
+	InstanceID       string            // container ID or ECS task ARN
+	Metadata         map[string]string // provider-specific metadata from LaunchResult
+	DestAuditDir     string            // absolute destination for audit content
+	DestArtifactsDir string            // absolute destination for artifacts content
 }
 
 // FileNotFoundError is returned when a requested file does not exist in the provider's storage.

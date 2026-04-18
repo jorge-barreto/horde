@@ -346,3 +346,75 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 	}
 	return data, nil
 }
+
+// HydrateRun copies a run's audit and artifacts trees from the local results
+// store to the caller-supplied destination dirs. The source is rooted at
+// ~/.horde/results/<run-id>/{audit,artifacts}/[<workflow>/]<ticket>/ —
+// i.e. the specific subtree orc wrote for this run — so that DestAuditDir
+// ends up containing the run's audit files directly, without orc's native
+// <workflow>/<ticket>/ nesting.
+//
+// Returns *FileNotFoundError if the run's results dir does not exist.
+// A missing audit or artifacts subtree individually is treated as empty
+// (some runs don't produce both).
+func (p *DockerProvider) HydrateRun(ctx context.Context, opts HydrateOpts) error {
+	if opts.RunID == "" {
+		return fmt.Errorf("hydrating run: run ID is required")
+	}
+	if strings.ContainsAny(opts.RunID, "/\\") || strings.Contains(opts.RunID, "..") {
+		return fmt.Errorf("hydrating run: invalid run ID")
+	}
+	if opts.Ticket == "" {
+		return fmt.Errorf("hydrating run: ticket is required")
+	}
+	if strings.ContainsAny(opts.Ticket, "/\\") || strings.Contains(opts.Ticket, "..") {
+		return fmt.Errorf("hydrating run: invalid ticket")
+	}
+	if strings.ContainsAny(opts.Workflow, "/\\") || strings.Contains(opts.Workflow, "..") {
+		return fmt.Errorf("hydrating run: invalid workflow")
+	}
+	if opts.DestAuditDir == "" || opts.DestArtifactsDir == "" {
+		return fmt.Errorf("hydrating run: destination directories are required")
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("hydrating run: %w", err)
+	}
+	resultsDir := filepath.Join(homeDir, ".horde", "results", opts.RunID)
+	if _, err := os.Stat(resultsDir); err != nil {
+		if os.IsNotExist(err) {
+			return &FileNotFoundError{Path: resultsDir, Err: err}
+		}
+		return fmt.Errorf("hydrating run: %w", err)
+	}
+
+	srcAudit := orcSubdir(filepath.Join(resultsDir, "audit"), opts.Workflow, opts.Ticket)
+	if _, err := os.Stat(srcAudit); err == nil {
+		if err := copyLocalTree(srcAudit, opts.DestAuditDir); err != nil {
+			return fmt.Errorf("hydrating audit: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("hydrating audit: %w", err)
+	}
+
+	srcArtifacts := orcSubdir(filepath.Join(resultsDir, "artifacts"), opts.Workflow, opts.Ticket)
+	if _, err := os.Stat(srcArtifacts); err == nil {
+		if err := copyLocalTree(srcArtifacts, opts.DestArtifactsDir); err != nil {
+			return fmt.Errorf("hydrating artifacts: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("hydrating artifacts: %w", err)
+	}
+
+	return nil
+}
+
+// orcSubdir appends orc's <workflow>/<ticket> layout (or just <ticket> for
+// the default workflow) to a base directory.
+func orcSubdir(base, workflow, ticket string) string {
+	if workflow == "" {
+		return filepath.Join(base, ticket)
+	}
+	return filepath.Join(base, workflow, ticket)
+}

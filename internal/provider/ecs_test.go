@@ -727,11 +727,33 @@ func TestECSProvider_Status_DescribeTasksError(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Status_Failure(t *testing.T) {
+func TestECSProvider_Status_FailureMissing_ReturnsUnknown(t *testing.T) {
+	// Per the Provider contract (see provider.go), a not-found instance
+	// must surface as (&InstanceStatus{State: "unknown"}, nil) — matching
+	// the Docker provider's behavior. AWS signals not-found with a
+	// Failure.Reason of "MISSING".
 	t.Parallel()
 	fake := &fakeECSClient{
 		describeTasksOutput: &ecs.DescribeTasksOutput{
 			Failures: []ecstypes.Failure{{Reason: aws.String("MISSING")}},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	st, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if st == nil || st.State != "unknown" {
+		t.Errorf("Status = %+v, want State=\"unknown\"", st)
+	}
+}
+
+func TestECSProvider_Status_Failure_NonMissing_ReturnsError(t *testing.T) {
+	// Any non-MISSING Failure must still surface as a real error.
+	t.Parallel()
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Failures: []ecstypes.Failure{{Reason: aws.String("ACCESS_DENIED")}},
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
@@ -742,8 +764,8 @@ func TestECSProvider_Status_Failure(t *testing.T) {
 	if !strings.Contains(err.Error(), "describing ECS task") {
 		t.Errorf("error = %q, want it to contain \"describing ECS task\"", err.Error())
 	}
-	if !strings.Contains(err.Error(), "MISSING") {
-		t.Errorf("error = %q, want it to contain \"MISSING\"", err.Error())
+	if !strings.Contains(err.Error(), "ACCESS_DENIED") {
+		t.Errorf("error = %q, want it to contain \"ACCESS_DENIED\"", err.Error())
 	}
 }
 
@@ -767,7 +789,9 @@ func TestECSProvider_Status_FailureNilReason(t *testing.T) {
 	}
 }
 
-func TestECSProvider_Status_NoTasks(t *testing.T) {
+func TestECSProvider_Status_NoTasks_ReturnsUnknown(t *testing.T) {
+	// Per the Provider contract, not-found must return the unknown
+	// sentinel rather than an error.
 	t.Parallel()
 	fake := &fakeECSClient{
 		describeTasksOutput: &ecs.DescribeTasksOutput{
@@ -776,12 +800,12 @@ func TestECSProvider_Status_NoTasks(t *testing.T) {
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Status(context.Background(), "task-arn")
-	if err == nil {
-		t.Fatal("Status() error = nil, want non-nil")
+	st, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
 	}
-	if !strings.Contains(err.Error(), "task not found") {
-		t.Errorf("error = %q, want it to contain \"task not found\"", err.Error())
+	if st == nil || st.State != "unknown" {
+		t.Errorf("Status = %+v, want State=\"unknown\"", st)
 	}
 }
 

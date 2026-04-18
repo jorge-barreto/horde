@@ -201,11 +201,18 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 	}
 
 	if len(out.Failures) > 0 {
+		// "MISSING" is AWS's per-task signal for not-found. Treat it
+		// like the Docker provider's "no such container" — return the
+		// unknown sentinel rather than an error so callers don't need
+		// provider-specific switches.
+		if f := out.Failures[0]; f.Reason != nil && strings.EqualFold(*f.Reason, "MISSING") {
+			return &InstanceStatus{State: "unknown"}, nil
+		}
 		return nil, fmt.Errorf("describing ECS task: %s", ecsFailureReason(out.Failures[0]))
 	}
 
 	if len(out.Tasks) == 0 {
-		return nil, fmt.Errorf("describing ECS task: task not found")
+		return &InstanceStatus{State: "unknown"}, nil
 	}
 
 	task := out.Tasks[0]

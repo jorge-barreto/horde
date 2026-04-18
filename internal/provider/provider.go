@@ -12,6 +12,13 @@ import (
 )
 
 // Provider abstracts container/task lifecycle operations.
+//
+// Status contract: when the instance cannot be located (not-found by
+// the underlying backend), Status must return (&InstanceStatus{State:
+// "unknown"}, nil). Callers rely on the "unknown" sentinel to branch
+// between "still running" and "gone" paths without a provider-specific
+// error type switch. Real transport/API errors should still be
+// returned as (nil, error).
 type Provider interface {
 	Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error)
 	Status(ctx context.Context, instanceID string) (*InstanceStatus, error)

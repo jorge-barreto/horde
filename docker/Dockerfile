@@ -30,7 +30,8 @@ RUN useradd -m -u 1000 -s /bin/bash horde \
 USER horde
 WORKDIR /home/horde
 
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && test -x /home/horde/.local/bin/claude
 ENV PATH="/home/horde/.local/bin:${PATH}"
 
 USER root

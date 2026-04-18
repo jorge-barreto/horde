@@ -3773,17 +3773,6 @@ func TestOpenStore_Docker_Cleanup(t *testing.T) {
 	}
 }
 
-func TestOpenStore_Unsupported(t *testing.T) {
-	t.Parallel()
-	_, _, err := openStore("gcp")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "unsupported provider") {
-		t.Errorf("error %q does not contain expected message", err.Error())
-	}
-}
-
 // --- JSON output tests ---
 
 func TestStatus_JSON_CompletedRun(t *testing.T) {

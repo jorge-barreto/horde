@@ -32,24 +32,20 @@ func defaultFactoryDeps() factoryDeps {
 	}
 }
 
-func openStore(providerName string) (store.Store, func(), error) {
-	switch providerName {
-	case "docker":
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, nil, fmt.Errorf("getting home directory: %w", err)
-		}
-		dbPath := filepath.Join(homeDir, ".horde", "horde.db")
-		st, err := store.NewSQLiteStore(dbPath)
-		if err != nil {
-			return nil, nil, fmt.Errorf("opening store: %w", err)
-		}
-		return st, func() { st.Close() }, nil
-	case "aws-ecs":
-		return nil, nil, fmt.Errorf("aws-ecs store is not yet implemented")
-	default:
-		return nil, nil, fmt.Errorf("openStore: unsupported provider %q", providerName)
+// openStore opens the local SQLite store used by the docker provider.
+// The aws-ecs provider gets its store directly via NewDynamoStore in
+// initProviderAndStoreWith — this helper is the SQLite-only path.
+func openStore(_ string) (store.Store, func(), error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting home directory: %w", err)
 	}
+	dbPath := filepath.Join(homeDir, ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("opening store: %w", err)
+	}
+	return st, func() { st.Close() }, nil
 }
 
 // newProviderWith creates just the provider, without opening a store.

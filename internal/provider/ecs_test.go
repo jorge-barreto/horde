@@ -2206,7 +2206,7 @@ func TestECSProvider_ReadFile_NoSuchKey(t *testing.T) {
 	}
 	var notFound *FileNotFoundError
 	if !errors.As(err, &notFound) {
-		t.Errorf("ReadFile() error type = %T, want *FileNotFoundError", err)
+		t.Fatalf("ReadFile() error type = %T, want *FileNotFoundError", err)
 	}
 	if notFound.Path != ".orc/audit/foo.json" {
 		t.Errorf("FileNotFoundError.Path = %q, want %q", notFound.Path, ".orc/audit/foo.json")

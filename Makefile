@@ -39,15 +39,17 @@ check: vet
 #             the deployed stack. ~15-20 min.
 #   e2e-down  Destroy the stack. ~3 min. ALWAYS run this when done.
 #
-E2E_ENV = set -a && . ./.env && set +a && HORDE_E2E_CDK=1
+E2E_ENV = set -a && . ./.env && set +a && export HORDE_E2E_CDK=1
 
 e2e-up:
 	@$(E2E_ENV) && go test -v -count=1 -timeout 20m -run TestECSCDK_Bringup ./test/integration/
 
 e2e-test:
-	@$(E2E_ENV) && HORDE_E2E_ECS=1 HORDE_E2E_ECS_BACKEND=cdk \
+	@$(E2E_ENV) && export HORDE_E2E_ECS=1 HORDE_E2E_ECS_BACKEND=cdk && \
 	    go test -v -count=1 -timeout 30m \
-	    -run 'TestECS|TestECSCDK_Smoke' -skip TestECSSmoke ./test/integration/
+	    -run 'TestECS' \
+	    -skip 'TestECSSmoke|TestECSCDK_Bringup|TestECSCDK_Teardown' \
+	    ./test/integration/
 
 e2e-down:
 	@$(E2E_ENV) && go test -v -count=1 -timeout 15m -run TestECSCDK_Teardown ./test/integration/

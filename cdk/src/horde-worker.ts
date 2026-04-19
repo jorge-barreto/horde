@@ -3,6 +3,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
 
 import type { HordeWorkerProps } from "./horde-worker-props";
@@ -91,6 +92,12 @@ export class HordeWorker extends Construct {
   /** The worker container inside `taskDefinition`. */
   public readonly container: ecs.ContainerDefinition;
 
+  /**
+   * S3 bucket holding run artifacts (logs, run-result.json) under
+   * `horde-runs/<runId>/`. Either provided by the caller or created here.
+   */
+  public readonly artifactsBucket: s3.IBucket;
+
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
 
@@ -159,6 +166,21 @@ export class HordeWorker extends Construct {
       taskRole: this.taskRole,
       executionRole: this.executionRole,
     });
+
+    if (props.artifactsBucket) {
+      this.artifactsBucket = props.artifactsBucket;
+    } else {
+      const bucket = new s3.Bucket(this, "ArtifactsBucket", {
+        bucketName: `horde-artifacts-${slug}-${cdk.Aws.ACCOUNT_ID}`,
+        encryption: s3.BucketEncryption.S3_MANAGED,
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        enforceSSL: true,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+        autoDeleteObjects: true,
+      });
+      cdk.Tags.of(bucket).add("Name", `horde-${slug}-artifacts`);
+      this.artifactsBucket = bucket;
+    }
 
     this.container = this.taskDefinition.addContainer("worker", {
       containerName: "horde-worker",

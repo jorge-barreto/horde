@@ -93,6 +93,38 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     }
   });
 
+  it("creates an S3 artifacts bucket with public access blocked and SSE-S3", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::S3::Bucket", {
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: [
+          { ServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } },
+        ],
+      },
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      },
+    });
+  });
+
+  it("denies non-TLS requests on the artifacts bucket", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::S3::BucketPolicy", {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: "Deny",
+            Action: "s3:*",
+            Condition: { Bool: { "aws:SecureTransport": "false" } },
+          }),
+        ]),
+      }),
+    });
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

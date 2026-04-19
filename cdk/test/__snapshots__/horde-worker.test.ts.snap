@@ -10,6 +10,210 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
     },
   },
   "Resources": {
+    "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F": {
+      "DependsOn": [
+        "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
+          "S3Key": "faa95a81ae7d7373f3e1f242268f904eb748d8d0fdd306e8a6fe515a1905a7d6.zip",
+        },
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Lambda function for auto-deleting objects in ",
+              {
+                "Ref": "HordeArtifactsBucket1A7FD4A4",
+              },
+              " S3 bucket.",
+            ],
+          ],
+        },
+        "Handler": "index.handler",
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeArtifactsBucket1A7FD4A4": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "BucketName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-artifacts-test-",
+              {
+                "Ref": "AWS::AccountId",
+              },
+            ],
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "Tags": [
+          {
+            "Key": "aws-cdk:auto-delete-objects",
+            "Value": "true",
+          },
+          {
+            "Key": "Name",
+            "Value": "horde-test-artifacts",
+          },
+        ],
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeArtifactsBucketAutoDeleteObjectsCustomResource5ED8AE6A": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "HordeArtifactsBucketPolicy035E46DD",
+      ],
+      "Properties": {
+        "BucketName": {
+          "Ref": "HordeArtifactsBucket1A7FD4A4",
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "Custom::S3AutoDeleteObjects",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeArtifactsBucketPolicy035E46DD": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "HordeArtifactsBucket1A7FD4A4",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:PutBucketPolicy",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::GetAtt": [
+                    "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+                    "Arn",
+                  ],
+                },
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",

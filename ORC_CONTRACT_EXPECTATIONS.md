@@ -66,7 +66,7 @@ orc needs exactly two environment variables from the worker environment:
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | API authentication for agent phases |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude CLI auth for agent phases (from `claude setup-token`) |
 | `GIT_TOKEN` | Git operations in script phases (clone, push, etc.) |
 
 orc sets `TICKET`, `ORC_TICKET`, and all other `ORC_*` variables internally from the `orc run <ticket>` command argument. horde does not set these.

@@ -323,7 +323,7 @@ The provider maps `LaunchOpts` to container environment variables:
 | `WORKFLOW` | `LaunchOpts.Workflow` | Empty if default workflow |
 | `RUN_ID` | `LaunchOpts.RunID` | Used by S3 upload path (ECS only) |
 | `ARTIFACTS_BUCKET` | ECS config (SSM) | Absent in docker mode — triggers S3 upload when present |
-| `ANTHROPIC_API_KEY` | `.env` (docker) / Secrets Manager (ECS) | Required by orc |
+| `CLAUDE_CODE_OAUTH_TOKEN` | `.env` (docker) / Secrets Manager (ECS) | Claude CLI auth token (from `claude setup-token`) |
 | `GIT_TOKEN` | `.env` (docker) / Secrets Manager (ECS) | Used by `GIT_ASKPASS` helper |
 
 ### Team Customization
@@ -344,13 +344,13 @@ The docker provider reads secrets from a `.env` file in the project directory (m
 
 ```
 # .env (gitignored)
-ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # from `claude setup-token`
 GIT_TOKEN=ghp_...
 ```
 
 horde passes this file to the container via `docker run --env-file .env`. Before launching, horde validates:
 - The `.env` file exists (error if missing)
-- The `.env` file contains `ANTHROPIC_API_KEY` (error if missing)
+- The `.env` file contains `CLAUDE_CODE_OAUTH_TOKEN` (error if missing)
 - The `.env` file contains `GIT_TOKEN` (error if missing)
 
 Validation checks that the keys are defined, not that the values are valid — bad credentials are caught at runtime by the container.
@@ -601,7 +601,7 @@ new HordeWorker(this, 'Horde', {
   workerImage: ecs.ContainerImage.fromAsset('./horde-worker'),
   artifactsBucket: existingBucket,              // optional — creates one if not provided
   secrets: {
-    ANTHROPIC_API_KEY: secretsmanager.Secret.fromSecretNameV2(...),
+    CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(...),
     GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(...),
   },
   // Optional overrides
@@ -699,7 +699,7 @@ Local-only. Validates the horde pipeline end-to-end without AWS.
 - SQLite store for local run history
 - All CLI commands: `launch`, `status`, `logs`, `kill`, `results`, `list`
 - Cost display: `status` and `list` show cost from `run-result.json` when available
-- `.env` validation: checks for required keys (`ANTHROPIC_API_KEY`, `GIT_TOKEN`) before launch
+- `.env` validation: checks for required keys (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) before launch
 - Zero-config: repo from git remote, secrets from `.env`, image hardcoded to `horde-worker:latest`
 - Base worker Docker image + entrypoint (with `git-askpass.sh` credential helper)
 - Run ID generation (12-char lowercase alphanumeric, `crypto/rand`)

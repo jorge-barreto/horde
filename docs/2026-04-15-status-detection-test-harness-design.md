@@ -90,7 +90,7 @@ type harness struct {
 }
 ```
 
-**`newHarness(t)`**: Creates a unique temp `$HOME`, initializes a project directory with a git remote and `.env`. The `.env` needs `GIT_TOKEN=dummy` (entrypoint exports it as `GH_TOKEN`) and `ANTHROPIC_API_KEY=dummy` (orc may validate its presence even for script-only workflows). Neither token is exercised. Sets `$HOME` and `$PATH` for the test subprocess environment.
+**`newHarness(t)`**: Creates a unique temp `$HOME`, initializes a project directory with a git remote and `.env`. The `.env` needs `GIT_TOKEN=dummy` (entrypoint exports it as `GH_TOKEN`) and `CLAUDE_CODE_OAUTH_TOKEN=dummy` (orc may validate its presence even for script-only workflows). Neither token is exercised. Sets `$HOME` and `$PATH` for the test subprocess environment.
 
 **`Launch(ticket, workflow, timeout) string`**: Runs `horde launch --provider docker --workflow <w> --timeout <t> <ticket>`. Returns the run ID parsed from stdout.
 

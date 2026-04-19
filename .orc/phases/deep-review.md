@@ -231,7 +231,7 @@ If no findings in a category, write `None.`
 > - **SSM parameter:** Is the launcher Lambda ARN published to the correct SSM path (`/horde/launcher`)?
 > - **Dockerfile:** Does the base image include git, jq, bash, curl, AWS CLI v2, orc, claude CLI, bd?
 > - **Entrypoint robustness:** Does the entrypoint capture orc's exit code without `set -e` killing the script? Are artifact uploads best-effort (|| true)?
-> - **Environment contract:** Does the worker environment NOT set CLAUDECODE? Does it set ANTHROPIC_API_KEY and GIT_TOKEN?
+> - **Environment contract:** Does the worker environment NOT set CLAUDECODE? Does it set CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN?
 >
 > Write findings to `$ARTIFACTS_DIR/reviews/infra.md`.
 > Only flag issues in code introduced by this diff.

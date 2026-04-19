@@ -165,6 +165,60 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     }
   });
 
+  it("execution role has the AWS managed ECS task execution policy", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::IAM::Role", {
+      AssumeRolePolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Principal: { Service: "ecs-tasks.amazonaws.com" },
+          }),
+        ]),
+      }),
+      ManagedPolicyArns: Match.arrayWith([
+        Match.objectLike({
+          "Fn::Join": Match.arrayWith([
+            Match.arrayWith([
+              Match.stringLikeRegexp(".*service-role/AmazonECSTaskExecutionRolePolicy.*"),
+            ]),
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it("execution role can resolve the two named secrets at container start", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::Policy");
+    const execPolicies = Object.entries(policies).filter(([_id, p]) =>
+      (p.Properties.Roles ?? []).some(
+        (r: { Ref?: string }) => typeof r === "object" && r.Ref?.includes("ExecutionRole"),
+      ),
+    );
+    expect(execPolicies.length).toBeGreaterThan(0);
+
+    const allActions = execPolicies
+      .flatMap(([_id, p]) => p.Properties.PolicyDocument.Statement ?? [])
+      .flatMap((s: { Action: string | string[] }) =>
+        Array.isArray(s.Action) ? s.Action : [s.Action],
+      );
+    expect(allActions).toContain("secretsmanager:GetSecretValue");
+
+    // Each statement that grants secretsmanager:* must scope to a specific
+    // secret ARN (Fn::Join over the secret name) — never "*".
+    for (const [_id, p] of execPolicies) {
+      for (const s of p.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        if (actions.some((a: string) => a?.startsWith?.("secretsmanager:"))) {
+          const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+          for (const r of resources) {
+            expect(r).not.toBe("*");
+          }
+        }
+      }
+    }
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

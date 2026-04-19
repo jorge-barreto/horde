@@ -528,6 +528,205 @@ Resources:
               - Fn::GetAtt: [ArtifactsBucket, Arn]
               - Fn::Sub: "${ArtifactsBucket.Arn}/*"
 
+  StatusLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: "horde-{{.Slug}}-status-lambda-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "horde-{{.Slug}}-status-lambda"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DynamoRunsTableRW
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - Fn::GetAtt: [RunsTable, Arn]
+                  - Fn::Sub: "${RunsTable.Arn}/index/*"
+              - Sid: ArtifactsRead
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - Fn::Sub: "${ArtifactsBucket.Arn}/*"
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-status-lambda-role"
+
+  StatusLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "horde-{{.Slug}}-status-updater"
+      Runtime: python3.12
+      Handler: index.handler
+      Role:
+        Fn::GetAtt: [StatusLambdaRole, Arn]
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          RUNS_TABLE:
+            Ref: RunsTable
+          ARTIFACTS_BUCKET:
+            Ref: ArtifactsBucket
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          from botocore.exceptions import ClientError
+
+          RUNS_TABLE = os.environ["RUNS_TABLE"]
+          ARTIFACTS_BUCKET = os.environ["ARTIFACTS_BUCKET"]
+
+          ddb = boto3.client("dynamodb")
+          s3 = boto3.client("s3")
+
+          TERMINAL = {"success", "failed", "killed"}
+
+
+          def find_run_id(task_arn):
+              # Query the by-instance GSI to resolve task ARN -> run id.
+              resp = ddb.query(
+                  TableName=RUNS_TABLE,
+                  IndexName="by-instance",
+                  KeyConditionExpression="instance_id = :iid",
+                  ExpressionAttributeValues={":iid": {"S": task_arn}},
+                  Limit=1,
+              )
+              items = resp.get("Items", [])
+              if not items:
+                  return None
+              return items[0]["id"]["S"]
+
+
+          def fetch_total_cost(run_id):
+              key = "horde-runs/" + run_id + "/run-result.json"
+              try:
+                  obj = s3.get_object(Bucket=ARTIFACTS_BUCKET, Key=key)
+              except ClientError as e:
+                  code = e.response.get("Error", {}).get("Code", "")
+                  if code in ("NoSuchKey", "404"):
+                      return None
+                  raise
+              body = obj["Body"].read()
+              try:
+                  data = json.loads(body)
+              except ValueError:
+                  return None
+              cost = data.get("total_cost_usd")
+              if cost is None:
+                  return None
+              return float(cost)
+
+
+          def current_status(run_id):
+              resp = ddb.get_item(
+                  TableName=RUNS_TABLE,
+                  Key={"id": {"S": run_id}},
+                  ProjectionExpression="#s",
+                  ExpressionAttributeNames={"#s": "status"},
+              )
+              item = resp.get("Item")
+              if not item:
+                  return None
+              return item.get("status", {}).get("S")
+
+
+          def handler(event, _context):
+              detail = event.get("detail", {})
+              if detail.get("lastStatus") != "STOPPED":
+                  return {"skipped": "not stopped"}
+              task_arn = detail.get("taskArn")
+              if not task_arn:
+                  return {"skipped": "no taskArn"}
+
+              run_id = find_run_id(task_arn)
+              if not run_id:
+                  return {"skipped": "task not managed by horde"}
+
+              existing = current_status(run_id)
+              if existing in TERMINAL:
+                  return {"skipped": "already terminal", "run_id": run_id, "status": existing}
+
+              containers = detail.get("containers", [])
+              exit_code = None
+              if containers:
+                  exit_code = containers[0].get("exitCode")
+              status = "success" if exit_code == 0 else "failed"
+
+              stopped_at = detail.get("stoppedAt")  # ISO-8601 string
+              cost = fetch_total_cost(run_id)
+
+              names = {"#s": "status", "#ec": "exit_code", "#ca": "completed_at"}
+              values = {
+                  ":s": {"S": status},
+                  ":ca": {"S": stopped_at} if stopped_at else {"NULL": True},
+              }
+              set_exprs = ["#s = :s", "#ca = :ca"]
+              if exit_code is not None:
+                  values[":ec"] = {"N": str(int(exit_code))}
+                  set_exprs.append("#ec = :ec")
+              if cost is not None:
+                  names["#tc"] = "total_cost_usd"
+                  values[":tc"] = {"N": str(cost)}
+                  set_exprs.append("#tc = :tc")
+
+              ddb.update_item(
+                  TableName=RUNS_TABLE,
+                  Key={"id": {"S": run_id}},
+                  UpdateExpression="SET " + ", ".join(set_exprs),
+                  ExpressionAttributeNames=names,
+                  ExpressionAttributeValues=values,
+              )
+              return {"updated": True, "run_id": run_id, "status": status, "exit_code": exit_code}
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-status-lambda"
+
+  StatusEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: "horde-{{.Slug}}-status"
+      EventPattern:
+        source:
+          - aws.ecs
+        detail-type:
+          - "ECS Task State Change"
+        detail:
+          clusterArn:
+            - Fn::GetAtt: [EcsCluster, Arn]
+          lastStatus:
+            - STOPPED
+      State: ENABLED
+      Targets:
+        - Id: StatusLambdaTarget
+          Arn:
+            Fn::GetAtt: [StatusLambda, Arn]
+
+  StatusLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Fn::GetAtt: [StatusLambda, Arn]
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt: [StatusEventRule, Arn]
+
 Outputs:
   VpcId:
     Value:
@@ -622,3 +821,9 @@ Outputs:
       Ref: CliUserManagedPolicy
     Export:
       Name: "horde-{{.Slug}}-cli-policy-arn"
+
+  StatusLambdaArn:
+    Value:
+      Fn::GetAtt: [StatusLambda, Arn]
+    Export:
+      Name: "horde-{{.Slug}}-status-lambda-arn"

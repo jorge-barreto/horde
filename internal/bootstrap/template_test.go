@@ -137,6 +137,10 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"ArtifactsBucketPolicy",
 		"CliUserManagedPolicy",
 		"HordeConfigParameter",
+		"StatusLambdaRole",
+		"StatusLambda",
+		"StatusEventRule",
+		"StatusLambdaInvokePermission",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -223,6 +227,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 		"GitTokenSecretArn",
 		"CliUserManagedPolicyArn",
 		"SsmConfigPath",
+		"StatusLambdaArn",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -442,6 +447,51 @@ func TestRender_SsmConfigParameter(t *testing.T) {
 	} {
 		if !strings.Contains(s, `"`+key+`"`) {
 			t.Errorf("SSM parameter JSON missing key %q", key)
+		}
+	}
+}
+
+func TestRender_StatusLambdaPython(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	resources, ok := m["Resources"].(map[string]any)
+	if !ok {
+		t.Fatalf("Resources is not a map, got %T", m["Resources"])
+	}
+	fn, ok := resources["StatusLambda"].(map[string]any)
+	if !ok {
+		t.Fatalf("StatusLambda is not a map, got %T", resources["StatusLambda"])
+	}
+	props, ok := fn["Properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("StatusLambda.Properties is not a map, got %T", fn["Properties"])
+	}
+	code, ok := props["Code"].(map[string]any)
+	if !ok {
+		t.Fatalf("StatusLambda.Properties.Code is not a map, got %T", props["Code"])
+	}
+	zipfile, ok := code["ZipFile"].(string)
+	if !ok {
+		t.Fatalf("StatusLambda.Properties.Code.ZipFile is not a string, got %T", code["ZipFile"])
+	}
+	if !strings.HasPrefix(zipfile, "import json") {
+		t.Errorf("ZipFile does not start with 'import json'; first 40 chars: %q", zipfile[:min(40, len(zipfile))])
+	}
+	for _, sub := range []string{
+		"by-instance",
+		"run-result.json",
+		"total_cost_usd",
+		`TERMINAL = {"success", "failed", "killed"}`,
+	} {
+		if !strings.Contains(zipfile, sub) {
+			t.Errorf("ZipFile missing expected substring %q", sub)
 		}
 	}
 }

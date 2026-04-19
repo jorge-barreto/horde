@@ -1975,7 +1975,7 @@ esac
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
-	if !strings.Contains(string(stderr), "warning: checking run errrun00001") {
+	if !strings.Contains(string(stderr), "warning: finalizing run errrun00001") {
 		t.Errorf("stderr missing warning for errrun00001: %s", string(stderr))
 	}
 	if !strings.Contains(string(stdout), "errrun00002") {

@@ -386,6 +386,7 @@ For the `aws-ecs` provider, all config is discovered from a single SSM parameter
   "log_stream_prefix": "ecs",
   "artifacts_bucket": "my-horde-artifacts",
   "runs_table": "horde-runs",
+  "ecr_repo_uri": "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj",
   "max_concurrent": 5,
   "default_timeout_minutes": 1440
 }

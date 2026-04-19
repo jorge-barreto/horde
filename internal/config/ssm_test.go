@@ -24,6 +24,7 @@ func validHordeFields() map[string]interface{} {
 		"log_stream_prefix":       "ecs",
 		"artifacts_bucket":        "my-horde-artifacts",
 		"runs_table":              "horde-runs",
+		"ecr_repo_uri":            "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj",
 		"max_concurrent":          5,
 		"default_timeout_minutes": 1440,
 	}
@@ -233,6 +234,9 @@ func TestParseHordeConfig_Valid(t *testing.T) {
 	if cfg.RunsTable != "horde-runs" {
 		t.Errorf("RunsTable = %q, want %q", cfg.RunsTable, "horde-runs")
 	}
+	if cfg.EcrRepoURI != "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj" {
+		t.Errorf("EcrRepoURI = %q, want %q", cfg.EcrRepoURI, "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj")
+	}
 	if cfg.MaxConcurrent != 5 {
 		t.Errorf("MaxConcurrent = %d, want 5", cfg.MaxConcurrent)
 	}
@@ -252,6 +256,7 @@ func TestParseHordeConfig_JSONRoundTrip(t *testing.T) {
 		LogStreamPrefix:       "ecs",
 		ArtifactsBucket:       "my-horde-artifacts",
 		RunsTable:             "horde-runs",
+		EcrRepoURI:            "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj",
 		MaxConcurrent:         5,
 		DefaultTimeoutMinutes: 1440,
 	}
@@ -266,7 +271,7 @@ func TestParseHordeConfig_JSONRoundTrip(t *testing.T) {
 	wantKeys := []string{
 		"cluster_arn", "task_definition_arn", "subnets", "security_group",
 		"log_group", "log_stream_prefix", "artifacts_bucket", "runs_table",
-		"max_concurrent", "default_timeout_minutes",
+		"ecr_repo_uri", "max_concurrent", "default_timeout_minutes",
 	}
 	for _, key := range wantKeys {
 		if _, ok := m[key]; !ok {
@@ -326,6 +331,11 @@ func TestParseHordeConfig_MissingFields(t *testing.T) {
 			name:    "missing runs_table",
 			mutate:  func(m map[string]interface{}) { delete(m, "runs_table") },
 			wantErr: []string{"missing required fields: runs_table"},
+		},
+		{
+			name:    "missing ecr_repo_uri",
+			mutate:  func(m map[string]interface{}) { delete(m, "ecr_repo_uri") },
+			wantErr: []string{"missing required fields: ecr_repo_uri"},
 		},
 		{
 			name: "multiple missing",
@@ -485,6 +495,7 @@ func TestHordeConfig_Validate_AllFieldsPresent(t *testing.T) {
 		LogStreamPrefix:       "ecs",
 		ArtifactsBucket:       "my-bucket",
 		RunsTable:             "horde-runs",
+		EcrRepoURI:            "123.dkr.ecr.us-east-1.amazonaws.com/horde-x",
 		MaxConcurrent:         1,
 		DefaultTimeoutMinutes: 1,
 	}
@@ -504,6 +515,7 @@ func TestHordeConfig_Validate_AssignPublicIp(t *testing.T) {
 		LogStreamPrefix:       "ecs",
 		ArtifactsBucket:       "my-bucket",
 		RunsTable:             "horde-runs",
+		EcrRepoURI:            "123.dkr.ecr.us-east-1.amazonaws.com/horde-x",
 		MaxConcurrent:         1,
 		DefaultTimeoutMinutes: 1,
 	}

@@ -121,6 +121,11 @@ type HordeConfig struct {
 	LogStreamPrefix       string   `json:"log_stream_prefix"`
 	ArtifactsBucket       string   `json:"artifacts_bucket"`
 	RunsTable             string   `json:"runs_table"`
+	// EcrRepoURI is the URI of the project's ECR repository (without a tag),
+	// e.g. "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj".
+	// Populated by the bootstrap CloudFormation stack and consumed by
+	// `horde push` to discover where to push the worker image.
+	EcrRepoURI            string   `json:"ecr_repo_uri"`
 	MaxConcurrent         int      `json:"max_concurrent"`
 	DefaultTimeoutMinutes int      `json:"default_timeout_minutes"`
 }
@@ -151,6 +156,9 @@ func (c *HordeConfig) Validate() error {
 	}
 	if c.RunsTable == "" {
 		missing = append(missing, "runs_table")
+	}
+	if c.EcrRepoURI == "" {
+		missing = append(missing, "ecr_repo_uri")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("validating horde config: missing required fields: %s", strings.Join(missing, ", "))

@@ -30,7 +30,9 @@ RUN useradd -m -u 1000 -s /bin/bash horde \
 USER horde
 WORKDIR /home/horde
 
-RUN curl -fsSL https://claude.ai/install.sh | bash \
+# Pinned Claude CLI version for reproducible builds. Bump with intent.
+ARG CLAUDE_VERSION=2.1.114
+RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_VERSION}" \
     && test -x /home/horde/.local/bin/claude
 ENV PATH="/home/horde/.local/bin:${PATH}"
 

@@ -946,6 +946,30 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       },
       "Type": "AWS::EC2::Subnet",
     },
+    "HordeWorkerSecurityGroupC1335488": {
+      "Properties": {
+        "GroupDescription": "horde worker egress-only (443 outbound for git/api/ecr)",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "https outbound",
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-worker-sg",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
   },
   "Rules": {
     "CheckBootstrapVersion": {

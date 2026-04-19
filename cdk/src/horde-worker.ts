@@ -106,6 +106,12 @@ export class HordeWorker extends Construct {
    */
   public readonly runsTable: dynamodb.Table;
 
+  /**
+   * Egress-only security group attached to the worker task at `RunTask` time
+   * by the CLI. The SG ID is published in SSM so the CLI can find it.
+   */
+  public readonly workerSecurityGroup: ec2.SecurityGroup;
+
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
 
@@ -189,6 +195,19 @@ export class HordeWorker extends Construct {
       cdk.Tags.of(bucket).add("Name", `horde-${slug}-artifacts`);
       this.artifactsBucket = bucket;
     }
+
+    // Egress-only worker SG. allowAllOutbound:false then a single 443 rule.
+    this.workerSecurityGroup = new ec2.SecurityGroup(this, "WorkerSecurityGroup", {
+      vpc: this.vpc,
+      description: "horde worker egress-only (443 outbound for git/api/ecr)",
+      allowAllOutbound: false,
+    });
+    this.workerSecurityGroup.addEgressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(443),
+      "https outbound",
+    );
+    cdk.Tags.of(this.workerSecurityGroup).add("Name", `horde-${slug}-worker-sg`);
 
     this.runsTable = new dynamodb.Table(this, "RunsTable", {
       tableName: `horde-runs-${slug}`,

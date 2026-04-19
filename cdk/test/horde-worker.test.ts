@@ -255,6 +255,27 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     }
   });
 
+  it("creates a worker security group with no ingress and only 443 egress", () => {
+    const t = synth();
+    const sgs = t.findResources("AWS::EC2::SecurityGroup");
+    const workerSgs = Object.values(sgs).filter((sg) =>
+      JSON.stringify(sg.Properties.Tags ?? []).includes("horde-test-worker-sg"),
+    );
+    expect(workerSgs).toHaveLength(1);
+    const sg = workerSgs[0];
+
+    // No ingress rules at all.
+    expect(sg.Properties.SecurityGroupIngress ?? []).toEqual([]);
+
+    // Exactly one egress: 443 over TCP to 0.0.0.0/0.
+    const egress = sg.Properties.SecurityGroupEgress ?? [];
+    expect(egress).toHaveLength(1);
+    expect(egress[0].IpProtocol).toBe("tcp");
+    expect(egress[0].FromPort).toBe(443);
+    expect(egress[0].ToPort).toBe(443);
+    expect(egress[0].CidrIp).toBe("0.0.0.0/0");
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

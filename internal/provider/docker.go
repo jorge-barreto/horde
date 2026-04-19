@@ -354,7 +354,11 @@ func mapExitCode(code int) store.Status {
 	}
 }
 
-type dockerRunResult struct {
+// RunResult is the subset of orc's run-result.json that horde reads when
+// finalizing a run. Both the Docker and ECS providers, plus the kill command,
+// parse the same fields with the same JSON tags — kept in one place to
+// prevent drift.
+type RunResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
 }
@@ -444,7 +448,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			resultPath := filepath.Join(resultsDir, AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			var cost *float64
 			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr dockerRunResult
+				var rr RunResult
 				if json.Unmarshal(data, &rr) == nil {
 					cost = rr.TotalCostUSD
 				}
@@ -470,7 +474,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			var exitCode *int
 			resultPath := filepath.Join(resultsDir, AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr dockerRunResult
+				var rr RunResult
 				if json.Unmarshal(data, &rr) == nil {
 					cost = rr.TotalCostUSD
 					exitCode = rr.ExitCode
@@ -514,7 +518,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		// neither the marker nor docker inspect reflects orc's result.
 		var cost *float64
 		if data, err := os.ReadFile(resultPath); err == nil {
-			var rr dockerRunResult
+			var rr RunResult
 			if json.Unmarshal(data, &rr) == nil {
 				cost = rr.TotalCostUSD
 			}
@@ -568,7 +572,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 			resultPath := filepath.Join(workspaceDir, ".orc", AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 			if data, err := os.ReadFile(resultPath); err == nil {
-				var rr dockerRunResult
+				var rr RunResult
 				if json.Unmarshal(data, &rr) == nil {
 					cost = rr.TotalCostUSD
 				}

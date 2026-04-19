@@ -636,7 +636,7 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				// Best-effort: read run-result.json for cost and exit code
 				resultPath := filepath.Join(resultsDir, provider.AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
 				if data, err := os.ReadFile(resultPath); err == nil {
-					var rr runResult
+					var rr provider.RunResult
 					if json.Unmarshal(data, &rr) == nil {
 						cost = rr.TotalCostUSD
 						exitCode = rr.ExitCode
@@ -832,11 +832,6 @@ include completed, failed, and killed runs.`,
 			return nil
 		},
 	}
-}
-
-type runResult struct {
-	TotalCostUSD *float64 `json:"total_cost_usd"`
-	ExitCode     *int     `json:"exit_code"`
 }
 
 func cleanCmd() *cli.Command {

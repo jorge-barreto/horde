@@ -55,6 +55,12 @@ var topics = []Topic{
 		Summary: "How to run the end-to-end ECS test suite against a real AWS account",
 		Content: topicECSIntegration,
 	},
+	{
+		Name:    "cdk",
+		Title:   "CDK Construct (@horde/cdk)",
+		Summary: "Provision AWS infrastructure from your existing CDK app",
+		Content: topicCDK,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -685,4 +691,89 @@ What's NOT tested end-to-end
 - 'horde logs --follow' in the integration suite. The CLI implementation
   exists and works manually; an automated streaming-mode test is future
   work.
+`
+
+const topicCDK = `CDK Construct (@horde/cdk)
+==========================
+
+Teams that already use AWS CDK can import the @horde/cdk npm package and
+provision every AWS resource horde needs from inside their own CDK app.
+This is the alternative to 'horde bootstrap' (which uses CloudFormation
+directly).
+
+Install
+-------
+
+    npm install @horde/cdk aws-cdk-lib constructs
+
+Both aws-cdk-lib (^2) and constructs (^10) are peer dependencies.
+
+Usage
+-----
+
+    import { App, Stack } from "aws-cdk-lib";
+    import * as ecr from "aws-cdk-lib/aws-ecr";
+    import * as ecs from "aws-cdk-lib/aws-ecs";
+    import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+    import { HordeWorker } from "@horde/cdk";
+
+    const app = new App();
+    const stack = new Stack(app, "HordeStack");
+
+    const repo = new ecr.Repository(stack, "WorkerImage", {
+      repositoryName: "horde-my-org-my-repo",
+    });
+
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "my-org-my-repo",
+      workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(
+          stack, "ClaudeToken", "horde/claude-code-oauth-token"),
+        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(
+          stack, "GitToken", "horde/git-token"),
+      },
+    });
+
+What it provisions
+------------------
+
+Same surface as 'horde bootstrap' (CloudFormation flavor):
+
+  - VPC with public + private subnets and one NAT gateway (or BYO via
+    the 'vpc' prop)
+  - ECS Fargate cluster + Fargate task definition (1 vCPU / 4 GB by
+    default; tunable via 'cpu' / 'memoryMiB' props)
+  - DynamoDB horde-runs-<slug> table with 4 GSIs (by-repo, by-ticket,
+    by-status, by-instance)
+  - S3 artifacts bucket with public-access blocked, SSE-S3, and a
+    deny-non-TLS bucket policy (or BYO via 'artifactsBucket' prop)
+  - Egress-only worker security group (443 outbound)
+  - SSM /horde/<slug>/config parameter consumed by the CLI
+  - EventBridge rule + status-sync Lambda (Node 20) that updates run
+    rows in DynamoDB on STOPPED ECS task events
+  - Scoped IAM task role, execution role, status Lambda role
+  - Managed policy for the horde CLI, exposed as CfnOutput
+    CliUserManagedPolicyArn — attach to the IAM principals that
+    will run the CLI
+
+Config defaults
+---------------
+
+  cpu                       1024 (1 vCPU)
+  memoryMiB                 4096 (4 GB)
+  maxConcurrent             5
+  defaultTimeoutMinutes     1440 (24 h)
+  logRetentionDays          30
+  ssmParameterPath          /horde/<projectSlug>/config
+
+CDK vs. CloudFormation
+----------------------
+
+Use 'horde bootstrap' if you don't already use CDK and want a single
+'horde bootstrap deploy' command. Use @horde/cdk if you have an existing
+CDK app and want the construct in your own pipeline. Both produce the
+same SSM JSON shape (internal/config/ssm.go::HordeConfig), so the CLI
+can't tell them apart.
 `

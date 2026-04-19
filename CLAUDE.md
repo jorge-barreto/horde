@@ -52,6 +52,7 @@ go test -v -count=1 -timeout 30m -run TestECS ./test/integration/
 - `internal/docs/` — Built-in documentation system (`horde docs <topic>`)
 - `internal/runid/` — Run ID generation (12-char alphanumeric via crypto/rand)
 - `docker/` — Worker Dockerfile, entrypoint.sh, git-askpass.sh (embedded into binary via `workerfiles.go`)
+- `cdk/` — `@horde/cdk` npm package: TypeScript CDK construct (`HordeWorker`) + status-sync Lambda. Alternative to `horde bootstrap` for teams with an existing CDK app. Emits the same SSM JSON shape consumed by `internal/config/ssm.go`. (v0.2)
 - `worker/` — Optional project-specific Dockerfile extending base image
 - `test/integration/` — End-to-end tests against real Docker containers
 

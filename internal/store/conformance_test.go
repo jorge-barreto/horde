@@ -924,6 +924,12 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			if r.Ticket == "" {
 				t.Error("run has empty Ticket")
 			}
+			// ListActive contract: only pending or running rows are returned.
+			// Terminal statuses (success/failed/killed) leaking through here
+			// would corrupt CountActive and break duplicate-ticket protection.
+			if r.Status != StatusPending && r.Status != StatusRunning {
+				t.Errorf("run %s status: got %q, want pending or running", r.ID, r.Status)
+			}
 		}
 	})
 

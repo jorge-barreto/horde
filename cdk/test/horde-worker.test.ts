@@ -276,6 +276,65 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     expect(egress[0].CidrIp).toBe("0.0.0.0/0");
   });
 
+  it("writes an SSM String parameter at /horde/<slug>/config by default", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::SSM::Parameter", {
+      Name: "/horde/test/config",
+      Type: "String",
+    });
+  });
+
+  it("respects a caller-provided ssmParameterPath", () => {
+    const app = new App();
+    const stack = new Stack(app, "S2", { env: { account: "111111111111", region: "us-east-1" } });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "test",
+      workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
+        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+      },
+      ssmParameterPath: "/custom/horde/cfg",
+    });
+    Template.fromStack(stack).hasResourceProperties("AWS::SSM::Parameter", {
+      Name: "/custom/horde/cfg",
+    });
+  });
+
+  it("SSM config JSON references every required HordeConfig field", () => {
+    const t = synth();
+    const params = t.findResources("AWS::SSM::Parameter");
+    const cfg = Object.values(params).find((p) => p.Properties.Name === "/horde/test/config");
+    if (!cfg) throw new Error("expected /horde/test/config parameter");
+    // The Value is an Fn::Join over alternating literal and token segments.
+    // Stringify everything and check each key appears in the literal pieces.
+    const valueStr = JSON.stringify(cfg.Properties.Value);
+    // The template's literal string fragments are JSON-escaped (\" becomes \\\")
+    // when passed through JSON.stringify, so each key reads as \"cluster_arn\".
+    for (const key of [
+      "cluster_arn",
+      "task_definition_arn",
+      "subnets",
+      "security_group",
+      "assign_public_ip",
+      "log_group",
+      "log_stream_prefix",
+      "artifacts_bucket",
+      "runs_table",
+      "ecr_repo_uri",
+      "max_concurrent",
+      "default_timeout_minutes",
+    ]) {
+      expect(valueStr).toContain(`\\"${key}\\"`);
+    }
+    expect(valueStr).toContain('\\"DISABLED\\"');
+    expect(valueStr).toContain('\\"ecs\\"');
+    expect(valueStr).toContain('\\"max_concurrent\\":5');
+    expect(valueStr).toContain('\\"default_timeout_minutes\\":1440');
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

@@ -5,6 +5,7 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import { Construct } from "constructs";
 
 import type { HordeWorkerProps } from "./horde-worker-props";
@@ -111,6 +112,12 @@ export class HordeWorker extends Construct {
    * by the CLI. The SG ID is published in SSM so the CLI can find it.
    */
   public readonly workerSecurityGroup: ec2.SecurityGroup;
+
+  /**
+   * SSM String parameter holding the JSON config blob the CLI reads at
+   * startup. The shape matches `internal/config/ssm.go::HordeConfig`.
+   */
+  public readonly configParameter: ssm.StringParameter;
 
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
@@ -266,6 +273,46 @@ export class HordeWorker extends Construct {
         ),
         GIT_TOKEN: ecs.Secret.fromSecretsManager(props.secrets.GIT_TOKEN),
       },
+    });
+
+    // SSM config parameter consumed by the horde CLI. JSON keys must match
+    // `internal/config/ssm.go::HordeConfig` exactly.
+    const ssmPath = props.ssmParameterPath ?? `/horde/${slug}/config`;
+    const privateSubnetIds = this.vpc.selectSubnets({
+      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+    }).subnetIds;
+    const maxConcurrent = props.maxConcurrent ?? 5;
+    const defaultTimeoutMinutes = props.defaultTimeoutMinutes ?? 1440;
+
+    const subnetsJson = cdk.Fn.join("", [
+      "[",
+      cdk.Fn.join(",", privateSubnetIds.map((id) => cdk.Fn.join("", ['"', id, '"']))),
+      "]",
+    ]);
+    const configJson = cdk.Fn.join("", [
+      '{"cluster_arn":"',
+      this.cluster.clusterArn,
+      '","task_definition_arn":"',
+      this.taskDefinition.taskDefinitionArn,
+      '","subnets":',
+      subnetsJson,
+      ',"security_group":"',
+      this.workerSecurityGroup.securityGroupId,
+      '","assign_public_ip":"DISABLED","log_group":"',
+      this.logGroup.logGroupName,
+      '","log_stream_prefix":"ecs","artifacts_bucket":"',
+      this.artifactsBucket.bucketName,
+      '","runs_table":"',
+      this.runsTable.tableName,
+      '","ecr_repo_uri":"',
+      props.ecrRepository.repositoryUri,
+      `","max_concurrent":${maxConcurrent},"default_timeout_minutes":${defaultTimeoutMinutes}}`,
+    ]);
+
+    this.configParameter = new ssm.StringParameter(this, "ConfigParameter", {
+      parameterName: ssmPath,
+      stringValue: configJson,
+      description: `horde CLI configuration for project ${slug}`,
     });
   }
 }

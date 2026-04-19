@@ -432,6 +432,35 @@ Resources:
               Bool:
                 "aws:SecureTransport": "false"
 
+  HordeConfigParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "/horde/{{.Slug}}/config"
+      Type: String
+      Description: "horde CLI configuration for project {{.Slug}}"
+      Value:
+        Fn::Sub:
+          - |
+            {"cluster_arn":"${ClusterArn}","task_definition_arn":"${TaskDefArn}","subnets":["${PrivateSubnet1Id}","${PrivateSubnet2Id}"],"security_group":"${SecurityGroupId}","assign_public_ip":"DISABLED","log_group":"${LogGroupName}","log_stream_prefix":"ecs","artifacts_bucket":"${BucketName}","runs_table":"${RunsTableName}","ecr_repo_uri":"${EcrUri}","max_concurrent":5,"default_timeout_minutes":1440}
+          - ClusterArn:
+              Fn::GetAtt: [EcsCluster, Arn]
+            TaskDefArn:
+              Ref: WorkerTaskDefinition
+            PrivateSubnet1Id:
+              Ref: PrivateSubnet1
+            PrivateSubnet2Id:
+              Ref: PrivateSubnet2
+            SecurityGroupId:
+              Ref: WorkerSecurityGroup
+            LogGroupName:
+              Ref: LogGroup
+            BucketName:
+              Ref: ArtifactsBucket
+            RunsTableName:
+              Ref: RunsTable
+            EcrUri:
+              Fn::GetAtt: [EcrRepository, RepositoryUri]
+
   CliUserManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -581,6 +610,12 @@ Outputs:
       Ref: GitTokenSecret
     Export:
       Name: "horde-{{.Slug}}-git-token-arn"
+
+  SsmConfigPath:
+    Value:
+      Ref: HordeConfigParameter
+    Export:
+      Name: "horde-{{.Slug}}-ssm-config-path"
 
   CliUserManagedPolicyArn:
     Value:

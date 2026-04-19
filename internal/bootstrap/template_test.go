@@ -136,6 +136,7 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"ArtifactsBucket",
 		"ArtifactsBucketPolicy",
 		"CliUserManagedPolicy",
+		"HordeConfigParameter",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -221,6 +222,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 		"AnthropicApiKeySecretArn",
 		"GitTokenSecretArn",
 		"CliUserManagedPolicyArn",
+		"SsmConfigPath",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -419,6 +421,27 @@ func TestRender_CliPolicyStatements(t *testing.T) {
 	for sid, seen := range wantSids {
 		if !seen {
 			t.Errorf("CliUserManagedPolicy missing statement with Sid %q", sid)
+		}
+	}
+}
+
+func TestRender_SsmConfigParameter(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `Name: "/horde/myproj/config"`) {
+		t.Errorf("SSM parameter name not found in rendered output")
+	}
+	for _, key := range []string{
+		"cluster_arn", "task_definition_arn", "subnets", "security_group",
+		"assign_public_ip", "log_group", "log_stream_prefix", "artifacts_bucket",
+		"runs_table", "ecr_repo_uri", "max_concurrent", "default_timeout_minutes",
+	} {
+		if !strings.Contains(s, `"`+key+`"`) {
+			t.Errorf("SSM parameter JSON missing key %q", key)
 		}
 	}
 }

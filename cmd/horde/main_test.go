@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -3599,14 +3600,11 @@ func TestResults_JSON_CorruptJSON(t *testing.T) {
 	}
 	st.Close()
 
-	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "results", "--json", runID})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "results", "--json", runID})
+	out := buf.Bytes()
 
 	if runErr != nil {
 		t.Fatalf("results --json returned error on corrupt JSON: %v", runErr)
@@ -3813,17 +3811,11 @@ func TestStatus_JSON_CompletedRun(t *testing.T) {
 	}
 	st.Close()
 
-	origStdout := os.Stdout
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating pipe: %v", err)
-	}
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
+	out := buf.Bytes()
 
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
@@ -3893,17 +3885,11 @@ esac
 	}
 	st.Close()
 
-	origStdout := os.Stdout
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating pipe: %v", err)
-	}
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
+	out := buf.Bytes()
 
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
@@ -3949,17 +3935,11 @@ func TestList_JSON_ActiveOnly(t *testing.T) {
 	}
 	st.Close()
 
-	origStdout := os.Stdout
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating pipe: %v", err)
-	}
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "list"})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "list"})
+	out := buf.Bytes()
 
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
@@ -4005,17 +3985,11 @@ func TestList_JSON_Empty(t *testing.T) {
 	}
 	st.Close()
 
-	origStdout := os.Stdout
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating pipe: %v", err)
-	}
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "list"})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "list"})
+	out := buf.Bytes()
 
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
@@ -4055,14 +4029,11 @@ func TestResults_JSON_CompletedWithResults(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(resultDir, "run-result.json"), []byte(resultJSON), 0o644); err != nil {
 		t.Fatalf("writing run-result.json: %v", err)
 	}
-	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	out := buf.Bytes()
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
@@ -4113,14 +4084,11 @@ func TestResults_JSON_StillRunning(t *testing.T) {
 		t.Fatalf("creating run: %v", err)
 	}
 	st.Close()
-	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	out := buf.Bytes()
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
@@ -4159,14 +4127,11 @@ func TestResults_JSON_MissingRunResult(t *testing.T) {
 		t.Fatalf("creating run: %v", err)
 	}
 	st.Close()
-	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
-	os.Stdout = pw
-	defer func() { os.Stdout = origStdout }()
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
-	pw.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(pr)
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	out := buf.Bytes()
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}

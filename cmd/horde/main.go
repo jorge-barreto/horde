@@ -43,6 +43,20 @@ func main() {
 	}
 }
 
+// setOutputs assigns w to the root command's Writer/ErrWriter and to every
+// subcommand. urfave/cli v3 initializes a subcommand's nil Writer to
+// os.Stdout independently of the parent, so simply setting Writer on the
+// root has no effect on subcommand output. Tests use this to capture
+// JSON output via a bytes.Buffer instead of swapping os.Stdout.
+func setOutputs(app *cli.Command, w io.Writer) {
+	app.Writer = w
+	app.ErrWriter = w
+	for _, sub := range app.Commands {
+		sub.Writer = w
+		sub.ErrWriter = w
+	}
+}
+
 func newApp() *cli.Command {
 	return &cli.Command{
 		Name:  "horde",
@@ -458,7 +472,7 @@ result collection.`,
 				}
 			}
 			if cmd.Bool("json") {
-				return writeJSON(statusToV1(run))
+				return writeJSONTo(cmd.Writer, statusToV1(run))
 			}
 			printRunStatus(run)
 			return nil
@@ -655,7 +669,7 @@ information if the result file is missing (e.g., orc crashed early).`,
 			}
 			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
 				if cmd.Bool("json") {
-					return writeJSON(partialResultsToV1(run))
+					return writeJSONTo(cmd.Writer, partialResultsToV1(run))
 				}
 				fmt.Printf("Run %s is still in progress (status: %s)\n", run.ID, run.Status)
 				return nil
@@ -669,7 +683,7 @@ information if the result file is missing (e.g., orc crashed early).`,
 			})
 			if err != nil {
 				if cmd.Bool("json") {
-					return writeJSON(partialResultsToV1(run))
+					return writeJSONTo(cmd.Writer, partialResultsToV1(run))
 				}
 				printPartialResults(run)
 				return nil
@@ -677,13 +691,13 @@ information if the result file is missing (e.g., orc crashed early).`,
 			var result fullRunResult
 			if err := json.Unmarshal(data, &result); err != nil {
 				if cmd.Bool("json") {
-					return writeJSON(partialResultsToV1(run))
+					return writeJSONTo(cmd.Writer, partialResultsToV1(run))
 				}
 				printPartialResults(run)
 				return nil
 			}
 			if cmd.Bool("json") {
-				return writeJSON(fullResultsToV1(run, &result))
+				return writeJSONTo(cmd.Writer, fullResultsToV1(run, &result))
 			}
 			printFullResults(run, &result)
 			return nil
@@ -756,7 +770,7 @@ include completed, failed, and killed runs.`,
 			}
 
 			if cmd.Bool("json") {
-				return writeJSON(listToV1(runs))
+				return writeJSONTo(cmd.Writer, listToV1(runs))
 			}
 
 			if len(runs) == 0 {

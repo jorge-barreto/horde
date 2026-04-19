@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/jorge-barreto/horde/internal/store"
@@ -142,8 +142,11 @@ func partialResultsToV1(run *store.Run) ResultsV1 {
 	}
 }
 
-func writeJSON(v interface{}) error {
-	enc := json.NewEncoder(os.Stdout)
+// writeJSONTo encodes v as indented JSON to the given writer. Tests pass a
+// bytes.Buffer; production call sites pass cmd.Writer (defaults to os.Stdout)
+// so JSON output never depends on swapping the global os.Stdout.
+func writeJSONTo(w io.Writer, v interface{}) error {
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
 		return fmt.Errorf("encoding JSON: %w", err)

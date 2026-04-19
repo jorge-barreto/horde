@@ -214,6 +214,19 @@ func (d *ecsDriver) TearDown() {
 
 // newECSHarness builds an ECS-backed harness against the deployed stack for
 // the horde repo. It skips unless -short is off and HORDE_E2E_ECS=1.
+//
+// Backend selection via HORDE_E2E_ECS_BACKEND env var:
+//   - "" or "cf" (default): the CloudFormation bootstrap stack at the
+//     `jorge-barreto-horde` slug.
+//   - "cdk": the CDK-deployed e2e stack. Reads the SSM path from the state
+//     file written by TestECSCDK_Bringup. The workspace's git remote still
+//     points at the real horde repo so the worker can git-fetch; the SSM
+//     lookup is redirected via HORDE_SSM_PATH.
+//
+// The backend switch lets the entire TestECS_* suite run against either
+// stack with no other changes, giving symmetric coverage of every CLI
+// surface (launch/status/logs/kill/list/lifecycle/hydrate) against both
+// the CF and CDK deployments.
 func newECSHarness(t *testing.T) *harness {
 	t.Helper()
 	if testing.Short() {
@@ -222,7 +235,20 @@ func newECSHarness(t *testing.T) *harness {
 	if os.Getenv("HORDE_E2E_ECS") != "1" {
 		t.Skip("ECS integration: HORDE_E2E_ECS != 1")
 	}
-	return newECSHarnessForRepo(t, ecsHarnessRepoURL)
+	switch os.Getenv("HORDE_E2E_ECS_BACKEND") {
+	case "", "cf":
+		return newECSHarnessForRepo(t, ecsHarnessRepoURL)
+	case "cdk":
+		s, err := readCDKStateSoft()
+		if err != nil {
+			t.Skipf("ECS integration (backend=cdk): reading %s: %v (run TestECSCDK_Bringup first)", cdkE2EStateFile, err)
+		}
+		// Workspace remote = real horde (clonable); SSM path = CDK stack.
+		return newECSHarnessForRepoWithSSM(t, ecsHarnessRepoURL, s.SSMPath)
+	default:
+		t.Fatalf("unknown HORDE_E2E_ECS_BACKEND=%q (want \"cf\" or \"cdk\")", os.Getenv("HORDE_E2E_ECS_BACKEND"))
+		return nil
+	}
 }
 
 // newECSHarnessForRepo is the same as newECSHarness but parameterized on the

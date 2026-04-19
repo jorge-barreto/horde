@@ -800,6 +800,31 @@ few cents of Fargate time.
 Teardown empties the ECR repo + S3 artifacts bucket, then 'cdk destroy'.
 Idempotent: works even if the state file is missing.
 
+Full-suite verification (recommended before shipping a release)
+---------------------------------------------------------------
+
+Smoke alone exercises one happy-path workflow. To run every ECS test
+('TestECSLaunch*', 'TestECSStatus*', 'TestECSLogs*', 'TestECSKill*',
+'TestECSList*', 'TestECSLifecycle*', 'TestECSHydrate*') against the CDK
+stack, set HORDE_E2E_ECS_BACKEND=cdk in addition to HORDE_E2E_ECS=1:
+
+    HORDE_E2E_CDK=1 go test -v -timeout 20m -run TestECSCDK_Bringup    ./test/integration/
+    HORDE_E2E_ECS=1 HORDE_E2E_ECS_BACKEND=cdk go test -v -timeout 30m \
+        -run TestECS -skip TestECSSmoke ./test/integration/
+    HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Teardown   ./test/integration/
+
+This runs every CLI surface (launch/status/logs/kill/list/hydrate/
+lifecycle) through the CDK-deployed stack, giving symmetric coverage
+with the CF bootstrap path. 'TestECSSmoke' is skipped because it
+hardcodes the CF slug internally; all other TestECS_* tests honor the
+backend switch.
+
+Backend selection via HORDE_E2E_ECS_BACKEND:
+
+    (unset) or cf    Default. CloudFormation bootstrap stack.
+    cdk              CDK-deployed stack. Requires TestECSCDK_Bringup
+                     to have populated /tmp/horde-cdk-e2e-state.json.
+
 Cost: this stack runs its own NAT Gateway (~$32/mo idle) since it can't
 share infrastructure with the bootstrap CF stack. Always tear down when
 you're done.

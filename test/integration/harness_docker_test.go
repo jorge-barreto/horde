@@ -179,11 +179,12 @@ func newHarness(t *testing.T) *harness {
 	copyFile(t, filepath.Join(integrationDir, "worker-dockerfile.tmpl"), filepath.Join(workerDir, "Dockerfile"))
 
 	return &harness{
-		t:        t,
-		homeDir:  homeDir,
-		workDir:  workDir,
-		repoRoot: repoRoot,
-		driver:   driver,
+		t:             t,
+		homeDir:       homeDir,
+		workDir:       workDir,
+		repoRoot:      repoRoot,
+		driver:        driver,
+		hordeProvider: "docker",
 	}
 }
 

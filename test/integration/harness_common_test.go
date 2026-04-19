@@ -37,11 +37,29 @@ type instanceDriver interface {
 // harness is the shared test harness. Provider-specific behavior is delegated
 // to the driver field; provider-neutral methods live on this struct.
 type harness struct {
-	t        *testing.T
-	homeDir  string // unique temp HOME for this test
-	workDir  string // project directory (cwd for horde commands)
-	repoRoot string // horde repo root
-	driver   instanceDriver
+	t             *testing.T
+	homeDir       string // unique temp HOME for this test
+	workDir       string // project directory (cwd for horde commands)
+	repoRoot      string // horde repo root
+	driver        instanceDriver
+	hordeProvider string // "docker" or "aws-ecs"; prepended to every horde invocation
+}
+
+// TrackRunForCleanup registers a run for driver-specific teardown. For the
+// ECS driver this appends to the DynamoDB delete list; for Docker this is a
+// no-op (SQLite lives in the temp HOME that gets removed wholesale).
+func (h *harness) TrackRunForCleanup(runID string) {
+	if d, ok := h.driver.(*ecsDriver); ok {
+		d.runsToClean = append(d.runsToClean, runID)
+	}
+}
+
+// providerArgs returns the --provider flag set to h.hordeProvider (if any).
+func (h *harness) providerArgs() []string {
+	if h.hordeProvider == "" {
+		return nil
+	}
+	return []string{"--provider", h.hordeProvider}
 }
 
 // copyFile copies a single file from src to dst.
@@ -62,13 +80,43 @@ func (h *harness) env() []string {
 	// Override HOME so horde uses our temp store/workspace.
 	// Override HORDE_DOCKER_IMAGE so tests don't clobber the real project image.
 	filtered := env[:0]
+	hasConfigFile := false
+	hasCredsFile := false
 	for _, e := range env {
-		if strings.HasPrefix(e, "HOME=") || strings.HasPrefix(e, "HORDE_DOCKER_IMAGE=") {
+		switch {
+		case strings.HasPrefix(e, "HOME="):
 			continue
+		case strings.HasPrefix(e, "HORDE_DOCKER_IMAGE="):
+			continue
+		case strings.HasPrefix(e, "AWS_CONFIG_FILE="):
+			hasConfigFile = true
+		case strings.HasPrefix(e, "AWS_SHARED_CREDENTIALS_FILE="):
+			hasCredsFile = true
 		}
 		filtered = append(filtered, e)
 	}
-	return append(filtered, "HOME="+h.homeDir, "HORDE_DOCKER_IMAGE="+testImage)
+	filtered = append(filtered, "HOME="+h.homeDir, "HORDE_DOCKER_IMAGE="+testImage)
+
+	// For ECS we need the horde subprocess to reach AWS — keep the real
+	// user's AWS config/credentials and SSO cache discoverable under the
+	// overridden HOME. Docker runs ignore these vars, so it's harmless.
+	if h.hordeProvider == "aws-ecs" {
+		realHome, _ := os.UserHomeDir()
+		if realHome != "" {
+			if !hasConfigFile {
+				filtered = append(filtered, "AWS_CONFIG_FILE="+realHome+"/.aws/config")
+			}
+			if !hasCredsFile {
+				filtered = append(filtered, "AWS_SHARED_CREDENTIALS_FILE="+realHome+"/.aws/credentials")
+			}
+			fakeSSO := h.homeDir + "/.aws/sso"
+			if _, err := os.Stat(fakeSSO); os.IsNotExist(err) {
+				_ = os.MkdirAll(h.homeDir+"/.aws", 0o755)
+				_ = os.Symlink(realHome+"/.aws/sso", fakeSSO)
+			}
+		}
+	}
+	return filtered
 }
 
 // runHorde executes the horde binary with args, returning stdout and any error.
@@ -101,7 +149,7 @@ func (h *harness) runHordeFull(args ...string) (string, string, error) {
 // Launch runs horde launch and returns the run ID.
 func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string {
 	h.t.Helper()
-	args := []string{"--provider", "docker", "launch", "--timeout", timeout.String()}
+	args := append(h.providerArgs(), "launch", "--timeout", timeout.String())
 	if workflow != "" {
 		args = append(args, "--workflow", workflow)
 	}
@@ -122,10 +170,13 @@ func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string 
 		h.t.Fatalf("horde launch returned empty run ID; stdout: %s", out)
 	}
 
-	// Register cleanup to stop and remove the container
+	// Register this run for driver-level cleanup (ECS: delete dynamo row).
+	h.TrackRunForCleanup(runID)
+
+	// Register cleanup to stop and remove the container (Docker only).
 	h.t.Cleanup(func() {
 		cid := h.driver.InstanceID(runID)
-		if cid != "" {
+		if cid != "" && h.hordeProvider == "docker" {
 			exec.Command("docker", "rm", "-f", cid).Run()
 		}
 	})
@@ -136,7 +187,7 @@ func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string 
 // Status runs horde status and returns stdout.
 func (h *harness) Status(runID string) string {
 	h.t.Helper()
-	out, err := h.runHorde("--provider", "docker", "status", runID)
+	out, err := h.runHorde(append(h.providerArgs(), "status", runID)...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		stderr := ""
@@ -151,14 +202,14 @@ func (h *harness) Status(runID string) string {
 // Kill runs horde kill. Returns error (does not fatal) since some tests expect failure.
 func (h *harness) Kill(runID string) error {
 	h.t.Helper()
-	_, err := h.runHorde("--provider", "docker", "kill", runID)
+	_, err := h.runHorde(append(h.providerArgs(), "kill", runID)...)
 	return err
 }
 
 // List runs horde list --all and returns stdout.
 func (h *harness) List() string {
 	h.t.Helper()
-	out, err := h.runHorde("--provider", "docker", "list", "--all")
+	out, err := h.runHorde(append(h.providerArgs(), "list", "--all")...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		stderr := ""
@@ -173,7 +224,7 @@ func (h *harness) List() string {
 // ListActive runs horde list (active only, no --all) and returns stdout.
 func (h *harness) ListActive() string {
 	h.t.Helper()
-	out, err := h.runHorde("--provider", "docker", "list")
+	out, err := h.runHorde(append(h.providerArgs(), "list")...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		stderr := ""
@@ -188,7 +239,7 @@ func (h *harness) ListActive() string {
 // Logs runs horde logs and returns stdout.
 func (h *harness) Logs(runID string) string {
 	h.t.Helper()
-	out, err := h.runHorde("--provider", "docker", "logs", runID)
+	out, err := h.runHorde(append(h.providerArgs(), "logs", runID)...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		stderr := ""
@@ -203,7 +254,7 @@ func (h *harness) Logs(runID string) string {
 // Results runs horde results and returns stdout.
 func (h *harness) Results(runID string) string {
 	h.t.Helper()
-	out, err := h.runHorde("--provider", "docker", "results", runID)
+	out, err := h.runHorde(append(h.providerArgs(), "results", runID)...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		stderr := ""
@@ -218,7 +269,7 @@ func (h *harness) Results(runID string) string {
 // Clean runs horde clean on a specific run. Returns stdout and any error.
 func (h *harness) Clean(runID string, purge bool) (string, error) {
 	h.t.Helper()
-	args := []string{"--provider", "docker", "clean"}
+	args := append(h.providerArgs(), "clean")
 	if purge {
 		args = append(args, "--purge")
 	}
@@ -229,7 +280,7 @@ func (h *harness) Clean(runID string, purge bool) (string, error) {
 // CleanAll runs horde clean (all terminal runs) and returns stdout.
 func (h *harness) CleanAll(purge bool) string {
 	h.t.Helper()
-	args := []string{"--provider", "docker", "clean"}
+	args := append(h.providerArgs(), "clean")
 	if purge {
 		args = append(args, "--purge")
 	}
@@ -248,7 +299,7 @@ func (h *harness) CleanAll(purge bool) string {
 // Retry runs horde retry and returns stdout and any error.
 func (h *harness) Retry(runID string, orcArgs ...string) (string, error) {
 	h.t.Helper()
-	args := []string{"--provider", "docker", "retry", runID}
+	args := append(h.providerArgs(), "retry", runID)
 	if len(orcArgs) > 0 {
 		args = append(args, "--")
 		args = append(args, orcArgs...)

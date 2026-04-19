@@ -168,7 +168,7 @@ func baseReq() DeployRequest {
 		StackName:       "horde-test",
 		Slug:            "test",
 		TemplateBody:    "AWSTemplateFormatVersion: '2010-09-09'\nResources: {}",
-		AnthropicAPIKey: "sk-test",
+		ClaudeCodeOauthToken: "sk-test",
 		GitToken:        "ghp_test",
 		PollInterval:    10 * time.Millisecond,
 	}

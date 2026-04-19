@@ -30,8 +30,8 @@ type DeployRequest struct {
 	StackName       string
 	Slug            string
 	TemplateBody    string
-	AnthropicAPIKey string
-	GitToken        string
+	ClaudeCodeOauthToken string
+	GitToken             string
 	// PollInterval controls how often DescribeStacks is called while waiting
 	// for a terminal status. If zero, defaults to 5s. Tests use a small value.
 	PollInterval time.Duration
@@ -55,8 +55,8 @@ func Deploy(ctx context.Context, client CFClient, req DeployRequest, w io.Writer
 	if strings.TrimSpace(req.TemplateBody) == "" {
 		return fmt.Errorf("deploy: template body is empty")
 	}
-	if req.AnthropicAPIKey == "" {
-		return fmt.Errorf("deploy: ANTHROPIC_API_KEY is empty")
+	if req.ClaudeCodeOauthToken == "" {
+		return fmt.Errorf("deploy: CLAUDE_CODE_OAUTH_TOKEN is empty")
 	}
 	if req.GitToken == "" {
 		return fmt.Errorf("deploy: GIT_TOKEN is empty")
@@ -69,8 +69,8 @@ func Deploy(ctx context.Context, client CFClient, req DeployRequest, w io.Writer
 
 	params := []cftypes.Parameter{
 		{
-			ParameterKey:     aws.String("AnthropicApiKey"),
-			ParameterValue:   aws.String(req.AnthropicAPIKey),
+			ParameterKey:     aws.String("ClaudeCodeOauthToken"),
+			ParameterValue:   aws.String(req.ClaudeCodeOauthToken),
 			UsePreviousValue: aws.Bool(false),
 		},
 		{

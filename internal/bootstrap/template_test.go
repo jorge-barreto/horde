@@ -76,7 +76,7 @@ func TestRender_ContainsSlug(t *testing.T) {
 		"horde-myproj-vpc-id",
 		"horde-myproj",
 		"/ecs/horde-worker-myproj",
-		"horde-myproj-anthropic-api-key",
+		"horde-myproj-claude-code-oauth-token",
 		"horde-myproj-git-token",
 		"horde-artifacts-myproj-",
 	}
@@ -131,7 +131,7 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"LogGroup",
 		"WorkerTaskDefinition",
 		"RunsTable",
-		"AnthropicApiKeySecret",
+		"ClaudeCodeOauthTokenSecret",
 		"GitTokenSecret",
 		"ArtifactsBucket",
 		"ArtifactsBucketPolicy",
@@ -223,7 +223,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 		"LogGroupName",
 		"RunsTableName",
 		"ArtifactsBucketName",
-		"AnthropicApiKeySecretArn",
+		"ClaudeCodeOauthTokenSecretArn",
 		"GitTokenSecretArn",
 		"CliUserManagedPolicyArn",
 		"SsmConfigPath",
@@ -254,7 +254,7 @@ func TestRender_ParametersPresent(t *testing.T) {
 	if !ok {
 		t.Fatalf("Parameters is not a map, got %T", m["Parameters"])
 	}
-	for _, name := range []string{"AnthropicApiKey", "GitToken"} {
+	for _, name := range []string{"ClaudeCodeOauthToken", "GitToken"} {
 		entry, ok := params[name].(map[string]any)
 		if !ok {
 			t.Errorf("parameter %q missing or wrong shape, got %T", name, params[name])
@@ -294,8 +294,8 @@ func TestRender_NoSecretsLeaked(t *testing.T) {
 	}
 	// The SecretString fields MUST reference the Parameter, not embed a literal.
 	// If someone refactored secrets to use plain strings, this check catches it.
-	if !strings.Contains(s, "Ref: AnthropicApiKey") {
-		t.Errorf("AnthropicApiKeySecret must reference AnthropicApiKey parameter by Ref")
+	if !strings.Contains(s, "Ref: ClaudeCodeOauthToken") {
+		t.Errorf("ClaudeCodeOauthTokenSecret must reference ClaudeCodeOauthToken parameter by Ref")
 	}
 	if !strings.Contains(s, "Ref: GitToken") {
 		t.Errorf("GitTokenSecret must reference GitToken parameter by Ref")
@@ -336,7 +336,7 @@ func TestRender_TaskDefSecrets(t *testing.T) {
 	if len(secrets) != 2 {
 		t.Fatalf("expected 2 secrets, got %d", len(secrets))
 	}
-	wantRefs := map[string]bool{"AnthropicApiKeySecret": false, "GitTokenSecret": false}
+	wantRefs := map[string]bool{"ClaudeCodeOauthTokenSecret": false, "GitTokenSecret": false}
 	for _, raw := range secrets {
 		s, ok := raw.(map[string]any)
 		if !ok {

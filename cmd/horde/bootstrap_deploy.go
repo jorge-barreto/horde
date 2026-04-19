@@ -17,7 +17,7 @@ import (
 )
 
 // secretReader reads a single secret value. The prompt is a human-readable
-// label (e.g. "ANTHROPIC_API_KEY") used both when prompting interactively
+// label (e.g. "CLAUDE_CODE_OAUTH_TOKEN") used both when prompting interactively
 // and when reporting errors in headless mode.
 type secretReader func(prompt string) (string, error)
 
@@ -54,12 +54,12 @@ func bootstrapDeployCmd() *cli.Command {
 		Usage: "Create or update the bootstrap CloudFormation stack",
 		Description: `deploy applies .horde/cloudformation.yaml to AWS. If no stack named
 horde-<slug> exists, it is created; otherwise it is updated. Prompts for
-ANTHROPIC_API_KEY and GIT_TOKEN (hidden input) when stdin is a TTY; in
+CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN (hidden input) when stdin is a TTY; in
 headless / CI contexts reads them from the same-named environment variables.
 Polls CloudFormation every 5s and prints each new stack event until the
 stack reaches a terminal status.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runBootstrapDeploy(ctx, cmd, defaultSecretReader("ANTHROPIC_API_KEY"), defaultSecretReader("GIT_TOKEN"), nil)
+			return runBootstrapDeploy(ctx, cmd, defaultSecretReader("CLAUDE_CODE_OAUTH_TOKEN"), defaultSecretReader("GIT_TOKEN"), nil)
 		},
 	}
 }
@@ -67,7 +67,7 @@ stack reaches a terminal status.`,
 // cfClientFactory produces a bootstrap.CFClient. Injected for tests.
 type cfClientFactory func(ctx context.Context, profile string) (bootstrap.CFClient, error)
 
-func runBootstrapDeploy(ctx context.Context, cmd *cli.Command, readAnthropic, readGit secretReader, newClient cfClientFactory) error {
+func runBootstrapDeploy(ctx context.Context, cmd *cli.Command, readClaude, readGit secretReader, newClient cfClientFactory) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
@@ -95,7 +95,7 @@ func runBootstrapDeploy(ctx context.Context, cmd *cli.Command, readAnthropic, re
 	stackName := "horde-" + slug
 
 	// 3. Gather secrets (never echoed).
-	anthropicKey, err := readAnthropic("ANTHROPIC_API_KEY")
+	claudeToken, err := readClaude("CLAUDE_CODE_OAUTH_TOKEN")
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func runBootstrapDeploy(ctx context.Context, cmd *cli.Command, readAnthropic, re
 		StackName:       stackName,
 		Slug:            slug,
 		TemplateBody:    string(templateBytes),
-		AnthropicAPIKey: anthropicKey,
+		ClaudeCodeOauthToken: claudeToken,
 		GitToken:        gitToken,
 	}
 	if err := bootstrap.Deploy(ctx, client, req, cmd.Writer); err != nil {

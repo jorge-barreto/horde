@@ -541,10 +541,11 @@ and *_FAILED terminal statuses produce an error. If UpdateStack reports
 stack), horde treats it as success.
 
 Deploy needs two secrets, passed as NoEcho CloudFormation parameters
-(AnthropicApiKey, GitToken). It never logs or echoes them:
+(ClaudeCodeOauthToken, GitToken). It never logs or echoes them:
   - Interactive: when stdin is a TTY, horde prompts with hidden input.
-  - Headless / CI: when stdin is not a TTY, horde reads ANTHROPIC_API_KEY
-    and GIT_TOKEN from the environment. Missing either is a hard error.
+  - Headless / CI: when stdin is not a TTY, horde reads CLAUDE_CODE_OAUTH_TOKEN
+    and GIT_TOKEN from the environment (or from .env in the project root).
+    Missing either is a hard error.
 
 The stack creates IAM roles with fixed names, so deploy passes
 CAPABILITY_NAMED_IAM automatically and tags the stack with horde-slug.

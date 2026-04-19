@@ -48,3 +48,63 @@ func ValidateEnvFile(dir string) (string, error) {
 
 	return envPath, nil
 }
+
+// LoadDotEnv parses dir/.env and returns its key/value pairs. A missing file
+// is NOT an error — returns an empty map. Lines that are blank or start with
+// '#' are skipped. Values may be optionally surrounded by double or single
+// quotes, which are stripped. No variable expansion is performed.
+func LoadDotEnv(dir string) (map[string]string, error) {
+	envPath := filepath.Join(dir, ".env")
+	f, err := os.Open(envPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, fmt.Errorf("opening %s: %w", envPath, err)
+	}
+	defer f.Close()
+
+	out := map[string]string{}
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+		out[key] = val
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading %s: %w", envPath, err)
+	}
+	return out, nil
+}
+
+// ApplyDotEnvToProcess loads dir/.env and exports each pair into the current
+// process environment unless the variable is already set (real env wins).
+// Missing .env is a silent no-op; other read errors propagate.
+func ApplyDotEnvToProcess(dir string) error {
+	pairs, err := LoadDotEnv(dir)
+	if err != nil {
+		return err
+	}
+	for k, v := range pairs {
+		if _, ok := os.LookupEnv(k); ok {
+			continue
+		}
+		if err := os.Setenv(k, v); err != nil {
+			return fmt.Errorf("setting %s: %w", k, err)
+		}
+	}
+	return nil
+}

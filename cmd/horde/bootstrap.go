@@ -33,7 +33,7 @@ Run subcommands in order:
   horde push                 # pushes the worker image to the ECR repo
   horde launch --provider aws-ecs ...
 
-'deploy' prompts for ANTHROPIC_API_KEY and GIT_TOKEN with hidden input; in
+'deploy' prompts for CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN with hidden input; in
 headless contexts (CI) it reads the same-named environment variables. It
 polls CloudFormation, streaming each new stack event until CREATE_COMPLETE
 or UPDATE_COMPLETE. 'destroy' tears everything down once no active runs
@@ -99,7 +99,7 @@ func bootstrapInitCmd() *cli.Command {
 			fmt.Fprintln(cmd.Writer, "  - ECR repository for the worker image")
 			fmt.Fprintln(cmd.Writer, "  - DynamoDB table (horde-runs-"+slug+") with 4 GSIs")
 			fmt.Fprintln(cmd.Writer, "  - S3 artifacts bucket (horde-artifacts-"+slug+"-<account>)")
-			fmt.Fprintln(cmd.Writer, "  - Secrets Manager secrets for ANTHROPIC and GIT tokens")
+			fmt.Fprintln(cmd.Writer, "  - Secrets Manager secrets for CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN")
 			fmt.Fprintln(cmd.Writer, "  - IAM task, execution, and CLI-user roles/policies")
 			fmt.Fprintln(cmd.Writer, "  - EventBridge rule + inline Lambda to sync run status")
 			fmt.Fprintln(cmd.Writer, "  - CloudWatch log group and SSM config parameter")

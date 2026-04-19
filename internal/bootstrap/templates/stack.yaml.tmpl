@@ -2,10 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: "horde stack for project {{.Slug}}"
 
 Parameters:
-  AnthropicApiKey:
+  ClaudeCodeOauthToken:
     Type: String
     NoEcho: true
-    Description: "Claude API key used by the worker container"
+    Description: "Claude CLI OAuth token used by the worker container (from 'claude setup-token')"
     MinLength: 1
   GitToken:
     Type: String
@@ -266,7 +266,7 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - Ref: AnthropicApiKeySecret
+                  - Ref: ClaudeCodeOauthTokenSecret
                   - Ref: GitTokenSecret
       Tags:
         - Key: Name
@@ -304,7 +304,7 @@ Resources:
           Secrets:
             - Name: CLAUDE_CODE_OAUTH_TOKEN
               ValueFrom:
-                Ref: AnthropicApiKeySecret
+                Ref: ClaudeCodeOauthTokenSecret
             - Name: GIT_TOKEN
               ValueFrom:
                 Ref: GitTokenSecret
@@ -373,16 +373,16 @@ Resources:
         - Key: Name
           Value: "horde-{{.Slug}}-runs"
 
-  AnthropicApiKeySecret:
+  ClaudeCodeOauthTokenSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: "horde-{{.Slug}}-anthropic-api-key"
-      Description: "Claude API key for the horde worker"
+      Name: "horde-{{.Slug}}-claude-code-oauth-token"
+      Description: "Claude CLI OAuth token for the horde worker"
       SecretString:
-        Ref: AnthropicApiKey
+        Ref: ClaudeCodeOauthToken
       Tags:
         - Key: Name
-          Value: "horde-{{.Slug}}-anthropic-api-key"
+          Value: "horde-{{.Slug}}-claude-code-oauth-token"
 
   GitTokenSecret:
     Type: AWS::SecretsManager::Secret
@@ -798,11 +798,11 @@ Outputs:
     Export:
       Name: "horde-{{.Slug}}-artifacts-bucket"
 
-  AnthropicApiKeySecretArn:
+  ClaudeCodeOauthTokenSecretArn:
     Value:
-      Ref: AnthropicApiKeySecret
+      Ref: ClaudeCodeOauthTokenSecret
     Export:
-      Name: "horde-{{.Slug}}-anthropic-api-key-arn"
+      Name: "horde-{{.Slug}}-claude-code-oauth-token-arn"
 
   GitTokenSecretArn:
     Value:

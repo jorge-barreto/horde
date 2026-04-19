@@ -28,6 +28,15 @@ import (
 )
 
 func main() {
+	// Merge .env from cwd into the process environment (real env wins). This
+	// lets commands like `horde bootstrap deploy` pick up CLAUDE_CODE_OAUTH_TOKEN
+	// and GIT_TOKEN directly from the project's .env without the caller having
+	// to `source` it. A missing .env is a silent no-op.
+	if cwd, err := os.Getwd(); err == nil {
+		if err := config.ApplyDotEnvToProcess(cwd); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
+		}
+	}
 	if err := newApp().Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

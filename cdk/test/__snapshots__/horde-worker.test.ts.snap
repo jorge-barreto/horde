@@ -1,0 +1,557 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
+{
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "HordeClusterA7629518": {
+      "Properties": {
+        "ClusterName": "horde-test",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-cluster",
+          },
+        ],
+      },
+      "Type": "AWS::ECS::Cluster",
+    },
+    "HordeExecutionRole89AE651A": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "horde worker task execution role for test",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+              ],
+            ],
+          },
+        ],
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-test-exec-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-exec-role",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeExecutionRoleDefaultPolicy71A29943": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeLogGroup1EE05984",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "HordeExecutionRoleDefaultPolicy71A29943",
+        "Roles": [
+          {
+            "Ref": "HordeExecutionRole89AE651A",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "HordeLogGroup1EE05984": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/ecs/horde-worker-test",
+        "RetentionInDays": 30,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeTaskDefinition1A4F86D0": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Essential": true,
+            "Image": "public.ecr.aws/horde/test:latest",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "HordeLogGroup1EE05984",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "ecs",
+              },
+            },
+            "Name": "horde-worker",
+            "StopTimeout": 120,
+          },
+        ],
+        "Cpu": "1024",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "HordeExecutionRole89AE651A",
+            "Arn",
+          ],
+        },
+        "Family": "horde-test",
+        "Memory": "4096",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "HordeTaskRole4CD3769C",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "HordeTaskRole4CD3769C": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "horde worker task role for test",
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-test-task-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-task-role",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeVpcB5939D5D": {
+      "Properties": {
+        "CidrBlock": "10.0.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-vpc",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::VPC",
+    },
+    "HordeVpcIGW2D4B66FE": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-vpc",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::InternetGateway",
+    },
+    "HordeVpcVPCGWAEEB195C": {
+      "Properties": {
+        "InternetGatewayId": {
+          "Ref": "HordeVpcIGW2D4B66FE",
+        },
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+    },
+    "HordeVpcprivateSubnet1DefaultRoute184FFD8B": {
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "HordeVpcpublicSubnet1NATGateway73FD7C1D",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet1RouteTableE564B7A0",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcprivateSubnet1RouteTableAssociationE29E1B5E": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet1RouteTableE564B7A0",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcprivateSubnet1Subnet50085241",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcprivateSubnet1RouteTableE564B7A0": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcprivateSubnet1Subnet50085241": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.2.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeVpcprivateSubnet2DefaultRoute791A061F": {
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "HordeVpcpublicSubnet1NATGateway73FD7C1D",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet2RouteTableB22C6503",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcprivateSubnet2RouteTableAssociationAAC23162": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet2RouteTableB22C6503",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcprivateSubnet2RouteTableB22C6503": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcprivateSubnet2Subnet9297B1D5": {
+      "Properties": {
+        "AvailabilityZone": "dummy1b",
+        "CidrBlock": "10.0.3.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeVpcpublicSubnet1DefaultRoute071AE970": {
+      "DependsOn": [
+        "HordeVpcVPCGWAEEB195C",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "HordeVpcIGW2D4B66FE",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet1RouteTableC1B700AC",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcpublicSubnet1EIP9B0718C2": {
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "HordeVpcpublicSubnet1NATGateway73FD7C1D": {
+      "DependsOn": [
+        "HordeVpcpublicSubnet1DefaultRoute071AE970",
+        "HordeVpcpublicSubnet1RouteTableAssociation962A9F88",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "HordeVpcpublicSubnet1EIP9B0718C2",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "HordeVpcpublicSubnet1RouteTableAssociation962A9F88": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet1RouteTableC1B700AC",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcpublicSubnet1RouteTableC1B700AC": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcpublicSubnet1Subnet246CEB9F": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.0.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeVpcpublicSubnet2DefaultRoute9C55E756": {
+      "DependsOn": [
+        "HordeVpcVPCGWAEEB195C",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "HordeVpcIGW2D4B66FE",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet2RouteTable1D5D20BC",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcpublicSubnet2RouteTable1D5D20BC": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcpublicSubnet2RouteTableAssociationE804D12F": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet2RouteTable1D5D20BC",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcpublicSubnet2Subnet6A9C5AB6",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcpublicSubnet2Subnet6A9C5AB6": {
+      "Properties": {
+        "AvailabilityZone": "dummy1b",
+        "CidrBlock": "10.0.1.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;

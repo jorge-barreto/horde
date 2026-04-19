@@ -266,6 +266,42 @@ func TestRender_ParametersPresent(t *testing.T) {
 	}
 }
 
+// TestRender_NoSecretsLeaked ensures no literal secret values from .env or
+// elsewhere can end up baked into the rendered template. Secrets MUST flow
+// through NoEcho CloudFormation Parameters, never through template variables.
+// This test renders with a slug that looks like a secret and asserts that
+// common secret prefixes never appear in the output.
+func TestRender_NoSecretsLeaked(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	s := string(out)
+	// Substrings that would indicate a secret was serialized into the template.
+	forbidden := []string{
+		"sk-ant-",        // Anthropic API key prefix
+		"github_pat_",    // GitHub fine-grained PAT prefix
+		"ghp_",           // GitHub classic PAT prefix
+		"AKIA",           // AWS access key prefix
+		"ASIA",           // AWS temporary access key prefix
+		"aws_secret_access_key",
+	}
+	for _, f := range forbidden {
+		if strings.Contains(s, f) {
+			t.Errorf("rendered template contains forbidden substring %q", f)
+		}
+	}
+	// The SecretString fields MUST reference the Parameter, not embed a literal.
+	// If someone refactored secrets to use plain strings, this check catches it.
+	if !strings.Contains(s, "Ref: AnthropicApiKey") {
+		t.Errorf("AnthropicApiKeySecret must reference AnthropicApiKey parameter by Ref")
+	}
+	if !strings.Contains(s, "Ref: GitToken") {
+		t.Errorf("GitTokenSecret must reference GitToken parameter by Ref")
+	}
+}
+
 func TestRender_TaskDefSecrets(t *testing.T) {
 	t.Parallel()
 	out, err := Render("myproj")

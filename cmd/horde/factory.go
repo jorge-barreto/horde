@@ -130,7 +130,7 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 	}
 
 	// Explicit provider flag, or run not found in SQLite.
-	prov, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
+	prov, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -153,48 +153,53 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 // does not consult this constant.
 const defaultMaxConcurrentDocker = 100
 
-func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, int, string, func(), error) {
+// initProviderAndStoreWith creates the provider and store. The returned
+// *aws.Config is non-nil for aws-ecs (and auto-detect that lands on aws-ecs)
+// so callers can reuse the loaded config for downstream STS / SDK calls
+// (e.g. resolveLaunchedBy) instead of triggering a fresh awscfg.Load round
+// trip. nil for docker.
+func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, int, string, *aws.Config, func(), error) {
 	switch name {
 	case "docker":
 		prov := provider.NewDockerProvider()
 		st, cleanup, err := deps.openStore("docker")
 		if err != nil {
-			return nil, nil, 0, "", nil, err
+			return nil, nil, 0, "", nil, nil, err
 		}
-		return prov, st, defaultMaxConcurrentDocker, "docker", cleanup, nil
+		return prov, st, defaultMaxConcurrentDocker, "docker", nil, cleanup, nil
 	case "aws-ecs":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
+			return nil, nil, 0, "", nil, nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
 		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
+			return nil, nil, 0, "", nil, nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
 		st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("initializing aws-ecs store: %w", err)
+			return nil, nil, 0, "", nil, nil, fmt.Errorf("initializing aws-ecs store: %w", err)
 		}
 		prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
-		return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", func() {}, nil
+		return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", &awsCfg, func() {}, nil
 	case "":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
+			return nil, nil, 0, "", nil, nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
 		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %s\n\nhint: use --provider docker for local mode", config.Diagnostic(err))
+			return nil, nil, 0, "", nil, nil, fmt.Errorf("auto-detecting provider: %s\n\nhint: use --provider docker for local mode", config.Diagnostic(err))
 		}
 		st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
+			return nil, nil, 0, "", nil, nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
 		}
 		prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
-		return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", func() {}, nil
+		return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", &awsCfg, func() {}, nil
 	default:
-		return nil, nil, 0, "", nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
+		return nil, nil, 0, "", nil, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
 	}
 }

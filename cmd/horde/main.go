@@ -129,7 +129,7 @@ kill some runs before launching more.`,
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
 
-			prov, st, maxConcurrent, provName, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, maxConcurrent, provName, awsCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -180,7 +180,7 @@ kill some runs before launching more.`,
 				return err
 			}
 
-			launchedBy, err := resolveLaunchedBy(ctx, provName, cwd, nil, cmd.String("profile"))
+			launchedBy, err := resolveLaunchedBy(ctx, provName, cwd, awsCfg, cmd.String("profile"))
 			if err != nil {
 				return err
 			}
@@ -761,7 +761,7 @@ include completed, failed, and killed runs.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			all := cmd.Bool("all")
 
-			prov, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -856,7 +856,7 @@ directories (all code changes will be lost).`,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			prov, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -1285,10 +1285,12 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 }
 
 // initProviderAndStore creates the Provider and Store based on the --provider flag.
-// Selection rule: "docker" → DockerProvider + SQLite; "aws-ecs" → ECS + DynamoDB
-// (not yet implemented); "" → auto-detect via SSM.
-// Returns a cleanup function that must be deferred to release store resources.
-func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, string, func(), error) {
+// Selection rule: "docker" → DockerProvider + SQLite; "aws-ecs" → ECS + DynamoDB;
+// "" → auto-detect via SSM. The returned *aws.Config is non-nil for aws-ecs so
+// callers can reuse the loaded config for STS / SDK calls without a duplicate
+// awscfg.Load round-trip.  Returns a cleanup function that must be deferred to
+// release store resources.
+func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, string, *aws.Config, func(), error) {
 	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 }
 

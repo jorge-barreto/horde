@@ -176,7 +176,7 @@ func emptyArtifactsBucket(ctx context.Context, cmd *cli.Command, awsCfg aws.Conf
 // problem) is treated as "nothing to check" — warn and proceed, since the
 // stack may already be partially torn down.
 func refuseIfActiveRuns(ctx context.Context, cmd *cli.Command) error {
-	_, st, _, _, cleanup, err := initProviderAndStoreWith(ctx, "aws-ecs", cmd.String("profile"), defaultFactoryDeps())
+	_, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, "aws-ecs", cmd.String("profile"), defaultFactoryDeps())
 	if err != nil {
 		fmt.Fprintf(cmd.Writer, "warning: could not reach DynamoDB store to check for active runs (%v); proceeding with destroy\n", err)
 		return nil

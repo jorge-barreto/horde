@@ -3685,9 +3685,16 @@ func TestResolveLaunchedBy_Docker(t *testing.T) {
 }
 
 func TestResolveLaunchedBy_ECS_NilConfig(t *testing.T) {
-	t.Parallel()
-	// nil awsCfg triggers on-demand load via awscfg.Load; in a test environment
-	// without real AWS credentials the call returns an error.
+	// Swap the package-level awscfgLoad seam to force an error.  This
+	// isolates the test from the ambient credential environment (which may
+	// succeed on EC2, developer machines with ~/.aws/credentials, etc.).
+	// Cannot use t.Parallel() because we mutate a package-level var.
+	orig := awscfgLoad
+	awscfgLoad = func(_ context.Context, _ string) (aws.Config, error) {
+		return aws.Config{}, fmt.Errorf("stub: no credentials available")
+	}
+	t.Cleanup(func() { awscfgLoad = orig })
+
 	got, err := resolveLaunchedBy(context.Background(), "aws-ecs", "", nil, "")
 	if err == nil {
 		t.Fatalf("resolveLaunchedBy(aws-ecs, nil config) = %q, want error", got)

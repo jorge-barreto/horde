@@ -1253,6 +1253,13 @@ func printPartialResults(run *store.Run) {
 	fmt.Println("Detailed results unavailable (run-result.json not found).")
 }
 
+// Test seams for resolveLaunchedBy. Package-level vars so tests can
+// substitute fakes without depending on ambient AWS credentials.
+var (
+	awscfgLoad           = awscfg.Load
+	awscfgCallerIdentity = awscfg.CallerIdentity
+)
+
 // resolveLaunchedBy returns the identity string for run records.
 // Docker uses the local git user name; aws-ecs uses the IAM ARN from STS.
 func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, awsCfg *aws.Config, profile string) (string, error) {
@@ -1261,13 +1268,13 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 		return config.LaunchedBy(cwd), nil
 	case "aws-ecs":
 		if awsCfg == nil {
-			cfg, err := awscfg.Load(ctx, profile)
+			cfg, err := awscfgLoad(ctx, profile)
 			if err != nil {
 				return "", fmt.Errorf("resolving launched_by: %w", err)
 			}
 			awsCfg = &cfg
 		}
-		arn, err := awscfg.CallerIdentity(ctx, *awsCfg, profile)
+		arn, err := awscfgCallerIdentity(ctx, *awsCfg, profile)
 		if err != nil {
 			return "", fmt.Errorf("resolving launched_by: %w", err)
 		}

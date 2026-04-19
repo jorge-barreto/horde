@@ -88,6 +88,44 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
                 ],
               },
             },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:111111111111:secret:horde/claude-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:111111111111:secret:horde/git-??????",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -132,6 +170,38 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
               },
             },
             "Name": "horde-worker",
+            "Secrets": [
+              {
+                "Name": "CLAUDE_CODE_OAUTH_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:111111111111:secret:horde/claude",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "GIT_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:111111111111:secret:horde/git",
+                    ],
+                  ],
+                },
+              },
+            ],
             "StopTimeout": 120,
           },
         ],

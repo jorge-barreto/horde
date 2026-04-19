@@ -169,6 +169,12 @@ export class HordeWorker extends Construct {
         logGroup: this.logGroup,
         streamPrefix: "ecs",
       }),
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(
+          props.secrets.CLAUDE_CODE_OAUTH_TOKEN,
+        ),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(props.secrets.GIT_TOKEN),
+      },
     });
   }
 }

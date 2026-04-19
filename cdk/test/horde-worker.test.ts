@@ -63,6 +63,36 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     });
   });
 
+  it("injects CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN as ECS secrets via valueFrom", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "horde-worker",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "CLAUDE_CODE_OAUTH_TOKEN", ValueFrom: Match.anyValue() }),
+            Match.objectLike({ Name: "GIT_TOKEN", ValueFrom: Match.anyValue() }),
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it("does NOT pass secrets as plain Environment vars", () => {
+    const t = synth();
+    const tds = t.findResources("AWS::ECS::TaskDefinition");
+    for (const td of Object.values(tds)) {
+      const containers = td.Properties.ContainerDefinitions ?? [];
+      for (const c of containers) {
+        const env = c.Environment ?? [];
+        for (const e of env) {
+          expect(e.Name).not.toBe("CLAUDE_CODE_OAUTH_TOKEN");
+          expect(e.Name).not.toBe("GIT_TOKEN");
+        }
+      }
+    }
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

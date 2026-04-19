@@ -49,6 +49,12 @@ var topics = []Topic{
 		Summary: "Provision AWS infrastructure via CloudFormation (bootstrap init/deploy/destroy)",
 		Content: topicBootstrap,
 	},
+	{
+		Name:    "ecs-integration",
+		Title:   "ECS Integration Tests",
+		Summary: "How to run the end-to-end ECS test suite against a real AWS account",
+		Content: topicECSIntegration,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -591,4 +597,92 @@ Naming and cost notes
   when idle.
 - Private-subnet topology is the default (assign_public_ip=DISABLED).
   Tasks reach GitHub, Anthropic, and other public APIs through the NAT.
+`
+
+const topicECSIntegration = `ECS Integration Tests
+=====================
+
+The ECS integration suite (test/integration/ecs_*_test.go) runs every
+horde feature end-to-end against a real CloudFormation stack: launch,
+status, logs, kill, list, hydrate, retry semantics, concurrent runs,
+and timeout/finalize reconciliation. Each test drives a full Fargate
+task lifecycle and verifies the status Lambda updates DynamoDB.
+
+Prerequisites
+
+1. AWS credentials available (SSO via 'aws sso login --profile <name>',
+   or static credentials — profile of your choice).
+2. A '.env' at the repo root containing at minimum:
+
+       AWS_PROFILE=<your-profile>
+       AWS_REGION=us-east-1
+       HORDE_E2E_ECS=1
+       HORDE_E2E_ECS_KEEP=1
+       CLAUDE_CODE_OAUTH_TOKEN=<from 'claude setup-token'>
+       GIT_TOKEN=<a GitHub PAT>
+
+3. Docker running locally (needed so 'horde push' can tag and push the
+   worker image to ECR — push shells out to 'docker push').
+
+Gate flags
+
+HORDE_E2E_ECS=1
+    Required. Without it the ECS tests skip and the test suite runs
+    only docker-backed integration tests.
+
+HORDE_E2E_ECS_KEEP=1
+    Keep the bootstrap stack alive after the test suite exits. Default
+    behavior (unset) destroys the stack at TestMain exit; keeping it
+    cuts the next run's turnaround from ~3 minutes to under 10 seconds.
+    When you're actively iterating, set this.
+
+Running the suite
+
+Parallel (recommended; ~2 minutes wall-clock for 17 tests):
+    go test -count=1 -timeout 30m -run 'TestECS' ./test/integration/ -v
+
+Individual test:
+    go test -count=1 -timeout 10m -run TestECSSmoke ./test/integration/ -v
+
+Stack lifecycle
+
+On each 'go test' invocation with HORDE_E2E_ECS=1 the suite's TestMain:
+    1. Regenerates .horde/cloudformation.yaml via 'horde bootstrap init --regenerate'.
+    2. Runs 'horde bootstrap deploy' (no-op when stack exists and is current).
+    3. Runs 'horde push' (no-op when ECR digest matches local image).
+    4. Runs the tests.
+    5. If HORDE_E2E_ECS_KEEP is unset, runs 'horde bootstrap destroy --force'.
+
+Manually teardown when you're done iterating:
+    horde bootstrap destroy
+
+Cost
+
+The stack's idle cost is dominated by one NAT gateway (~$0.045/hour +
+data-transfer-per-GB). Fargate tasks cost ~$0.05/hour for 1 vCPU / 4 GB
+while running; each test's task runs for ~90 seconds. A typical full
+run with the stack kept alive for an hour and 20 task launches totals
+well under $0.10.
+
+Destroying the stack between iterations avoids NAT idle cost at the
+expense of a ~3-minute redeploy on the next run.
+
+Concurrency
+
+The stack's SSM config sets max_concurrent=20, allowing up to 20
+Fargate tasks at once. All ECS tests call t.Parallel(), so the 17-test
+suite finishes in ~2 minutes wall-clock. Lowering max_concurrent also
+requires rebuilding the template and redeploying.
+
+What's NOT tested end-to-end
+
+- 'horde retry' on ECS: the current implementation requires a local
+  workspace dir that ECS doesn't have. Tracked as a design decision
+  rather than a bug (see horde-lbx.8 note).
+- Agent session persistence across retries: Docker uses a host-mounted
+  directory; ECS has no equivalent without S3 round-trips. Tracked as
+  a design conversation (see horde-lbx.13 note).
+- 'horde logs --follow' in the integration suite. The CLI implementation
+  exists and works manually; an automated streaming-mode test is future
+  work.
 `

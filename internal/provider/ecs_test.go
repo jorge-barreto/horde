@@ -1026,20 +1026,25 @@ func TestECSProvider_Logs_NilResponse(t *testing.T) {
 
 func TestECSProvider_Logs_LogStreamNotCreated(t *testing.T) {
 	t.Parallel()
+	// When the CloudWatch log stream hasn't been created yet (the task's
+	// container has started but not emitted any output), Logs must return
+	// an empty reader, not an error — matches the follow-mode behavior
+	// and lets `horde logs` work on just-started runs.
 	fake := &fakeCloudWatchLogsClient{
 		getLogEventsErr: &cwltypes.ResourceNotFoundException{Message: aws.String("The specified log stream does not exist.")},
 	}
 	p := NewECSProvider(&fakeECSClient{}, fake, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123:task/c/task1", false)
-	if err == nil {
-		t.Fatal("Logs() error = nil, want non-nil")
+	rc, err := p.Logs(context.Background(), "arn:aws:ecs:us-east-1:123:task/c/task1", false)
+	if err != nil {
+		t.Fatalf("Logs() unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "reading logs") {
-		t.Errorf("error = %q, want it to contain \"reading logs\"", err.Error())
+	defer rc.Close()
+	buf, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("reading Logs() body: %v", err)
 	}
-	var rnf *cwltypes.ResourceNotFoundException
-	if !errors.As(err, &rnf) {
-		t.Errorf("error type = %T, want *cwltypes.ResourceNotFoundException", err)
+	if len(buf) != 0 {
+		t.Errorf("Logs() body = %q, want empty", string(buf))
 	}
 }
 

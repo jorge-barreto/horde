@@ -96,12 +96,13 @@ Mounts use Docker's `host:container` format. Host paths are relative to the proj
 
 ```bash
 go test -short ./...                                   # unit tests only (fast, no Docker)
-go test -v -count=1 -timeout 10m ./test/integration/   # integration tests (requires Docker)
+go test -v -count=1 -timeout 10m ./test/integration/   # Docker integration tests
+go test -v -count=1 -timeout 30m -run TestECS ./test/integration/   # ECS integration tests (real AWS)
 ```
 
-Unit tests use fake Docker shell scripts — no real containers. Integration tests launch real Docker containers running real orc with script-only workflows against a real SQLite store. They exercise the full status detection chain: launch, timeout, kill, and external stop scenarios.
+Unit tests use fake Docker shell scripts — no real containers. Docker integration tests launch real Docker containers running real orc with script-only workflows against a real SQLite store. They exercise the full status detection chain: launch, timeout, kill, and external stop scenarios, and take ~1-2 minutes.
 
-Integration tests take ~1-2 minutes. First run is slower (~3-4 minutes) because it builds the worker Docker image.
+ECS integration tests drive a real CloudFormation-deployed AWS stack end-to-end: launch, status, logs (CloudWatch), kill, list, hydrate (S3), concurrent runs, and timeout reconciliation. Gated by `HORDE_E2E_ECS=1` in `.env`; set `HORDE_E2E_ECS_KEEP=1` to reuse the bootstrap stack between runs. Full suite runs in ~2 minutes parallel. See `horde docs ecs-integration` for setup and cost notes.
 
 ## Run Data
 

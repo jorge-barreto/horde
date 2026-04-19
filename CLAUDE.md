@@ -21,6 +21,11 @@ go vet ./...                   # lint
 
 # Integration tests — real Docker, real orc, real horde (~2 min)
 go test -v -count=1 -timeout 10m ./test/integration/
+
+# ECS end-to-end tests — real AWS stack (~2 min parallel).
+# Gated by HORDE_E2E_ECS=1 (set in .env). HORDE_E2E_ECS_KEEP=1 reuses the
+# stack between runs. See `horde docs ecs-integration`.
+go test -v -count=1 -timeout 30m -run TestECS ./test/integration/
 ```
 
 ## Git

@@ -52,6 +52,7 @@ const (
 // script workflow against the pre-deployed CloudFormation stack, polls to
 // terminal, fetches logs, hydrates artifacts, and cleans up the DynamoDB row.
 func TestECSSmoke(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping ECS smoke test in short mode")
 	}

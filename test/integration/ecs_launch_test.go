@@ -13,6 +13,7 @@ import (
 // This overlaps TestECSSmoke but exercises the harness (not inline helpers),
 // paving the way for subsequent ecs_*_test.go files to share a setup pattern.
 func TestECSLaunchSuccess(t *testing.T) {
+	t.Parallel()
 	h := newECSHarness(t)
 
 	ticket := uniqueTicket("launch-success")
@@ -33,6 +34,7 @@ func TestECSLaunchSuccess(t *testing.T) {
 // rejects the second launch with a 'duplicate' error. Mirrors the Docker
 // TestLaunchDuplicateTicket behavior.
 func TestECSLaunchDuplicateTicket(t *testing.T) {
+	t.Parallel()
 	h := newECSHarness(t)
 
 	ticket := uniqueTicket("launch-dup")

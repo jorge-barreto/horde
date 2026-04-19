@@ -313,6 +313,27 @@ func uniqueTicket(name string) string {
 	return fmt.Sprintf("TEST-%s-%d", name, time.Now().UnixNano())
 }
 
+// waitForECSStatus polls h.driver.StoreStatus every pollInterval up to
+// timeout, returning when the observed status equals want. Logs each
+// transition. Fails the test if want is never observed.
+func waitForECSStatus(t *testing.T, h *harness, runID, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		got := h.driver.StoreStatus(runID)
+		if got != last {
+			t.Logf("status transition (waiting for %q): %q -> %q", want, last, got)
+			last = got
+		}
+		if got == want {
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Fatalf("run %s did not reach status %q within %s (last=%q)", runID, want, timeout, last)
+}
+
 // waitForECSTerminal polls StoreStatus every 5 seconds up to timeout. Fails
 // the test via t.Fatalf if the run never reaches success/failed/killed. On
 // success logs each status transition so failure mode is trivially visible.

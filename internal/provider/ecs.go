@@ -297,6 +297,13 @@ func (p *ECSProvider) Logs(ctx context.Context, instanceID string, follow bool) 
 
 			out, err := p.logs.GetLogEvents(ctx, input)
 			if err != nil {
+				// The log stream only exists once the container has emitted
+				// at least one log event. For runs queried before their
+				// first output, return empty logs rather than a hard error.
+				var rnf *cwltypes.ResourceNotFoundException
+				if errors.As(err, &rnf) {
+					return io.NopCloser(&buf), nil
+				}
 				return nil, fmt.Errorf("reading logs: %w", err)
 			}
 			if out == nil {

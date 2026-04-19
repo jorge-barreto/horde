@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // E2E smoke stack for @horde/cdk. Not for production. Deploys a real ECS
 // stack under a dedicated slug so the existing TestECS_* harness pattern
-// can verify the construct end-to-end without colliding with the
-// horde-bootstrap CF stack.
+// can verify the construct end-to-end.
 //
-// Secrets are reused by name from the bootstrap CF stack (so we don't
-// re-upload Claude/Git tokens for the e2e). If you have not deployed the
-// bootstrap stack at slug "jorge-barreto-horde", create those two secrets
-// in Secrets Manager first.
+// Secrets: CDK creates the two secret resources here (initially empty).
+// The Go bring-up test populates them via PutSecretValue from the local
+// .env BEFORE launching any task, so no token literal ever lands in the
+// CFN template or template history.
 import * as cdk from "aws-cdk-lib";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
@@ -18,9 +17,8 @@ import { HordeWorker } from "../src";
 // The Go test sets that fake remote so `horde push` resolves to this SSM path.
 const SLUG = "jorge-barreto-horde-cdke2e";
 
-const BOOTSTRAP_SLUG = "jorge-barreto-horde";
-const CLAUDE_SECRET_NAME = `horde-${BOOTSTRAP_SLUG}-claude-code-oauth-token`;
-const GIT_SECRET_NAME = `horde-${BOOTSTRAP_SLUG}-git-token`;
+const CLAUDE_SECRET_NAME = `horde-${SLUG}-claude-code-oauth-token`;
+const GIT_SECRET_NAME = `horde-${SLUG}-git-token`;
 
 const app = new cdk.App();
 const stack = new cdk.Stack(app, "HordeCdkE2E", {
@@ -39,16 +37,19 @@ const repo = new ecr.Repository(stack, "WorkerRepo", {
   imageScanOnPush: true,
 });
 
-const claudeSecret = secretsmanager.Secret.fromSecretNameV2(
-  stack,
-  "ClaudeToken",
-  CLAUDE_SECRET_NAME,
-);
-const gitSecret = secretsmanager.Secret.fromSecretNameV2(
-  stack,
-  "GitToken",
-  GIT_SECRET_NAME,
-);
+// Empty secret resources owned by the stack. The bring-up Go test calls
+// PutSecretValue to populate them from the developer's local .env before
+// any worker task is launched.
+const claudeSecret = new secretsmanager.Secret(stack, "ClaudeToken", {
+  secretName: CLAUDE_SECRET_NAME,
+  description: "CLAUDE_CODE_OAUTH_TOKEN for the e2e worker (populated post-deploy by bring-up test)",
+  removalPolicy: cdk.RemovalPolicy.DESTROY,
+});
+const gitSecret = new secretsmanager.Secret(stack, "GitToken", {
+  secretName: GIT_SECRET_NAME,
+  description: "GIT_TOKEN for the e2e worker (populated post-deploy by bring-up test)",
+  removalPolicy: cdk.RemovalPolicy.DESTROY,
+});
 
 const worker = new HordeWorker(stack, "Worker", {
   projectSlug: SLUG,
@@ -73,5 +74,7 @@ new cdk.CfnOutput(stack, "ArtifactsBucketOut", {
 });
 new cdk.CfnOutput(stack, "RunsTableOut", { value: worker.runsTable.tableName });
 new cdk.CfnOutput(stack, "LogGroupOut", { value: worker.logGroup.logGroupName });
+new cdk.CfnOutput(stack, "ClaudeSecretArnOut", { value: claudeSecret.secretArn });
+new cdk.CfnOutput(stack, "GitSecretArnOut", { value: gitSecret.secretArn });
 
 app.synth();

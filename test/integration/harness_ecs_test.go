@@ -231,6 +231,17 @@ func newECSHarness(t *testing.T) *harness {
 //
 // Caller is responsible for skip-gating; this function never skips.
 func newECSHarnessForRepo(t *testing.T, repoURL string) *harness {
+	return newECSHarnessForRepoWithSSM(t, repoURL, "")
+}
+
+// newECSHarnessForRepoWithSSM lets the caller override the SSM path used to
+// load runtime config. When ssmPathOverride is empty the path is derived
+// from repoURL via bootstrap.Slug (the production code path).
+//
+// CDK e2e uses an override so the workspace's git remote can stay set to a
+// real, clonable repo (so the worker can git-fetch) while SSM lookup still
+// resolves to the CDK-deployed stack at a different slug.
+func newECSHarnessForRepoWithSSM(t *testing.T, repoURL, ssmPathOverride string) *harness {
 	t.Helper()
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
@@ -280,11 +291,14 @@ func newECSHarnessForRepo(t *testing.T, repoURL string) *harness {
 	if err != nil {
 		t.Fatalf("loading AWS config (profile=%q): %v", os.Getenv("AWS_PROFILE"), err)
 	}
-	slug, err := bootstrap.Slug(repoURL)
-	if err != nil {
-		t.Fatalf("deriving slug: %v", err)
+	ssmPath := ssmPathOverride
+	if ssmPath == "" {
+		slug, err := bootstrap.Slug(repoURL)
+		if err != nil {
+			t.Fatalf("deriving slug: %v", err)
+		}
+		ssmPath = "/horde/" + slug + "/config"
 	}
-	ssmPath := "/horde/" + slug + "/config"
 	ssmClient := ssm.NewFromConfig(awsCfg)
 	hc, err := config.LoadFromSSM(ctx, ssmClient, ssmPath)
 	if err != nil {
@@ -310,6 +324,12 @@ func newECSHarnessForRepo(t *testing.T, repoURL string) *harness {
 		repoRoot:      repoRoot,
 		driver:        driver,
 		hordeProvider: "aws-ecs",
+	}
+	if ssmPathOverride != "" {
+		// Make `horde` subprocesses look up the same SSM path the harness
+		// pre-loaded. Otherwise they'd derive from the workspace's git
+		// remote, which (for CDK e2e) points at a different slug.
+		h.extraEnv = append(h.extraEnv, "HORDE_SSM_PATH="+ssmPathOverride)
 	}
 	t.Cleanup(driver.TearDown)
 	return h

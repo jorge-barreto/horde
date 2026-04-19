@@ -17,6 +17,7 @@ import (
 	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 
 	"github.com/jorge-barreto/horde/internal/awscfg"
 )
@@ -49,6 +50,8 @@ type cdkE2EState struct {
 	ArtifactsBucket string    `json:"artifacts_bucket"`
 	RunsTable       string    `json:"runs_table"`
 	LogGroup        string    `json:"log_group"`
+	ClaudeSecretArn string    `json:"claude_secret_arn"`
+	GitSecretArn    string    `json:"git_secret_arn"`
 	DeployedAt      time.Time `json:"deployed_at"`
 }
 
@@ -129,7 +132,37 @@ func readCDKOutputs(t *testing.T, path string) cdkE2EState {
 		ArtifactsBucket: o["ArtifactsBucketOut"],
 		RunsTable:       o["RunsTableOut"],
 		LogGroup:        o["LogGroupOut"],
+		ClaudeSecretArn: o["ClaudeSecretArnOut"],
+		GitSecretArn:    o["GitSecretArnOut"],
 	}
+}
+
+// populateE2ESecrets reads CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN from the
+// ambient env (set by `set -a; source .env; set +a` before the test) and
+// writes them into the two Secrets Manager secrets owned by the CDK stack.
+// Tokens never enter the CFN template — only their ARNs do.
+func populateE2ESecrets(ctx context.Context, c *secretsmanager.Client, claudeArn, gitArn string) error {
+	claudeVal := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
+	gitVal := os.Getenv("GIT_TOKEN")
+	if claudeVal == "" {
+		return fmt.Errorf("CLAUDE_CODE_OAUTH_TOKEN env var empty (source .env first)")
+	}
+	if gitVal == "" {
+		return fmt.Errorf("GIT_TOKEN env var empty (source .env first)")
+	}
+	if _, err := c.PutSecretValue(ctx, &secretsmanager.PutSecretValueInput{
+		SecretId:     aws.String(claudeArn),
+		SecretString: aws.String(claudeVal),
+	}); err != nil {
+		return fmt.Errorf("PutSecretValue(claude): %w", err)
+	}
+	if _, err := c.PutSecretValue(ctx, &secretsmanager.PutSecretValueInput{
+		SecretId:     aws.String(gitArn),
+		SecretString: aws.String(gitVal),
+	}); err != nil {
+		return fmt.Errorf("PutSecretValue(git): %w", err)
+	}
+	return nil
 }
 
 func writeCDKState(t *testing.T, s cdkE2EState) {
@@ -320,9 +353,25 @@ func TestECSCDK_Bringup(t *testing.T) {
 
 	state := readCDKOutputs(t, outputsFile)
 	state.DeployedAt = time.Now().UTC()
-	if state.SSMPath == "" || state.EcrRepoName == "" {
+	if state.SSMPath == "" || state.EcrRepoName == "" || state.ClaudeSecretArn == "" || state.GitSecretArn == "" {
 		t.Fatalf("cdk outputs missing required fields: %+v", state)
 	}
+
+	// Populate the empty Secrets Manager resources from local env. This must
+	// happen BEFORE the worker tries to start (otherwise ECS task fails with
+	// "ResourceInitializationError: unable to pull secrets").
+	ctx := context.Background()
+	awsCfg, aerr := awscfg.Load(ctx, os.Getenv("AWS_PROFILE"))
+	if aerr != nil {
+		writeCDKState(t, state)
+		t.Fatalf("loading AWS config: %v (run TestECSCDK_Teardown to clean up)", aerr)
+	}
+	if err := populateE2ESecrets(ctx, secretsmanager.NewFromConfig(awsCfg),
+		state.ClaudeSecretArn, state.GitSecretArn); err != nil {
+		writeCDKState(t, state)
+		t.Fatalf("populating secrets: %v (run TestECSCDK_Teardown to clean up)", err)
+	}
+	t.Logf("populated %d secrets", 2)
 
 	// Push the worker image. On failure, persist state anyway so teardown
 	// can clean up the deployed stack.
@@ -343,8 +392,9 @@ func TestECSCDK_Smoke(t *testing.T) {
 	state := readCDKState(t)
 	t.Logf("smoke test against slug=%s, cluster=%s", state.Slug, state.ClusterArn)
 
-	// Reuse the standard ECS harness, parameterized on the CDK fake remote.
-	h := newECSHarnessForRepo(t, cdkE2ERepoURL)
+	// Workspace remote = real horde URL (so the worker can git-fetch).
+	// SSM path = CDK stack's path (override; the slug differs from the URL).
+	h := newECSHarnessForRepoWithSSM(t, ecsHarnessRepoURL, state.SSMPath)
 
 	ticket := uniqueTicket("cdke2e-smoke")
 	t.Logf("launching: ticket=%s, workflow=quick-success", ticket)

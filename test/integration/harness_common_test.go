@@ -43,6 +43,10 @@ type harness struct {
 	repoRoot      string // horde repo root
 	driver        instanceDriver
 	hordeProvider string // "docker" or "aws-ecs"; prepended to every horde invocation
+	// extraEnv is appended to every horde subprocess invocation. Used by
+	// the CDK e2e harness to set HORDE_SSM_PATH so the SSM lookup goes to
+	// the CDK-deployed stack regardless of the workspace's git remote.
+	extraEnv []string
 }
 
 // TrackRunForCleanup registers a run for driver-specific teardown. For the
@@ -116,6 +120,7 @@ func (h *harness) env() []string {
 			}
 		}
 	}
+	filtered = append(filtered, h.extraEnv...)
 	return filtered
 }
 

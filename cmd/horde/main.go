@@ -92,7 +92,12 @@ func launchCmd() *cli.Command {
 		Description: `Builds the worker Docker image if needed, validates the .env file,
 and launches a container that clones the repo and runs orc. Prints the
 run ID on success. Use --force to launch even if a run with the same
-ticket is already active.`,
+ticket is already active.
+
+Concurrency: docker provider caps active runs at 100 (pending + running);
+aws-ecs uses the bootstrap stack's max_concurrent (default 20). Hitting
+the cap fails with "max concurrent runs reached (N/N)" — wait for or
+kill some runs before launching more.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "branch",

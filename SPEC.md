@@ -119,7 +119,7 @@ horde launch PROJ-123
 horde:
 - Resolves repo URL from the local git remote (`git remote get-url origin`)
 - Generates a run ID
-- **Concurrency check (v0.2):** Queries the store for active runs. If the count equals or exceeds `maxConcurrent` (from SSM config), launch is rejected with an error showing current active runs. No queuing — the user decides what to do.
+- **Concurrency check (v0.2):** Queries the store for active runs. If the count equals or exceeds `maxConcurrent`, launch is rejected with an error showing current active runs. No queuing — the user decides what to do. The docker provider uses a hard-coded ceiling of 100 (`defaultMaxConcurrentDocker` in `cmd/horde/factory.go`); the aws-ecs provider reads `max_concurrent` from the SSM config (default 20, set by the bootstrap stack).
 - **Duplicate ticket check:** Queries the store for active runs with the same ticket. If found, warns and requires `--force` to proceed.
 - Records the run in the store as `pending` (SQLite for docker, DynamoDB for ECS)
 - Starts the worker container (docker provider) or calls ECS RunTask (ECS provider)

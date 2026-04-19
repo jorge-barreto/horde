@@ -142,6 +142,17 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 	return prov, st, run, cleanup, nil
 }
 
+// defaultMaxConcurrentDocker is the local Docker provider's launch ceiling.
+// `horde launch` rejects new runs once this many runs are pending or running
+// at the same time, with the error "max concurrent runs reached (N/N)".
+//
+// 100 is intentionally generous: a developer machine will exhaust memory or
+// disk long before hitting it under any realistic workflow. The cap exists to
+// catch runaway scripts that fork-launch unbounded tickets, not to throttle
+// real use. ECS uses its own per-stack `max_concurrent` from SSM config and
+// does not consult this constant.
+const defaultMaxConcurrentDocker = 100
+
 func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, int, string, func(), error) {
 	switch name {
 	case "docker":
@@ -150,7 +161,7 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 		if err != nil {
 			return nil, nil, 0, "", nil, err
 		}
-		return prov, st, 100, "docker", cleanup, nil
+		return prov, st, defaultMaxConcurrentDocker, "docker", cleanup, nil
 	case "aws-ecs":
 		awsCfg, err := deps.loadAWSConfig(ctx, profile)
 		if err != nil {

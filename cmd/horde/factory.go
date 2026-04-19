@@ -179,7 +179,7 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 		}
 		st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
 		if err != nil {
-			return nil, nil, 0, "", nil, fmt.Errorf("initializing aws-ecs store: %w", err)
+			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
 		}
 		prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
 		return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", func() {}, nil

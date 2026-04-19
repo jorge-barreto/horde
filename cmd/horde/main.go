@@ -645,15 +645,10 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 					return fmt.Errorf("killing run: %w", err)
 				}
 
-				// Best-effort: read run-result.json for cost and exit code
-				resultPath := filepath.Join(resultsDir, provider.AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
-				if data, err := os.ReadFile(resultPath); err == nil {
-					var rr provider.RunResult
-					if json.Unmarshal(data, &rr) == nil {
-						cost = rr.TotalCostUSD
-						exitCode = rr.ExitCode
-					}
-				}
+				// Best-effort: read run-result.json for cost and exit code.
+				// orc may have crashed before writing it — the helper returns
+				// nils in that case and we record killed without those fields.
+				cost, exitCode = provider.ReadRunResult(homeDir, run)
 			}
 			killedStatus := store.StatusKilled
 			now := time.Now()

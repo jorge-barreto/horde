@@ -363,6 +363,23 @@ type RunResult struct {
 	ExitCode     *int     `json:"exit_code"`
 }
 
+// ReadRunResult parses run-result.json from the local results directory for
+// the given run. Returns (nil, nil) when the file is absent or malformed —
+// the file is best-effort and missing/garbage values are non-fatal (the run
+// itself may have crashed before orc could write it).
+func ReadRunResult(homeDir string, run *store.Run) (cost *float64, exitCode *int) {
+	resultPath := filepath.Join(LocalResultsDir(homeDir, run.ID), AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		return nil, nil
+	}
+	var rr RunResult
+	if json.Unmarshal(data, &rr) != nil {
+		return nil, nil
+	}
+	return rr.TotalCostUSD, rr.ExitCode
+}
+
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

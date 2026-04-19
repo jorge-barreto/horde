@@ -626,8 +626,57 @@ func (p *ECSProvider) downloadS3Object(ctx context.Context, bucket, key, destPat
 	return nil
 }
 
-// Finalize is a no-op for ECS. The status Lambda handles finalization
-// (updating DynamoDB on task completion via EventBridge).
+// Finalize reconciles a run's recorded status with ECS task state, but only
+// when necessary. DynamoDB is the source of truth for ECS runs — the status
+// Lambda triggered by EventBridge updates it on task completion. The CLI
+// trusts that, so Finalize is a no-op unless the run is past its timeout
+// and still marked active (pending/running). Past-timeout runs get a
+// DescribeTasks call to resolve whether the task actually completed (Lambda
+// behind / failed / missed the event), and the run is marked killed if the
+// task is still running.
+//
+// This keeps `horde status` / `list` / `results` fast in the common case
+// (no AWS call at all for terminal or active-within-timeout runs).
 func (p *ECSProvider) Finalize(ctx context.Context, run *store.Run, homeDir string) error {
+	if run.Status != store.StatusPending && run.Status != store.StatusRunning {
+		return nil
+	}
+	if time.Now().Before(run.TimeoutAt) {
+		return nil
+	}
+
+	// Past timeout and still active — reconcile via DescribeTasks.
+	inst, err := p.Status(ctx, run.InstanceID)
+	if err != nil {
+		// Leave the run in its current state; the next status/list call will retry.
+		return nil
+	}
+
+	now := time.Now()
+	switch inst.State {
+	case StateStopped:
+		// Task finished; infer status from exit code. Lambda will likely
+		// update total_cost_usd later if it runs.
+		if inst.ExitCode != nil && *inst.ExitCode == 0 {
+			run.Status = store.StatusSuccess
+		} else {
+			run.Status = store.StatusFailed
+		}
+		run.ExitCode = inst.ExitCode
+		if inst.FinishedAt != nil {
+			run.CompletedAt = inst.FinishedAt
+		} else {
+			run.CompletedAt = &now
+		}
+	case StateRunning, "pending", "stopping":
+		// Past timeout and still live — stop it and record as killed.
+		_ = p.Stop(ctx, StopOpts{InstanceID: run.InstanceID})
+		run.Status = store.StatusKilled
+		run.CompletedAt = &now
+	case StateUnknown:
+		// ECS has no record of this task. Treat as killed.
+		run.Status = store.StatusKilled
+		run.CompletedAt = &now
+	}
 	return nil
 }

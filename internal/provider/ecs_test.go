@@ -2791,3 +2791,107 @@ func TestECSProvider_Integration_LaunchStopStatus(t *testing.T) {
 		t.Errorf("Status.ExitCode = %v, want 0", st.ExitCode)
 	}
 }
+
+func TestECS_Finalize_TerminalStatusIsNoOp(t *testing.T) {
+	fake := &fakeECSClient{}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	for _, status := range []store.Status{store.StatusSuccess, store.StatusFailed, store.StatusKilled} {
+		run := &store.Run{ID: "abc123", Status: status, TimeoutAt: time.Now().Add(-1 * time.Hour)}
+		if err := p.Finalize(context.Background(), run, ""); err != nil {
+			t.Fatalf("Finalize(%s) error = %v", status, err)
+		}
+	}
+	if len(fake.describeTasksInputs) != 0 {
+		t.Errorf("DescribeTasks called %d times for terminal runs; want 0", len(fake.describeTasksInputs))
+	}
+}
+
+func TestECS_Finalize_WithinTimeoutIsNoOp(t *testing.T) {
+	fake := &fakeECSClient{}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	run := &store.Run{
+		ID:        "abc123",
+		Status:    store.StatusRunning,
+		TimeoutAt: time.Now().Add(1 * time.Hour), // NOT past timeout
+	}
+	if err := p.Finalize(context.Background(), run, ""); err != nil {
+		t.Fatalf("Finalize error = %v", err)
+	}
+	if len(fake.describeTasksInputs) != 0 {
+		t.Errorf("DescribeTasks called for run within timeout; want 0 calls, got %d", len(fake.describeTasksInputs))
+	}
+	if run.Status != store.StatusRunning {
+		t.Errorf("run.Status mutated: got %s, want %s", run.Status, store.StatusRunning)
+	}
+}
+
+func TestECS_Finalize_PastTimeoutStillRunningKills(t *testing.T) {
+	taskARN := "arn:aws:ecs:us-east-1:123:task/horde/abcdef"
+	fake := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{
+				Tasks: []ecstypes.Task{
+					{
+						TaskArn:    aws.String(taskARN),
+						LastStatus: aws.String("RUNNING"),
+					},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	run := &store.Run{
+		ID:         "abc123",
+		InstanceID: taskARN,
+		Status:     store.StatusRunning,
+		TimeoutAt:  time.Now().Add(-1 * time.Hour), // past timeout
+	}
+	if err := p.Finalize(context.Background(), run, ""); err != nil {
+		t.Fatalf("Finalize error = %v", err)
+	}
+	if run.Status != store.StatusKilled {
+		t.Errorf("run.Status = %s, want %s", run.Status, store.StatusKilled)
+	}
+	if run.CompletedAt == nil {
+		t.Errorf("run.CompletedAt was not set")
+	}
+	if fake.stopTaskInput == nil {
+		t.Errorf("StopTask was not called to kill the overdue task")
+	}
+}
+
+func TestECS_Finalize_PastTimeoutStoppedReconciles(t *testing.T) {
+	taskARN := "arn:aws:ecs:us-east-1:123:task/horde/abcdef"
+	finishedAt := time.Now().Add(-5 * time.Minute)
+	exitCode := int32(0)
+	fake := &fakeECSClient{
+		describeTasksOutputs: []*ecs.DescribeTasksOutput{
+			{
+				Tasks: []ecstypes.Task{
+					{
+						TaskArn:    aws.String(taskARN),
+						LastStatus: aws.String("STOPPED"),
+						StoppedAt:  &finishedAt,
+						Containers: []ecstypes.Container{{ExitCode: &exitCode}},
+					},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	run := &store.Run{
+		ID:         "abc123",
+		InstanceID: taskARN,
+		Status:     store.StatusRunning,
+		TimeoutAt:  time.Now().Add(-1 * time.Hour),
+	}
+	if err := p.Finalize(context.Background(), run, ""); err != nil {
+		t.Fatalf("Finalize error = %v", err)
+	}
+	if run.Status != store.StatusSuccess {
+		t.Errorf("run.Status = %s, want %s (exit 0)", run.Status, store.StatusSuccess)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 0 {
+		t.Errorf("run.ExitCode = %v, want 0", run.ExitCode)
+	}
+}

@@ -511,7 +511,7 @@ plus inline Lambda that keeps run status in sync.
 Workflow
 
   horde bootstrap init       # generates .horde/cloudformation.yaml
-  horde bootstrap deploy     # (not yet implemented) creates the stack
+  horde bootstrap deploy     # creates or updates the CloudFormation stack
   horde push                 # (not yet implemented) pushes the worker image
   horde launch --provider aws-ecs -t TICKET-123
 
@@ -526,6 +526,35 @@ overwrite an existing file unless --regenerate is passed.
 The generated template is inspectable and hand-editable. Commit it to
 version control — secrets are passed as NoEcho CloudFormation parameters
 at deploy time, never baked into the file on disk.
+
+Step 2 — horde bootstrap deploy
+
+Applies .horde/cloudformation.yaml to AWS under the stack name
+horde-<slug>. If the stack does not exist, it is created; otherwise it
+is updated in place. horde polls CloudFormation every 5 seconds and
+streams each new stack event as
+  <timestamp> <LogicalResourceId> <ResourceStatus> <ResourceStatusReason>
+until the stack reaches CREATE_COMPLETE or UPDATE_COMPLETE. Rollback
+and *_FAILED terminal statuses produce an error. If UpdateStack reports
+"No updates are to be performed" (template + parameters match the live
+stack), horde treats it as success.
+
+Deploy needs two secrets, passed as NoEcho CloudFormation parameters
+(AnthropicApiKey, GitToken). It never logs or echoes them:
+  - Interactive: when stdin is a TTY, horde prompts with hidden input.
+  - Headless / CI: when stdin is not a TTY, horde reads ANTHROPIC_API_KEY
+    and GIT_TOKEN from the environment. Missing either is a hard error.
+
+The stack creates IAM roles with fixed names, so deploy passes
+CAPABILITY_NAMED_IAM automatically and tags the stack with horde-slug.
+
+First-time deploys take roughly 15 minutes (the NAT gateway and ECS
+cluster dominate); subsequent updates that only touch in-place resources
+typically finish in 1–3 minutes.
+
+When deploy completes it prints the SSM config parameter path,
+/horde/<slug>/config, which holds the stack's runtime outputs consumed
+by the ECS provider.
 
 Naming and cost notes
 

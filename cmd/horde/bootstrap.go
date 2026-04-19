@@ -26,11 +26,21 @@ stack that provisions the AWS resources horde needs to run workflows on
 ECS Fargate: VPC, ECS cluster, DynamoDB, S3, ECR, Secrets Manager, and
 an EventBridge-triggered Lambda that keeps run status in sync.
 
-Run subcommands in order: 'init' (generate template), 'deploy' (create stack),
-then 'horde push' (push the worker image to ECR). 'destroy' tears everything
-down once no active runs remain.`,
+Run subcommands in order:
+
+  horde bootstrap init       # generates .horde/cloudformation.yaml from the git remote
+  horde bootstrap deploy     # creates/updates the CloudFormation stack (~15 min first time)
+  horde push                 # pushes the worker image to the ECR repo
+  horde launch --provider aws-ecs ...
+
+'deploy' prompts for ANTHROPIC_API_KEY and GIT_TOKEN with hidden input; in
+headless contexts (CI) it reads the same-named environment variables. It
+polls CloudFormation, streaming each new stack event until CREATE_COMPLETE
+or UPDATE_COMPLETE. 'destroy' tears everything down once no active runs
+remain.`,
 		Commands: []*cli.Command{
 			bootstrapInitCmd(),
+			bootstrapDeployCmd(),
 		},
 	}
 }

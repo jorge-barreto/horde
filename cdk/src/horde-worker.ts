@@ -1,4 +1,5 @@
 import * as cdk from "aws-cdk-lib";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
@@ -98,6 +99,13 @@ export class HordeWorker extends Construct {
    */
   public readonly artifactsBucket: s3.IBucket;
 
+  /**
+   * DynamoDB table backing the run history. Partition key `id`; four GSIs
+   * for repo/ticket/status/instance lookups. Consumed by the CLI's
+   * `internal/store/dynamo.go` and by the status-sync Lambda.
+   */
+  public readonly runsTable: dynamodb.Table;
+
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
 
@@ -181,6 +189,37 @@ export class HordeWorker extends Construct {
       cdk.Tags.of(bucket).add("Name", `horde-${slug}-artifacts`);
       this.artifactsBucket = bucket;
     }
+
+    this.runsTable = new dynamodb.Table(this, "RunsTable", {
+      tableName: `horde-runs-${slug}`,
+      partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    cdk.Tags.of(this.runsTable).add("Name", `horde-${slug}-runs`);
+    this.runsTable.addGlobalSecondaryIndex({
+      indexName: "by-repo",
+      partitionKey: { name: "repo", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "started_at", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    this.runsTable.addGlobalSecondaryIndex({
+      indexName: "by-ticket",
+      partitionKey: { name: "ticket", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "started_at", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    this.runsTable.addGlobalSecondaryIndex({
+      indexName: "by-status",
+      partitionKey: { name: "status", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "started_at", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    this.runsTable.addGlobalSecondaryIndex({
+      indexName: "by-instance",
+      partitionKey: { name: "instance_id", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
 
     // Task role: write-only access to its own artifact prefix.
     // Reading happens via the CLI (with the cli-user managed policy).

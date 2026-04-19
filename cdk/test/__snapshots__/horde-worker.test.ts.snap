@@ -357,6 +357,115 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Delete",
     },
+    "HordeRunsTableAC562C05": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "repo",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "started_at",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "ticket",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "status",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "instance_id",
+            "AttributeType": "S",
+          },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "by-repo",
+            "KeySchema": [
+              {
+                "AttributeName": "repo",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "started_at",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "by-ticket",
+            "KeySchema": [
+              {
+                "AttributeName": "ticket",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "started_at",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "by-status",
+            "KeySchema": [
+              {
+                "AttributeName": "status",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "started_at",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "by-instance",
+            "KeySchema": [
+              {
+                "AttributeName": "instance_id",
+                "KeyType": "HASH",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH",
+          },
+        ],
+        "TableName": "horde-runs-test",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-runs",
+          },
+        ],
+      },
+      "Type": "AWS::DynamoDB::Table",
+      "UpdateReplacePolicy": "Delete",
+    },
     "HordeTaskDefinition1A4F86D0": {
       "Properties": {
         "ContainerDefinitions": [

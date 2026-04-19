@@ -219,6 +219,42 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     }
   });
 
+  it("creates the horde-runs DynamoDB table with PAY_PER_REQUEST billing", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::DynamoDB::Table", {
+      TableName: "horde-runs-test",
+      BillingMode: "PAY_PER_REQUEST",
+      KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],
+    });
+  });
+
+  it("creates 4 GSIs on the runs table (by-repo, by-ticket, by-status, by-instance)", () => {
+    const t = synth();
+    const tables = t.findResources("AWS::DynamoDB::Table");
+    const runsTables = Object.values(tables).filter(
+      (tbl) => tbl.Properties.TableName === "horde-runs-test",
+    );
+    expect(runsTables).toHaveLength(1);
+    const gsis = runsTables[0].Properties.GlobalSecondaryIndexes;
+    expect(gsis).toBeDefined();
+    const names = gsis.map((g: { IndexName: string }) => g.IndexName).sort();
+    expect(names).toEqual(["by-instance", "by-repo", "by-status", "by-ticket"]);
+
+    const byInstance = gsis.find((g: { IndexName: string }) => g.IndexName === "by-instance");
+    expect(byInstance.KeySchema).toEqual([{ AttributeName: "instance_id", KeyType: "HASH" }]);
+    expect(byInstance.Projection.ProjectionType).toBe("ALL");
+
+    for (const name of ["by-repo", "by-ticket", "by-status"]) {
+      const idx = gsis.find((g: { IndexName: string }) => g.IndexName === name);
+      const pkName = name === "by-repo" ? "repo" : name === "by-ticket" ? "ticket" : "status";
+      expect(idx.KeySchema).toEqual([
+        { AttributeName: pkName, KeyType: "HASH" },
+        { AttributeName: "started_at", KeyType: "RANGE" },
+      ]);
+      expect(idx.Projection.ProjectionType).toBe("ALL");
+    }
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

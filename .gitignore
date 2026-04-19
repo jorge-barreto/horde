@@ -30,6 +30,13 @@
 *.swo
 *~
 
+# Claude Code per-session runtime state (lockfiles, local settings,
+# scheduled-task working dirs). Intentionally NOT ignoring the whole
+# .claude/ dir — hooks or project-scoped agent prompts would live there.
+.claude/*.lock
+.claude/settings.local.json
+.claude/scheduled_tasks/
+
 # OS
 .DS_Store
 Thumbs.db

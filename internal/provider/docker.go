@@ -354,6 +354,34 @@ func mapExitCode(code int) store.Status {
 	}
 }
 
+// resolveStoppedExitCode picks the authoritative exit code (and resulting
+// run status) for a container that has finished. Source priority:
+//
+//  1. The host-side .horde-exit-code marker (orc's own exit). Container
+//     stays alive via sleep infinity, so docker's exit code reflects how
+//     the container process died, not orc's result.
+//  2. Docker's reported exit code (instExit), used only when the marker
+//     file is missing or unreadable.
+//  3. StatusFailed with no exit code, when neither source is available.
+//     Today the docker client always populates instExit so case (3) is
+//     unreachable in production — the helper exists to keep this fallback
+//     covered by tests if Status() behavior changes.
+//
+// runID is used only for the unparseable-marker warning, never for control flow.
+func resolveStoppedExitCode(markerData []byte, markerErr error, instExit *int, runID string) (store.Status, *int) {
+	if markerErr == nil {
+		code := 1
+		if n, _ := fmt.Sscanf(strings.TrimSpace(string(markerData)), "%d", &code); n == 0 {
+			fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", runID)
+		}
+		return mapExitCode(code), &code
+	}
+	if instExit != nil {
+		return mapExitCode(*instExit), instExit
+	}
+	return store.StatusFailed, nil
+}
+
 // RunResult is the subset of orc's run-result.json that horde reads when
 // finalizing a run. Both the Docker and ECS providers, plus the kill command,
 // parse the same fields with the same JSON tags — kept in one place to
@@ -560,22 +588,9 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 		// Check orc's exit marker on host workspace first — docker's exit code
 		// reflects how the container process (sleep infinity) died, not orc's result.
-		var newStatus store.Status
-		var exitCode *int
 		markerPath := filepath.Join(WorkspacePath(homeDir, run.ID), ".horde-exit-code")
-		if data, err := os.ReadFile(markerPath); err == nil {
-			code := 1
-			if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code); n == 0 {
-				fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", run.ID)
-			}
-			exitCode = &code
-			newStatus = mapExitCode(code)
-		} else if instanceStatus.ExitCode != nil {
-			exitCode = instanceStatus.ExitCode
-			newStatus = mapExitCode(*instanceStatus.ExitCode)
-		} else {
-			newStatus = store.StatusFailed
-		}
+		markerData, markerErr := os.ReadFile(markerPath)
+		newStatus, exitCode := resolveStoppedExitCode(markerData, markerErr, instanceStatus.ExitCode, run.ID)
 
 		now := time.Now()
 		run.Status = newStatus

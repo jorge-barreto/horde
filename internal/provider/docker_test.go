@@ -2223,6 +2223,86 @@ func TestDockerProvider_HydrateRun_ConfigMissingWorkspace(t *testing.T) {
 	}
 }
 
+func TestResolveStoppedExitCode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		markerData []byte
+		markerErr  error
+		instExit   *int
+		wantStatus store.Status
+		wantCode   *int
+	}{
+		{
+			name:       "marker present overrides docker exit",
+			markerData: []byte("0\n"),
+			markerErr:  nil,
+			instExit:   intPtr(143), // docker SIGTERM — should be ignored
+			wantStatus: store.StatusSuccess,
+			wantCode:   intPtr(0),
+		},
+		{
+			name:       "marker present with failure code",
+			markerData: []byte("3"),
+			markerErr:  nil,
+			instExit:   nil,
+			wantStatus: store.StatusFailed,
+			wantCode:   intPtr(3),
+		},
+		{
+			name:       "marker present with kill code 5",
+			markerData: []byte("5"),
+			markerErr:  nil,
+			instExit:   nil,
+			wantStatus: store.StatusKilled,
+			wantCode:   intPtr(5),
+		},
+		{
+			name:       "unparseable marker defaults to 1",
+			markerData: []byte("garbage"),
+			markerErr:  nil,
+			instExit:   intPtr(0),
+			wantStatus: store.StatusFailed, // 1 → failed
+			wantCode:   intPtr(1),
+		},
+		{
+			name:       "marker missing falls through to docker exit",
+			markerData: nil,
+			markerErr:  errors.New("no such file"),
+			instExit:   intPtr(0),
+			wantStatus: store.StatusSuccess,
+			wantCode:   intPtr(0),
+		},
+		{
+			name:       "no marker and no docker exit returns failed nil",
+			markerData: nil,
+			markerErr:  errors.New("no such file"),
+			instExit:   nil,
+			wantStatus: store.StatusFailed,
+			wantCode:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotStatus, gotCode := resolveStoppedExitCode(tc.markerData, tc.markerErr, tc.instExit, "test-run")
+			if gotStatus != tc.wantStatus {
+				t.Errorf("status = %q, want %q", gotStatus, tc.wantStatus)
+			}
+			if (gotCode == nil) != (tc.wantCode == nil) {
+				t.Errorf("exitCode nilness = %v, want %v (got %v want %v)",
+					gotCode == nil, tc.wantCode == nil, gotCode, tc.wantCode)
+				return
+			}
+			if gotCode != nil && *gotCode != *tc.wantCode {
+				t.Errorf("exitCode = %d, want %d", *gotCode, *tc.wantCode)
+			}
+		})
+	}
+}
+
+func intPtr(i int) *int { return &i }
+
 func TestSaveContainerLog_Empty(t *testing.T) {
 	t.Parallel()
 	// Empty payload is a no-op: no directory created, no file written, no warning.

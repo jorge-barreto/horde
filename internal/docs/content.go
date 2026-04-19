@@ -776,4 +776,31 @@ Use 'horde bootstrap' if you don't already use CDK and want a single
 CDK app and want the construct in your own pipeline. Both produce the
 same SSM JSON shape (internal/config/ssm.go::HordeConfig), so the CLI
 can't tell them apart.
+
+End-to-end verification
+-----------------------
+
+The construct ships with a real-AWS smoke test gated by HORDE_E2E_CDK=1.
+Three independent test functions, run as separate 'go test -run'
+invocations so the stack lifetime is decoupled from the test runs:
+
+    HORDE_E2E_CDK=1 go test -v -timeout 20m -run TestECSCDK_Bringup ./test/integration/
+    HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Smoke    ./test/integration/
+    HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Teardown ./test/integration/
+
+Bring-up runs 'cdk deploy', builds the worker image via 'make docker-build',
+and pushes it to the freshly-created ECR repo. State is written to
+/tmp/horde-cdk-e2e-state.json so subsequent test runs can find the stack.
+
+Smoke launches one quick-success workflow against the deployed stack and
+asserts the status-sync Lambda updates the DynamoDB row to status=success
+within 8 minutes. Re-run as often as you like — each invocation costs a
+few cents of Fargate time.
+
+Teardown empties the ECR repo + S3 artifacts bucket, then 'cdk destroy'.
+Idempotent: works even if the state file is missing.
+
+Cost: this stack runs its own NAT Gateway (~$32/mo idle) since it can't
+share infrastructure with the bootstrap CF stack. Always tear down when
+you're done.
 `

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	cwltypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -285,6 +287,22 @@ func emptyECRRepo(ctx context.Context, c *ecr.Client, name string) error {
 	}
 }
 
+// deleteCWLogGroupIfExists deletes the named CloudWatch Logs group. Idempotent
+// (returns nil if the group doesn't exist).
+func deleteCWLogGroupIfExists(ctx context.Context, c *cloudwatchlogs.Client, name string) error {
+	_, err := c.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{
+		LogGroupName: aws.String(name),
+	})
+	if err == nil {
+		return nil
+	}
+	var nf *cwltypes.ResourceNotFoundException
+	if errors.As(err, &nf) {
+		return nil
+	}
+	return err
+}
+
 // emptyS3Bucket deletes every object (and version) from the bucket. Idempotent.
 func emptyS3Bucket(ctx context.Context, c *s3.Client, bucket string) error {
 	for {
@@ -465,6 +483,17 @@ func TestECSCDK_Teardown(t *testing.T) {
 	cdkDir := filepath.Join(cdkRepoRoot(t), "cdk")
 	if err := runCDK(t, cdkDir, "destroy", "--force"); err != nil {
 		t.Fatalf("cdk destroy: %v", err)
+	}
+
+	// The lambda-nodejs `logRetention` prop provisions a custom resource that
+	// retains /aws/lambda/<fn-name> even after stack destroy. Delete it here
+	// so a subsequent bring-up doesn't hit ResourceAlreadyExistsException and
+	// so ingestion on that group can't accrue more data.
+	lambdaLogGroup := fmt.Sprintf("/aws/lambda/horde-%s-status-updater", cdkE2ESlug)
+	if err := deleteCWLogGroupIfExists(ctx, cloudwatchlogs.NewFromConfig(awsCfg), lambdaLogGroup); err != nil {
+		t.Logf("deleting lingering log group %s: %v (non-fatal)", lambdaLogGroup, err)
+	} else {
+		t.Logf("deleted lingering log group %s", lambdaLogGroup)
 	}
 
 	if err := os.Remove(cdkE2EStateFile); err != nil && !errors.Is(err, os.ErrNotExist) {

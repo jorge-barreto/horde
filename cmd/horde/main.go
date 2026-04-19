@@ -521,13 +521,17 @@ in the results directory.`,
 			}
 
 			if run.Status.IsTerminal() {
-				// Container is gone — try saved logs
-				logPath := filepath.Join(provider.LocalResultsDir(homeDir, runID), "container.log")
-				if data, err := os.ReadFile(logPath); err == nil {
-					os.Stdout.Write(data)
-					return nil
+				// Docker: container is gone, try saved logs on disk.
+				// ECS: CloudWatch Logs persist after task stops, so fall
+				// through to prov.Logs() which queries CloudWatch.
+				if run.Provider == "docker" {
+					logPath := filepath.Join(provider.LocalResultsDir(homeDir, runID), "container.log")
+					if data, err := os.ReadFile(logPath); err == nil {
+						os.Stdout.Write(data)
+						return nil
+					}
+					return fmt.Errorf("logs unavailable: run %s is %s (container removed, no saved logs)", runID, run.Status)
 				}
-				return fmt.Errorf("logs unavailable: run %s is %s (container removed, no saved logs)", runID, run.Status)
 			}
 			if run.InstanceID == "" {
 				return fmt.Errorf("logs unavailable: run %s has no container yet", runID)

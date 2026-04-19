@@ -13,10 +13,41 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/jorge-barreto/horde/internal/awscfg"
+	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/store"
 )
+
+// resolveSSMPath returns the SSM parameter path holding the runtime config
+// for the current project. Order of precedence:
+//
+//  1. If HORDE_SSM_PATH is set, use it verbatim (escape hatch for custom
+//     deployments or projects sharing config across repos).
+//  2. If the current directory has a git remote, derive the project slug
+//     the same way `horde bootstrap init` and `horde push` do and return
+//     /horde/<slug>/config. This matches the path the bootstrap stack
+//     actually writes to.
+//  3. Fall back to the legacy global config.DefaultSSMPath (/horde/config)
+//     so pre-slug deployments keep working.
+func resolveSSMPath() string {
+	if p := os.Getenv("HORDE_SSM_PATH"); p != "" {
+		return p
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return config.DefaultSSMPath
+	}
+	repo, err := config.RepoURL(cwd)
+	if err != nil {
+		return config.DefaultSSMPath
+	}
+	slug, err := bootstrap.Slug(repo)
+	if err != nil {
+		return config.DefaultSSMPath
+	}
+	return "/horde/" + slug + "/config"
+}
 
 type factoryDeps struct {
 	loadAWSConfig func(ctx context.Context, profile string) (aws.Config, error)
@@ -59,7 +90,7 @@ func newProviderWith(ctx context.Context, name, profile string, deps factoryDeps
 			return nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
 		if err != nil {
 			return nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
@@ -126,7 +157,7 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 			return nil, nil, 0, "", nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
 		if err != nil {
 			return nil, nil, 0, "", nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
@@ -142,7 +173,7 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %w\n\nhint: use --provider docker for local mode", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, config.DefaultSSMPath)
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
 		if err != nil {
 			return nil, nil, 0, "", nil, fmt.Errorf("auto-detecting provider: %s\n\nhint: use --provider docker for local mode", config.Diagnostic(err))
 		}

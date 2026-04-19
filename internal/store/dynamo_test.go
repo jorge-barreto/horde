@@ -669,9 +669,12 @@ func TestDynamoStore_GetRun_UsesCorrectKey(t *testing.T) {
 
 func TestDynamoStore_GetRun_MissingRequiredField(t *testing.T) {
 	t.Parallel()
+	// AttrInstanceID is intentionally absent: it is populated by UpdateRun
+	// once the provider returns a real instance ID, so missing is valid for
+	// newly-created runs.
 	attrs := []string{
 		AttrID, AttrRepo, AttrTicket, AttrBranch, AttrWorkflow,
-		AttrProvider, AttrInstanceID, AttrLaunchedBy, AttrStatus,
+		AttrProvider, AttrLaunchedBy, AttrStatus,
 		AttrStartedAt, AttrTimeoutAt,
 	}
 	for _, attr := range attrs {

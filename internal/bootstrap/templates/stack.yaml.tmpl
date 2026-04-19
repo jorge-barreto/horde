@@ -235,6 +235,18 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: "horde-{{.Slug}}-exec-secrets"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ResolveContainerSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - Ref: ClaudeCodeOauthTokenSecret
+                  - Ref: GitTokenSecret
       Tags:
         - Key: Name
           Value: "horde-{{.Slug}}-exec-role"
@@ -260,7 +272,10 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
                 Resource:
+                  - Fn::GetAtt: [ArtifactsBucket, Arn]
                   - Fn::Sub: "${ArtifactsBucket.Arn}/*"
               - Sid: SecretsRead
                 Effect: Allow
@@ -297,7 +312,7 @@ Resources:
           - TaskRole
           - Arn
       ContainerDefinitions:
-        - Name: worker
+        - Name: horde-worker
           Image:
             Fn::Sub: "${EcrRepository.RepositoryUri}:latest"
           Essential: true
@@ -561,7 +576,9 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:ListBucket
                 Resource:
+                  - Fn::GetAtt: [ArtifactsBucket, Arn]
                   - Fn::Sub: "${ArtifactsBucket.Arn}/*"
       Tags:
         - Key: Name
@@ -615,14 +632,26 @@ Resources:
 
 
           def fetch_total_cost(run_id):
-              key = "horde-runs/" + run_id + "/run-result.json"
+              # The worker uploads run-result.json under several paths (audit/
+              # and artifacts/, nested under <workflow>/<ticket>). Rather than
+              # hard-coding a path, list the run's prefix and pick the first
+              # run-result.json we find. Any error fetching cost is non-fatal:
+              # status update must still fire even if cost is unknown.
+              prefix = "horde-runs/" + run_id + "/"
               try:
-                  obj = s3.get_object(Bucket=ARTIFACTS_BUCKET, Key=key)
-              except ClientError as e:
-                  code = e.response.get("Error", {}).get("Code", "")
-                  if code in ("NoSuchKey", "404"):
+                  listing = s3.list_objects_v2(Bucket=ARTIFACTS_BUCKET, Prefix=prefix)
+                  key = None
+                  for obj in listing.get("Contents", []) or []:
+                      k = obj.get("Key", "")
+                      if k.endswith("/run-result.json"):
+                          key = k
+                          break
+                  if not key:
                       return None
-                  raise
+                  obj = s3.get_object(Bucket=ARTIFACTS_BUCKET, Key=key)
+              except Exception:
+                  # Any S3 error (access denied, not found, throttle) -> no cost.
+                  return None
               body = obj["Body"].read()
               try:
                   data = json.loads(body)

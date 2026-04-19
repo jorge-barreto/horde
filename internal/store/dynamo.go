@@ -51,11 +51,16 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 		AttrBranch:     &types.AttributeValueMemberS{Value: run.Branch},
 		AttrWorkflow:   &types.AttributeValueMemberS{Value: run.Workflow},
 		AttrProvider:   &types.AttributeValueMemberS{Value: run.Provider},
-		AttrInstanceID: &types.AttributeValueMemberS{Value: run.InstanceID},
 		AttrStatus:     &types.AttributeValueMemberS{Value: string(run.Status)},
 		AttrLaunchedBy: &types.AttributeValueMemberS{Value: run.LaunchedBy},
 		AttrStartedAt:  &types.AttributeValueMemberS{Value: run.StartedAt.UTC().Format(time.RFC3339)},
 		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: run.TimeoutAt.UTC().Format(time.RFC3339)},
+	}
+	// instance_id is the GSI "by-instance" partition key. DynamoDB rejects
+	// empty strings on GSI keys, so only set it when known (UpdateRun fills
+	// it in once the provider returns a real instance ID).
+	if run.InstanceID != "" {
+		item[AttrInstanceID] = &types.AttributeValueMemberS{Value: run.InstanceID}
 	}
 	if run.ExitCode != nil {
 		item[AttrExitCode] = &types.AttributeValueMemberN{Value: strconv.Itoa(*run.ExitCode)}
@@ -127,11 +132,15 @@ func parseRun(item map[string]types.AttributeValue) (*Run, error) {
 	}
 	run.Provider = providerAttr.Value
 
-	instanceIDAttr, ok := item[AttrInstanceID].(*types.AttributeValueMemberS)
-	if !ok {
-		return nil, fmt.Errorf("parsing run %q: missing or invalid %q attribute", id, AttrInstanceID)
+	// instance_id is optional at creation time and populated by UpdateRun
+	// once the provider returns the real instance ID. Absence is not an error.
+	if raw, present := item[AttrInstanceID]; present {
+		instanceIDAttr, ok := raw.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute type", id, AttrInstanceID)
+		}
+		run.InstanceID = instanceIDAttr.Value
 	}
-	run.InstanceID = instanceIDAttr.Value
 
 	launchedByAttr, ok := item[AttrLaunchedBy].(*types.AttributeValueMemberS)
 	if !ok {

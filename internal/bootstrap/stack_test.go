@@ -37,8 +37,10 @@ type fakeCFClient struct {
 
 	createCalls int
 	updateCalls int
+	deleteCalls int
 
 	updateErr error
+	deleteErr error
 
 	events []cftypes.StackEvent
 
@@ -85,8 +87,80 @@ func (f *fakeCFClient) UpdateStack(ctx context.Context, in *cloudformation.Updat
 	return &cloudformation.UpdateStackOutput{StackId: aws.String("stack/fake")}, nil
 }
 
+func (f *fakeCFClient) DeleteStack(ctx context.Context, in *cloudformation.DeleteStackInput, _ ...func(*cloudformation.Options)) (*cloudformation.DeleteStackOutput, error) {
+	f.deleteCalls++
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
+	return &cloudformation.DeleteStackOutput{}, nil
+}
+
 func (f *fakeCFClient) DescribeStackEvents(ctx context.Context, in *cloudformation.DescribeStackEventsInput, _ ...func(*cloudformation.Options)) (*cloudformation.DescribeStackEventsOutput, error) {
 	return &cloudformation.DescribeStackEventsOutput{StackEvents: f.events}, nil
+}
+
+func TestDestroy_SuccessWhenStackDisappears(t *testing.T) {
+	t.Parallel()
+	// Sequence: DescribeStacks returns CREATE_COMPLETE (stack exists) → after
+	// DeleteStack, DescribeStacks returns DELETE_IN_PROGRESS → then "does not exist".
+	notExist := errors.New("ValidationError: Stack with id horde-x does not exist")
+	fake := &fakeCFClient{
+		describeResponses: []describeResponse{
+			{status: cftypes.StackStatusCreateComplete},
+			{status: cftypes.StackStatusDeleteInProgress},
+			{err: notExist},
+		},
+	}
+	var buf bytes.Buffer
+	err := Destroy(context.Background(), fake, "horde-x", 10*time.Millisecond, &buf)
+	if err != nil {
+		t.Fatalf("Destroy error: %v", err)
+	}
+	if fake.deleteCalls != 1 {
+		t.Errorf("DeleteStack calls = %d, want 1", fake.deleteCalls)
+	}
+}
+
+func TestDestroy_StackAlreadyGone(t *testing.T) {
+	t.Parallel()
+	notExist := errors.New("ValidationError: Stack with id horde-x does not exist")
+	fake := &fakeCFClient{
+		describeResponses: []describeResponse{
+			{err: notExist},
+		},
+	}
+	var buf bytes.Buffer
+	err := Destroy(context.Background(), fake, "horde-x", 10*time.Millisecond, &buf)
+	if err != nil {
+		t.Fatalf("Destroy error: %v", err)
+	}
+	if fake.deleteCalls != 0 {
+		t.Errorf("DeleteStack should NOT be called when stack is already absent, got %d", fake.deleteCalls)
+	}
+	if !strings.Contains(buf.String(), "nothing to destroy") {
+		t.Errorf("expected 'nothing to destroy' message, got %q", buf.String())
+	}
+}
+
+func TestDestroy_DeleteFailed(t *testing.T) {
+	t.Parallel()
+	fake := &fakeCFClient{
+		describeResponses: []describeResponse{
+			{status: cftypes.StackStatusCreateComplete},
+			{status: cftypes.StackStatusDeleteFailed, reason: "bucket not empty"},
+		},
+	}
+	var buf bytes.Buffer
+	err := Destroy(context.Background(), fake, "horde-x", 10*time.Millisecond, &buf)
+	if err == nil {
+		t.Fatal("expected error on DELETE_FAILED, got nil")
+	}
+	if !strings.Contains(err.Error(), "DELETE_FAILED") {
+		t.Errorf("error %q should mention DELETE_FAILED", err.Error())
+	}
+	if !strings.Contains(err.Error(), "bucket not empty") {
+		t.Errorf("error %q should include StackStatusReason", err.Error())
+	}
 }
 
 func baseReq() DeployRequest {

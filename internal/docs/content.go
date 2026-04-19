@@ -514,6 +514,7 @@ Workflow
   horde bootstrap deploy     # creates or updates the CloudFormation stack
   horde push                 # (not yet implemented) pushes the worker image
   horde launch --provider aws-ecs -t TICKET-123
+  horde bootstrap destroy    # tears everything down
 
 Step 1 — horde bootstrap init
 
@@ -555,6 +556,18 @@ typically finish in 1–3 minutes.
 When deploy completes it prints the SSM config parameter path,
 /horde/<slug>/config, which holds the stack's runtime outputs consumed
 by the ECS provider.
+
+Step 3 — horde bootstrap destroy
+
+Deletes the horde-<slug> CloudFormation stack and waits for deletion to
+complete. Refuses if pending or running runs exist in DynamoDB (horde
+checks the store first; kill the active runs before destroying). Prompts
+for confirmation — the user must type the full stack name. Pass --force
+to skip the confirmation in scripts.
+
+If the DynamoDB store is unreachable (credentials stale, table deleted
+from a prior partial destroy), destroy warns and proceeds rather than
+blocking on an unreachable dependency.
 
 Naming and cost notes
 

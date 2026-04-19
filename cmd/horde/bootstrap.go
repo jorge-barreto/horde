@@ -41,6 +41,7 @@ remain.`,
 		Commands: []*cli.Command{
 			bootstrapInitCmd(),
 			bootstrapDeployCmd(),
+			bootstrapDestroyCmd(),
 		},
 	}
 }

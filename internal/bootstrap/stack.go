@@ -21,6 +21,7 @@ type CFClient interface {
 	DescribeStacks(ctx context.Context, in *cloudformation.DescribeStacksInput, opts ...func(*cloudformation.Options)) (*cloudformation.DescribeStacksOutput, error)
 	CreateStack(ctx context.Context, in *cloudformation.CreateStackInput, opts ...func(*cloudformation.Options)) (*cloudformation.CreateStackOutput, error)
 	UpdateStack(ctx context.Context, in *cloudformation.UpdateStackInput, opts ...func(*cloudformation.Options)) (*cloudformation.UpdateStackOutput, error)
+	DeleteStack(ctx context.Context, in *cloudformation.DeleteStackInput, opts ...func(*cloudformation.Options)) (*cloudformation.DeleteStackOutput, error)
 	DescribeStackEvents(ctx context.Context, in *cloudformation.DescribeStackEventsInput, opts ...func(*cloudformation.Options)) (*cloudformation.DescribeStackEventsOutput, error)
 }
 
@@ -114,6 +115,84 @@ func Deploy(ctx context.Context, client CFClient, req DeployRequest, w io.Writer
 	}
 
 	return waitForStack(ctx, client, req.StackName, req.PollInterval, w)
+}
+
+// Destroy deletes the named CloudFormation stack and polls until the stack is
+// gone (DescribeStacks returns a "does not exist" ValidationError) or until
+// the stack reaches a DELETE_FAILED terminal status. Events are streamed to w.
+//
+// PollInterval defaults to 5s if zero. Returns nil on successful deletion.
+func Destroy(ctx context.Context, client CFClient, stackName string, pollInterval time.Duration, w io.Writer) error {
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
+	if strings.TrimSpace(stackName) == "" {
+		return fmt.Errorf("destroy: stack name is empty")
+	}
+
+	exists, err := stackExists(ctx, client, stackName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		fmt.Fprintf(w, "Stack %s does not exist; nothing to destroy.\n", stackName)
+		return nil
+	}
+
+	fmt.Fprintf(w, "Deleting stack %s...\n", stackName)
+	if _, err := client.DeleteStack(ctx, &cloudformation.DeleteStackInput{
+		StackName: aws.String(stackName),
+	}); err != nil {
+		return fmt.Errorf("deleting stack %s: %w", stackName, err)
+	}
+
+	return waitForDelete(ctx, client, stackName, pollInterval, w)
+}
+
+// waitForDelete polls DescribeStacks until the stack disappears (treated as
+// successful deletion) or reaches DELETE_FAILED.
+func waitForDelete(ctx context.Context, client CFClient, name string, interval time.Duration, w io.Writer) error {
+	var lastEventTime time.Time
+	first := true
+	for {
+		if !first {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+		first = false
+
+		lastEventTime = printNewEvents(ctx, client, name, lastEventTime, w)
+
+		out, err := client.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{
+			StackName: aws.String(name),
+		})
+		if err != nil {
+			if isNotExistError(err) {
+				// Stack has been fully deleted.
+				return nil
+			}
+			return fmt.Errorf("describing stack %s: %w", name, err)
+		}
+		if len(out.Stacks) == 0 {
+			return nil
+		}
+		status := out.Stacks[0].StackStatus
+		if status == cftypes.StackStatusDeleteComplete {
+			printNewEvents(ctx, client, name, lastEventTime, w)
+			return nil
+		}
+		if status == cftypes.StackStatusDeleteFailed {
+			printNewEvents(ctx, client, name, lastEventTime, w)
+			reason := ""
+			if out.Stacks[0].StackStatusReason != nil {
+				reason = ": " + *out.Stacks[0].StackStatusReason
+			}
+			return fmt.Errorf("stack %s: DELETE_FAILED%s", name, reason)
+		}
+	}
 }
 
 // stackExists reports whether the named stack already exists. A

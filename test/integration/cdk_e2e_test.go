@@ -76,18 +76,40 @@ func cdkRepoRoot(t *testing.T) string {
 	return root
 }
 
-// runCDK shells out to `npx cdk <args>` from cdkDir. Streams output to the
-// test logger so deploys are observable in real time.
+// runCDK shells out to `npx cdk <args>` from cdkDir. Captures combined
+// output and, on failure, flushes it to the test log so failures leave a
+// visible trail even without -v.
 func runCDK(t *testing.T, cdkDir string, args ...string) error {
 	t.Helper()
 	full := append([]string{"cdk"}, args...)
 	cmd := exec.Command("npx", full...)
 	cmd.Dir = cdkDir
 	cmd.Env = cdkEnvForCDK()
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
 	t.Logf("running: cd %s && npx %s", cdkDir, strings.Join(full, " "))
-	return cmd.Run()
+	return runAndLogOnFailure(t, cmd)
+}
+
+// runAndLogOnFailure runs cmd with combined stdout+stderr into a buffer.
+// Streams to os.Stderr so `-v` still shows live output; on failure also
+// emits the full captured buffer via t.Log so errors survive the test
+// runner's quiet mode.
+func runAndLogOnFailure(t *testing.T, cmd *exec.Cmd) error {
+	t.Helper()
+	var buf strings.Builder
+	cmd.Stdout = &teeWriter{a: &buf, b: os.Stderr}
+	cmd.Stderr = cmd.Stdout
+	err := cmd.Run()
+	if err != nil {
+		t.Logf("command failed: %v\n--- output ---\n%s\n--- end output ---", err, buf.String())
+	}
+	return err
+}
+
+type teeWriter struct{ a, b interface{ Write([]byte) (int, error) } }
+
+func (t *teeWriter) Write(p []byte) (int, error) {
+	t.a.Write(p)
+	return t.b.Write(p)
 }
 
 func cdkEnvForCDK() []string {
@@ -242,20 +264,16 @@ func hordePushForCDK(t *testing.T, repoRoot string) error {
 	cmd := exec.Command(hordeBin, "push")
 	cmd.Dir = projDir
 	cmd.Env = os.Environ()
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
 	t.Logf("running: cd %s && horde push", projDir)
-	return cmd.Run()
+	return runAndLogOnFailure(t, cmd)
 }
 
 func runMake(t *testing.T, dir, target string) error {
 	t.Helper()
 	cmd := exec.Command("make", target)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
 	t.Logf("running: cd %s && make %s", dir, target)
-	return cmd.Run()
+	return runAndLogOnFailure(t, cmd)
 }
 
 // emptyECRRepo deletes every image in the named repo. Idempotent.

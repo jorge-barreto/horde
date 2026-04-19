@@ -304,3 +304,35 @@ func newECSHarness(t *testing.T) *harness {
 	t.Cleanup(driver.TearDown)
 	return h
 }
+
+// uniqueTicket returns a ticket ID unique within this test binary invocation.
+// Format: TEST-<name>-<unix-nano>. Lets individual ECS tests run concurrently
+// without ticket collisions, and makes a failing test's run trivially
+// identifiable in AWS consoles.
+func uniqueTicket(name string) string {
+	return fmt.Sprintf("TEST-%s-%d", name, time.Now().UnixNano())
+}
+
+// waitForECSTerminal polls StoreStatus every 5 seconds up to timeout. Fails
+// the test via t.Fatalf if the run never reaches success/failed/killed. On
+// success logs each status transition so failure mode is trivially visible.
+func waitForECSTerminal(t *testing.T, h *harness, runID string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		got := h.driver.StoreStatus(runID)
+		if got != last {
+			t.Logf("status transition: %q -> %q", last, got)
+			last = got
+		}
+		switch got {
+		case "success", "failed", "killed", "timed_out":
+			t.Logf("run %s reached terminal status=%q", runID, got)
+			return got
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Fatalf("run %s did not reach terminal status within %s (last=%q)", runID, timeout, last)
+	return ""
+}

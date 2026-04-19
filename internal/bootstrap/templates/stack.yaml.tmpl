@@ -192,6 +192,7 @@ Resources:
       ImageTagMutability: MUTABLE
       ImageScanningConfiguration:
         ScanOnPush: true
+      EmptyOnDelete: true
       Tags:
         - Key: Name
           Value: "horde-{{.Slug}}-ecr"

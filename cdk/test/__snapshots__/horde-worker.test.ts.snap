@@ -2,6 +2,14 @@
 
 exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
 {
+  "Outputs": {
+    "HordeCliUserManagedPolicyArn09A94DB5": {
+      "Description": "Attach this managed policy to IAM principals that run the horde CLI",
+      "Value": {
+        "Ref": "HordeCliUserPolicy7E962E7B",
+      },
+    },
+  },
   "Parameters": {
     "BootstrapVersion": {
       "Default": "/cdk-bootstrap/hnb659fds/version",
@@ -213,6 +221,189 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "HordeCliUserPolicy7E962E7B": {
+      "Properties": {
+        "Description": "Permissions required by the horde CLI to launch, inspect, and terminate runs",
+        "ManagedPolicyName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-test-cli-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Path": "/",
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:111111111111:parameter",
+                    {
+                      "Ref": "HordeConfigParameterA1D17F8F",
+                    },
+                  ],
+                ],
+              },
+              "Sid": "SsmRead",
+            },
+            {
+              "Action": [
+                "ecs:RunTask",
+                "ecs:DescribeTasks",
+                "ecs:StopTask",
+                "ecs:ListTasks",
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Fn::GetAtt": [
+                      "HordeClusterA7629518",
+                      "Arn",
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "EcsRun",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ecs-tasks.amazonaws.com",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeTaskRole4CD3769C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "HordeExecutionRole89AE651A",
+                    "Arn",
+                  ],
+                },
+              ],
+              "Sid": "EcsPassRole",
+            },
+            {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeRunsTableAC562C05",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeRunsTableAC562C05",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "DynamoRunsTable",
+            },
+            {
+              "Action": [
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents",
+                "logs:DescribeLogStreams",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeLogGroup1EE05984",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeLogGroup1EE05984",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "LogsRead",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "ArtifactsRead",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::ManagedPolicy",
     },
     "HordeClusterA7629518": {
       "Properties": {

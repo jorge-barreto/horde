@@ -335,6 +335,51 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     expect(valueStr).toContain('\\"default_timeout_minutes\\":1440');
   });
 
+  it("creates a CLI user managed policy with all six required Sids", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::ManagedPolicy");
+    const cliPolicies = Object.values(policies).filter((p) =>
+      p.Properties.ManagedPolicyName?.["Fn::Join"]?.[1]?.some?.(
+        (seg: string) => typeof seg === "string" && seg.includes("horde-test-cli-"),
+      ) ||
+      (typeof p.Properties.ManagedPolicyName === "string" &&
+        p.Properties.ManagedPolicyName.includes("horde-test-cli-")),
+    );
+    expect(cliPolicies).toHaveLength(1);
+    const stmts = cliPolicies[0].Properties.PolicyDocument.Statement as Array<{
+      Sid: string;
+    }>;
+    const sids = stmts.map((s) => s.Sid).sort();
+    expect(sids).toEqual([
+      "ArtifactsRead",
+      "DynamoRunsTable",
+      "EcsPassRole",
+      "EcsRun",
+      "LogsRead",
+      "SsmRead",
+    ]);
+  });
+
+  it("EcsRun is scoped to the cluster ARN via condition", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::ManagedPolicy");
+    const cliPolicy = Object.values(policies)[0];
+    const ecsRun = cliPolicy.Properties.PolicyDocument.Statement.find(
+      (s: { Sid: string }) => s.Sid === "EcsRun",
+    );
+    expect(ecsRun.Condition.ArnEquals).toBeDefined();
+    expect(ecsRun.Condition.ArnEquals["ecs:cluster"]).toBeDefined();
+  });
+
+  it("emits a CfnOutput named CliUserManagedPolicyArn", () => {
+    const t = synth();
+    const outputs = t.findOutputs("*");
+    const matchingKeys = Object.keys(outputs).filter((k) =>
+      k.includes("CliUserManagedPolicyArn"),
+    );
+    expect(matchingKeys.length).toBeGreaterThan(0);
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

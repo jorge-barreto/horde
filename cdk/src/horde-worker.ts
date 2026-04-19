@@ -119,6 +119,14 @@ export class HordeWorker extends Construct {
    */
   public readonly configParameter: ssm.StringParameter;
 
+  /**
+   * Managed policy that grants the horde CLI everything it needs to launch,
+   * inspect, and terminate runs. Attach to whichever IAM principal your
+   * developers/CI use (group, role, or user). Also exposed as CfnOutput
+   * `CliUserManagedPolicyArn`.
+   */
+  public readonly cliUserPolicy: iam.ManagedPolicy;
+
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
 
@@ -313,6 +321,63 @@ export class HordeWorker extends Construct {
       parameterName: ssmPath,
       stringValue: configJson,
       description: `horde CLI configuration for project ${slug}`,
+    });
+
+    this.cliUserPolicy = new iam.ManagedPolicy(this, "CliUserPolicy", {
+      managedPolicyName: `horde-${slug}-cli-${cdk.Aws.REGION}`,
+      description: "Permissions required by the horde CLI to launch, inspect, and terminate runs",
+      statements: [
+        new iam.PolicyStatement({
+          sid: "SsmRead",
+          effect: iam.Effect.ALLOW,
+          actions: ["ssm:GetParameter"],
+          resources: [this.configParameter.parameterArn],
+        }),
+        new iam.PolicyStatement({
+          sid: "EcsRun",
+          effect: iam.Effect.ALLOW,
+          actions: ["ecs:RunTask", "ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"],
+          resources: ["*"],
+          conditions: { ArnEquals: { "ecs:cluster": this.cluster.clusterArn } },
+        }),
+        new iam.PolicyStatement({
+          sid: "EcsPassRole",
+          effect: iam.Effect.ALLOW,
+          actions: ["iam:PassRole"],
+          resources: [this.taskRole.roleArn, this.executionRole.roleArn],
+          conditions: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
+        }),
+        new iam.PolicyStatement({
+          sid: "DynamoRunsTable",
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "dynamodb:PutItem",
+            "dynamodb:GetItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:Scan",
+          ],
+          resources: [this.runsTable.tableArn, `${this.runsTable.tableArn}/index/*`],
+        }),
+        new iam.PolicyStatement({
+          sid: "LogsRead",
+          effect: iam.Effect.ALLOW,
+          actions: ["logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams"],
+          resources: [this.logGroup.logGroupArn, `${this.logGroup.logGroupArn}:*`],
+        }),
+        new iam.PolicyStatement({
+          sid: "ArtifactsRead",
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:GetObject", "s3:ListBucket"],
+          resources: [this.artifactsBucket.bucketArn, `${this.artifactsBucket.bucketArn}/*`],
+        }),
+      ],
+    });
+
+    new cdk.CfnOutput(this, "CliUserManagedPolicyArn", {
+      value: this.cliUserPolicy.managedPolicyArn,
+      description: "Attach this managed policy to IAM principals that run the horde CLI",
     });
   }
 }

@@ -3,11 +3,17 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	smithy "github.com/aws/smithy-go"
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
@@ -79,13 +85,23 @@ func runBootstrapDestroy(ctx context.Context, cmd *cli.Command, stdin confirmRea
 		}
 	}
 
-	// 3. Load AWS config + CFN client.
+	// 3. Load AWS config.
+	awsCfg, err := awscfg.Load(ctx, cmd.String("profile"))
+	if err != nil {
+		return err
+	}
+
+	// 4. Empty the artifacts S3 bucket. CloudFormation can't delete an
+	//    S3 bucket that still has objects in it, and tests / real runs
+	//    populate it with artifacts. Best-effort: if we can't read SSM
+	//    config (stack already partially gone) or the bucket doesn't
+	//    exist, warn and proceed — DeleteStack will succeed anyway for
+	//    a missing bucket and surface a clear error for a non-empty one.
+	emptyArtifactsBucket(ctx, cmd, awsCfg, slug)
+
+	// 5. CFN client + delete.
 	if newClient == nil {
-		newClient = func(ctx context.Context, profile string) (bootstrap.CFClient, error) {
-			awsCfg, err := awscfg.Load(ctx, profile)
-			if err != nil {
-				return nil, err
-			}
+		newClient = func(_ context.Context, _ string) (bootstrap.CFClient, error) {
 			return cloudformation.NewFromConfig(awsCfg), nil
 		}
 	}
@@ -93,9 +109,66 @@ func runBootstrapDestroy(ctx context.Context, cmd *cli.Command, stdin confirmRea
 	if err != nil {
 		return err
 	}
-
-	// 4. Delete stack.
 	return bootstrap.Destroy(ctx, client, stackName, 0, cmd.Writer)
+}
+
+// emptyArtifactsBucket deletes every object in the stack's artifacts bucket
+// so the subsequent CloudFormation DeleteStack doesn't fail on a non-empty
+// S3 bucket. All errors are warnings, not fatal: if SSM is unreachable
+// (stack already partially destroyed) or the bucket is already gone, let
+// DeleteStack drive the final outcome.
+func emptyArtifactsBucket(ctx context.Context, cmd *cli.Command, awsCfg aws.Config, slug string) {
+	ssmClient := ssm.NewFromConfig(awsCfg)
+	hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, "/horde/"+slug+"/config")
+	if err != nil {
+		fmt.Fprintf(cmd.Writer, "warning: could not read stack SSM config to find artifacts bucket (%v); proceeding\n", err)
+		return
+	}
+	bucket := hordeCfg.ArtifactsBucket
+	if bucket == "" {
+		return
+	}
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	// Paginate list+delete in batches of 1000.
+	var continuationToken *string
+	total := 0
+	for {
+		out, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(bucket),
+			ContinuationToken: continuationToken,
+		})
+		if err != nil {
+			var apiErr smithy.APIError
+			if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchBucket" {
+				return
+			}
+			fmt.Fprintf(cmd.Writer, "warning: listing objects in %s failed (%v); proceeding\n", bucket, err)
+			return
+		}
+		if len(out.Contents) == 0 {
+			break
+		}
+		ids := make([]s3types.ObjectIdentifier, 0, len(out.Contents))
+		for _, obj := range out.Contents {
+			ids = append(ids, s3types.ObjectIdentifier{Key: obj.Key})
+		}
+		if _, err := s3Client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucket),
+			Delete: &s3types.Delete{Objects: ids, Quiet: aws.Bool(true)},
+		}); err != nil {
+			fmt.Fprintf(cmd.Writer, "warning: deleting objects in %s failed (%v); proceeding\n", bucket, err)
+			return
+		}
+		total += len(ids)
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			break
+		}
+		continuationToken = out.NextContinuationToken
+	}
+	if total > 0 {
+		fmt.Fprintf(cmd.Writer, "Emptied %d object(s) from artifacts bucket %s.\n", total, bucket)
+	}
 }
 
 // refuseIfActiveRuns queries the DynamoDB store for pending or running runs

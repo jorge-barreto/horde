@@ -16,19 +16,30 @@ npm install @horde/cdk aws-cdk-lib constructs
 
 ```ts
 import { App, Stack } from "aws-cdk-lib";
+import * as ecr from "aws-cdk-lib/aws-ecr";
+import * as ecs from "aws-cdk-lib/aws-ecs";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { HordeWorker } from "@horde/cdk";
 
 const app = new App();
 const stack = new Stack(app, "HordeStack");
 
+const repo = new ecr.Repository(stack, "WorkerImage", {
+  repositoryName: "horde-my-org-my-repo",
+});
+
 new HordeWorker(stack, "Horde", {
   projectSlug: "my-org-my-repo",
-  claudeCodeOauthTokenSecretArn: "arn:aws:secretsmanager:...",
-  gitTokenSecretArn: "arn:aws:secretsmanager:...",
+  workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
+  ecrRepository: repo,
+  secrets: {
+    CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(
+      stack, "ClaudeToken", "horde/claude-code-oauth-token"),
+    GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(
+      stack, "GitToken", "horde/git-token"),
+  },
 });
 ```
-
-The construct emits a `CliUserManagedPolicyArn` `CfnOutput` — attach that managed policy to whichever IAM principal runs the `horde` CLI.
 
 ## Development
 

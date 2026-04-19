@@ -1,3 +1,1 @@
-// Barrel export for @horde/cdk.
-// Construct exports are added by horde-5fh.3 onward.
-export {};
+export type { HordeWorkerProps, HordeWorkerSecrets } from "./horde-worker-props";

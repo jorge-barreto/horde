@@ -74,6 +74,8 @@ func TestRender_ContainsSlug(t *testing.T) {
 		"horde-myproj-private-2",
 		"horde-myproj-nat",
 		"horde-myproj-vpc-id",
+		"horde-myproj",
+		"/ecs/horde-worker-myproj",
 	}
 	for _, sub := range expected {
 		if !strings.Contains(s, sub) {
@@ -118,6 +120,13 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"PrivateDefaultRoute",
 		"PrivateSubnet1RouteAssoc",
 		"PrivateSubnet2RouteAssoc",
+		"EcrRepository",
+		"EcsCluster",
+		"WorkerSecurityGroup",
+		"TaskExecutionRole",
+		"TaskRole",
+		"LogGroup",
+		"WorkerTaskDefinition",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -125,6 +134,42 @@ func TestRender_ResourcesPresent(t *testing.T) {
 			t.Parallel()
 			if _, ok := resources[id]; !ok {
 				t.Errorf("resource %q missing from rendered template", id)
+			}
+		})
+	}
+}
+
+func TestRender_OutputsPresent(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	outputs, ok := m["Outputs"].(map[string]any)
+	if !ok {
+		t.Fatalf("Outputs is not a map, got %T", m["Outputs"])
+	}
+
+	expectedIDs := []string{
+		"VpcId",
+		"PublicSubnetIds",
+		"PrivateSubnetIds",
+		"ClusterArn",
+		"TaskDefinitionArn",
+		"WorkerSecurityGroupId",
+		"EcrRepositoryUri",
+		"LogGroupName",
+	}
+	for _, id := range expectedIDs {
+		id := id
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+			if _, ok := outputs[id]; !ok {
+				t.Errorf("output %q missing from rendered template", id)
 			}
 		})
 	}

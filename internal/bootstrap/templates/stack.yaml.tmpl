@@ -175,6 +175,113 @@ Resources:
       SubnetId:
         Ref: PrivateSubnet2
 
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: "horde-{{.Slug}}"
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-ecr"
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: "horde-{{.Slug}}"
+      CapacityProviders:
+        - FARGATE
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-cluster"
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "horde worker egress-only"
+      VpcId:
+        Ref: VPC
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: "0.0.0.0/0"
+          Description: "allow all outbound"
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-worker-sg"
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: "horde-{{.Slug}}-exec-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-exec-role"
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: "horde-{{.Slug}}-task-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-task-role"
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: "/ecs/horde-worker-{{.Slug}}"
+      RetentionInDays: 30
+
+  WorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: "horde-{{.Slug}}"
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "4096"
+      ExecutionRoleArn:
+        Fn::GetAtt:
+          - TaskExecutionRole
+          - Arn
+      TaskRoleArn:
+        Fn::GetAtt:
+          - TaskRole
+          - Arn
+      ContainerDefinitions:
+        - Name: worker
+          Image:
+            Fn::Sub: "${EcrRepository.RepositoryUri}:latest"
+          Essential: true
+          Environment: []
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:
+                Ref: LogGroup
+              awslogs-region:
+                Ref: "AWS::Region"
+              awslogs-stream-prefix: ecs
+
 Outputs:
   VpcId:
     Value:
@@ -199,3 +306,37 @@ Outputs:
           - Ref: PrivateSubnet2
     Export:
       Name: "horde-{{.Slug}}-private-subnets"
+
+  ClusterArn:
+    Value:
+      Fn::GetAtt:
+        - EcsCluster
+        - Arn
+    Export:
+      Name: "horde-{{.Slug}}-cluster-arn"
+
+  TaskDefinitionArn:
+    Value:
+      Ref: WorkerTaskDefinition
+    Export:
+      Name: "horde-{{.Slug}}-task-definition-arn"
+
+  WorkerSecurityGroupId:
+    Value:
+      Ref: WorkerSecurityGroup
+    Export:
+      Name: "horde-{{.Slug}}-worker-sg"
+
+  EcrRepositoryUri:
+    Value:
+      Fn::GetAtt:
+        - EcrRepository
+        - RepositoryUri
+    Export:
+      Name: "horde-{{.Slug}}-ecr-uri"
+
+  LogGroupName:
+    Value:
+      Ref: LogGroup
+    Export:
+      Name: "horde-{{.Slug}}-log-group"

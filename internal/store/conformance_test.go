@@ -225,6 +225,14 @@ func conformanceRun(id, repo, ticket string, status Status) *Run {
 	}
 }
 
+func runIDs(runs []*Run) []string {
+	ids := make([]string, len(runs))
+	for i, r := range runs {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
 // RunStoreConformance runs the shared conformance suite against any Store implementation.
 func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 	t.Helper()
@@ -757,7 +765,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		repo := "github.com/org/ticketrepo"
 		ticket := "PROJ-42"
 
-		run1 := conformanceRun("run-1", repo, ticket, StatusPending)    // active, matching, newest
+		run1 := conformanceRun("run-1", repo, ticket, StatusPending) // active, matching, newest
 		run1Older := conformanceRun("run-1-older", repo, ticket, StatusRunning)
 		run1Older.StartedAt = run1.StartedAt.Add(-1 * time.Hour)
 		run2 := conformanceRun("run-2", repo, ticket, StatusSuccess)    // inactive
@@ -952,6 +960,47 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if len(runs) != 2 {
 			t.Errorf("len: got %d, want 2", len(runs))
+		}
+	})
+
+	t.Run("ListActive/SortedByStartedAtDesc", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		// Three runs of mixed pending/running status with strictly
+		// increasing StartedAt values. ListActive must return them in
+		// descending order regardless of how a backend partitions the
+		// query (e.g. DynamoDB's separate by-status GSI lookups).
+		base := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+		entries := []struct {
+			id     string
+			status Status
+			offset time.Duration
+		}{
+			{"sort-pending-old", StatusPending, 0},
+			{"sort-running-mid", StatusRunning, 1 * time.Minute},
+			{"sort-pending-new", StatusPending, 2 * time.Minute},
+		}
+		for _, e := range entries {
+			r := conformanceRun(e.id, "github.com/org/repo", "PROJ-1", e.status)
+			r.StartedAt = base.Add(e.offset)
+			r.TimeoutAt = r.StartedAt.Add(60 * time.Minute)
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun %s: %v", r.ID, err)
+			}
+		}
+		runs, err := s.ListActive(ctx)
+		if err != nil {
+			t.Fatalf("ListActive: %v", err)
+		}
+		if len(runs) != 3 {
+			t.Fatalf("len: got %d, want 3", len(runs))
+		}
+		want := []string{"sort-pending-new", "sort-running-mid", "sort-pending-old"}
+		for i, r := range runs {
+			if r.ID != want[i] {
+				t.Errorf("position %d: got %q, want %q (full order: %v)",
+					i, r.ID, want[i], runIDs(runs))
+			}
 		}
 	})
 

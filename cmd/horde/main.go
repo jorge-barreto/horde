@@ -190,17 +190,24 @@ kill some runs before launching more.`,
 				return fmt.Errorf("checking active runs: %w", err)
 			}
 			// Reconcile stale records: container may have died since last check.
+			// Reconciliation is best-effort — a failed Finalize/UpdateRun must
+			// not block the new launch, but we log so users can diagnose if
+			// duplicate-ticket protection misbehaves due to a stuck record.
 			stillActive := active[:0]
 			for _, r := range active {
 				origStatus := r.Status
-				_ = prov.Finalize(ctx, r, homeDir)
+				if err := prov.Finalize(ctx, r, homeDir); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: reconciling active run %s: %v\n", r.ID, err)
+				}
 				if r.Status != origStatus {
-					_ = st.UpdateRun(ctx, r.ID, &store.RunUpdate{
+					if err := st.UpdateRun(ctx, r.ID, &store.RunUpdate{
 						Status:       &r.Status,
 						ExitCode:     r.ExitCode,
 						CompletedAt:  r.CompletedAt,
 						TotalCostUSD: r.TotalCostUSD,
-					})
+					}); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: persisting reconciled status for run %s: %v\n", r.ID, err)
+					}
 				}
 				if r.Status == store.StatusPending || r.Status == store.StatusRunning {
 					stillActive = append(stillActive, r)

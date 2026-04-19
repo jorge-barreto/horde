@@ -3912,6 +3912,96 @@ esac
 	}
 }
 
+// TestStatus_JSON_FinalizeDuringCall covers horde-5ez: a single horde --json
+// status invocation where the run is "running" in the store at call start
+// but the container is already stopped, so prov.Finalize updates the run
+// before writeJSONTo serializes it. The JSON output must reflect the
+// post-Finalize success state (not the pre-call running state) AND the
+// store must persist the same transition. Existing JSON tests cover the
+// already-terminal path; lazy-completion tests cover the stdout (text)
+// path. This is the integration of the two.
+func TestStatus_JSON_FinalizeDuringCall(t *testing.T) {
+	// inspect reports a stopped container with exit 0; cp/rm noop so
+	// Finalize's stopped branch (artifact copy) succeeds silently.
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) printf '{"Running":false,"ExitCode":0,"StartedAt":"2024-06-15T10:30:00Z","FinishedAt":"2024-06-15T10:45:00Z"}' ;;
+  cp) exit 0 ;;
+  rm) exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	runID := "fin5ezjson01"
+	if err := st.CreateRun(ctx, &store.Run{
+		ID:         runID,
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-5EZ",
+		Status:     store.StatusRunning, // pre-call: running
+		InstanceID: "abc123",
+		Provider:   "docker",
+		LaunchedBy: "testuser",
+		StartedAt:  now.Add(-15 * time.Minute),
+		TimeoutAt:  now.Add(45 * time.Minute),
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", runID})
+	out := buf.Bytes()
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, out)
+	}
+
+	// JSON output must reflect the POST-Finalize state, not the
+	// pre-call StatusRunning that the store held when the call started.
+	var v StatusV1
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, out)
+	}
+	if v.Status != "success" {
+		t.Errorf("JSON Status = %q, want %q (Finalize result must surface in JSON)", v.Status, "success")
+	}
+	if v.ExitCode == nil || *v.ExitCode != 0 {
+		t.Errorf("JSON ExitCode = %v, want 0", v.ExitCode)
+	}
+	if v.CompletedAt == "" {
+		t.Errorf("JSON CompletedAt is empty, want set after Finalize")
+	}
+
+	// And the store must have been updated by the same call (the
+	// finalizeAndSync helper persists the new state alongside).
+	st2, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("reopening store: %v", err)
+	}
+	defer st2.Close()
+	r, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("re-reading run: %v", err)
+	}
+	if r.Status != store.StatusSuccess {
+		t.Errorf("store Status = %q, want %q", r.Status, store.StatusSuccess)
+	}
+	if r.ExitCode == nil || *r.ExitCode != 0 {
+		t.Errorf("store ExitCode = %v, want 0", r.ExitCode)
+	}
+	if r.CompletedAt == nil {
+		t.Errorf("store CompletedAt is nil, want set after Finalize")
+	}
+}
+
 func TestList_JSON_ActiveOnly(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()

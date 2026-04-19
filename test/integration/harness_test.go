@@ -15,16 +15,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jorge-barreto/horde/internal/config"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var hordeBin string // set by TestMain
 
+// dockerAvailable caches the result of exec.LookPath("docker"). Docker-backed
+// tests should skip when false; ECS-backed tests do not require it.
+var dockerAvailable bool
+
 func TestMain(m *testing.M) {
-	// Skip all integration tests if Docker is not available in PATH.
-	if _, err := exec.LookPath("docker"); err != nil {
-		fmt.Fprintln(os.Stderr, "SKIP: docker not found in PATH; skipping integration tests")
-		os.Exit(0)
+	// Load .env from the repo root so tests inherit AWS_PROFILE, HORDE_E2E_*
+	// flags, and any other variables declared there. Real environment wins
+	// (same policy as cmd/horde/main.go).
+	if repoRoot, err := filepath.Abs(filepath.Join("..", "..")); err == nil {
+		if err := config.ApplyDotEnvToProcess(repoRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
+		}
+	}
+
+	// Docker is a soft dependency — record availability so Docker-backed
+	// tests can skip individually. ECS tests do not need Docker.
+	_, err := exec.LookPath("docker")
+	dockerAvailable = err == nil
+	if !dockerAvailable {
+		fmt.Fprintln(os.Stderr, "note: docker not found in PATH; Docker-backed tests will skip")
 	}
 
 	// Build horde binary
@@ -70,6 +86,9 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	if !dockerAvailable {
+		t.Skip("docker not available; skipping Docker-backed integration test")
+	}
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

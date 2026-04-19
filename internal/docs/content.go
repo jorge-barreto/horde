@@ -512,7 +512,7 @@ Workflow
 
   horde bootstrap init       # generates .horde/cloudformation.yaml
   horde bootstrap deploy     # creates or updates the CloudFormation stack
-  horde push                 # (not yet implemented) pushes the worker image
+  horde push                 # tags and pushes horde-worker:latest to ECR
   horde launch --provider aws-ecs -t TICKET-123
   horde bootstrap destroy    # tears everything down
 
@@ -557,7 +557,19 @@ When deploy completes it prints the SSM config parameter path,
 /horde/<slug>/config, which holds the stack's runtime outputs consumed
 by the ECS provider.
 
-Step 3 — horde bootstrap destroy
+Step 3 — horde push
+
+Tags the local horde-worker:latest image with the ECR repository URI
+discovered from the SSM config parameter and pushes it to ECR. horde
+push calls ecr:GetAuthorizationToken via the AWS SDK and pipes the
+decoded password into 'docker login --password-stdin' — there is no
+dependency on the AWS CLI. Requires that horde-worker:latest is built
+locally first (a 'horde launch' under the docker provider, or 'make
+docker-build', produces it); push errors out with guidance if it is
+missing. The image is pushed as <ecr-repo-uri>:latest, and the sha256
+digest parsed from the push output is echoed back for verification.
+
+Step 4 — horde bootstrap destroy
 
 Deletes the horde-<slug> CloudFormation stack and waits for deletion to
 complete. Refuses if pending or running runs exist in DynamoDB (horde

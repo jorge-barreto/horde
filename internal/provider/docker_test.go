@@ -1305,6 +1305,44 @@ func TestDockerProvider_Finalize_NoInstanceID(t *testing.T) {
 	}
 }
 
+// TestDockerProvider_Finalize_StatusError covers the docker-daemon-error
+// branch: when p.Status returns an error other than "no such container",
+// Finalize must propagate it wrapped with "checking instance status:".
+// Without this test a regression in the error wrap would slip past the
+// 17 other Finalize cases, all of which exercise successful Status calls.
+func TestDockerProvider_Finalize_StatusError(t *testing.T) {
+	dir := t.TempDir()
+	// Inspect fails with stderr that is NOT "no such container"; Status
+	// returns the wrapped error rather than treating it as Unknown.
+	writeFakeDocker(t, dir, `
+case "$1" in
+  inspect)
+    echo "Error: cannot connect to the Docker daemon" >&2
+    exit 1
+    ;;
+esac
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	run := &store.Run{
+		ID:         "r-status-err",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	err := NewDockerProvider().Finalize(context.Background(), run, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error from Finalize when Status fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "checking instance status:") {
+		t.Errorf("error wrap = %q, want it to contain %q", err.Error(), "checking instance status:")
+	}
+	if !strings.Contains(err.Error(), "cannot connect to the Docker daemon") {
+		t.Errorf("error = %q, want it to contain inner stderr", err.Error())
+	}
+}
+
 func TestDockerProvider_Finalize_RunningWithMarker(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, runningDockerScript())

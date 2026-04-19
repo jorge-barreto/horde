@@ -68,6 +68,7 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 			listCmd(),
 			cleanCmd(),
 			shellCmd(),
+			bootstrapCmd(),
 			docsCmd(),
 		},
 	}

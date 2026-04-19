@@ -40,9 +40,17 @@ func Slug(remoteURL string) (string, error) {
 		return "", fmt.Errorf("deriving project slug: input is empty")
 	}
 
+	// Accept either a raw remote URL or a pre-normalized "host/path" form
+	// (config.RepoURL returns the latter). If the input has no scheme and
+	// no scp-style "git@host:" prefix but does contain a '/', assume it's
+	// already normalized and skip re-normalization.
 	normalized, err := config.NormalizeRepoURL(remoteURL)
 	if err != nil {
-		return "", fmt.Errorf("deriving project slug: %w", err)
+		if isAlreadyNormalized(remoteURL) {
+			normalized = remoteURL
+		} else {
+			return "", fmt.Errorf("deriving project slug: %w", err)
+		}
 	}
 
 	// Strip the host: take everything after the first '/'.
@@ -86,4 +94,15 @@ func Slug(remoteURL string) (string, error) {
 	}
 
 	return slug, nil
+}
+
+// isAlreadyNormalized reports whether s looks like the "host/path" output
+// of config.NormalizeRepoURL (no scheme, no scp-style userinfo, at least
+// one "/", and a non-empty host segment).
+func isAlreadyNormalized(s string) bool {
+	if strings.Contains(s, "://") || strings.Contains(s, "@") {
+		return false
+	}
+	slash := strings.Index(s, "/")
+	return slash > 0 && slash < len(s)-1
 }

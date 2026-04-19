@@ -43,6 +43,12 @@ var topics = []Topic{
 		Summary: "Required secrets, .env file, token permissions",
 		Content: topicEnv,
 	},
+	{
+		Name:    "bootstrap",
+		Title:   "AWS Bootstrap",
+		Summary: "Provision AWS infrastructure via CloudFormation (bootstrap init/deploy/destroy)",
+		Content: topicBootstrap,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -490,4 +496,44 @@ Providers
 
 - Docker provider: copies from ~/.horde/results/<run-id>/.
 - ECS provider: downloads from s3://<artifacts-bucket>/horde-runs/<run-id>/.
+`
+
+const topicBootstrap = `AWS Bootstrap
+=============
+
+For projects that don't already have CDK or other IaC, horde ships a
+self-contained CloudFormation path that provisions every AWS resource
+needed to run workflows on ECS Fargate: VPC, ECS cluster, DynamoDB table,
+S3 artifacts bucket, ECR repository, Secrets Manager secrets, IAM roles,
+a CloudWatch log group, an SSM config parameter, and an EventBridge rule
+plus inline Lambda that keeps run status in sync.
+
+Workflow
+
+  horde bootstrap init       # generates .horde/cloudformation.yaml
+  horde bootstrap deploy     # (not yet implemented) creates the stack
+  horde push                 # (not yet implemented) pushes the worker image
+  horde launch --provider aws-ecs -t TICKET-123
+
+Step 1 — horde bootstrap init
+
+Derives a project slug from the current git remote (e.g.
+github.com/jorge-barreto/horde → jorge-barreto-horde), renders the
+embedded CloudFormation template with that slug, and writes it to
+.horde/cloudformation.yaml. Prints a summary of resources. Refuses to
+overwrite an existing file unless --regenerate is passed.
+
+The generated template is inspectable and hand-editable. Commit it to
+version control — secrets are passed as NoEcho CloudFormation parameters
+at deploy time, never baked into the file on disk.
+
+Naming and cost notes
+
+- All resources are named horde-<slug>-* and will coexist with other
+  CloudFormation stacks from different projects.
+- The stack includes one NAT gateway (~$32/month standalone, plus data
+  transfer). The rest is pay-per-request or per-invocation — near-zero
+  when idle.
+- Private-subnet topology is the default (assign_public_ip=DISABLED).
+  Tasks reach GitHub, Anthropic, and other public APIs through the NAT.
 `

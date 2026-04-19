@@ -38,7 +38,8 @@ go test -v -count=1 -timeout 10m ./test/integration/
 
 ## Architecture
 
-- `cmd/horde/` — CLI entry point, all commands (launch, retry, status, logs, kill, results, list, clean, shell, docs), factory for provider/store
+- `cmd/horde/` — CLI entry point, all commands (launch, retry, status, logs, kill, results, hydrate, list, clean, shell, bootstrap, docs), factory for provider/store
+- `internal/bootstrap/` — CloudFormation template generation + project-slug derivation for `horde bootstrap` (v0.2)
 - `internal/provider/` — Provider interface (`provider.go`) + Docker implementation (`docker.go`, `dockerimage.go`); ECS provider in v0.2
 - `internal/store/` — Store interface (`store.go`) + SQLite (`sqlite.go`) and DynamoDB (`dynamo.go`, v0.2) implementations. Both pass shared conformance tests.
 - `internal/config/` — Git remote URL resolution, `.env` file validation, `.horde/config.yaml` project config, SSM parameter loading (v0.2)

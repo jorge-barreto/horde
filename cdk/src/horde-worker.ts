@@ -7,6 +7,11 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { Construct } from "constructs";
+import * as events from "aws-cdk-lib/aws-events";
+import * as targets from "aws-cdk-lib/aws-events-targets";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as lambda_nodejs from "aws-cdk-lib/aws-lambda-nodejs";
+import * as path from "path";
 
 import type { HordeWorkerProps } from "./horde-worker-props";
 
@@ -126,6 +131,12 @@ export class HordeWorker extends Construct {
    * `CliUserManagedPolicyArn`.
    */
   public readonly cliUserPolicy: iam.ManagedPolicy;
+
+  /** Lambda that reconciles run status from ECS Task State Change events. */
+  public readonly statusLambda: lambda_nodejs.NodejsFunction;
+
+  /** EventBridge rule routing STOPPED task events to `statusLambda`. */
+  public readonly statusEventRule: events.Rule;
 
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
@@ -374,6 +385,66 @@ export class HordeWorker extends Construct {
         }),
       ],
     });
+
+    this.statusLambda = new lambda_nodejs.NodejsFunction(this, "StatusLambda", {
+      functionName: `horde-${slug}-status-updater`,
+      entry: path.join(__dirname, "status-lambda", "index.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_20_X,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        RUNS_TABLE: this.runsTable.tableName,
+        ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
+      },
+      bundling: {
+        minify: false,
+        sourceMap: false,
+        target: "node20",
+        externalModules: ["@aws-sdk/*"],
+      },
+      logRetention: retention,
+    });
+    cdk.Tags.of(this.statusLambda).add("Name", `horde-${slug}-status-lambda`);
+
+    this.statusLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "DynamoRunsTableRW",
+        effect: iam.Effect.ALLOW,
+        actions: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+        resources: [
+          this.runsTable.tableArn,
+          `${this.runsTable.tableArn}/index/by-instance`,
+        ],
+      }),
+    );
+    this.statusLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "ArtifactsRead",
+        effect: iam.Effect.ALLOW,
+        // ListBucket needed because run-result.json lives under a
+        // workflow/ticket-nested prefix not known at invoke time.
+        actions: ["s3:GetObject", "s3:ListBucket"],
+        resources: [
+          this.artifactsBucket.bucketArn,
+          `${this.artifactsBucket.bucketArn}/*`,
+        ],
+      }),
+    );
+
+    this.statusEventRule = new events.Rule(this, "StatusEventRule", {
+      ruleName: `horde-${slug}-status`,
+      description: `Route STOPPED ECS task events on the horde-${slug} cluster to the status lambda`,
+      eventPattern: {
+        source: ["aws.ecs"],
+        detailType: ["ECS Task State Change"],
+        detail: {
+          clusterArn: [this.cluster.clusterArn],
+          lastStatus: ["STOPPED"],
+        },
+      },
+    });
+    this.statusEventRule.addTarget(new targets.LambdaFunction(this.statusLambda));
 
     new cdk.CfnOutput(this, "CliUserManagedPolicyArn", {
       value: this.cliUserPolicy.managedPolicyArn,

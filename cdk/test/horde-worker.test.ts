@@ -403,3 +403,120 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     ).toThrow(/logRetentionDays=42/);
   });
 });
+
+describe("HordeWorker status-sync (5fh.12/13/14)", () => {
+  it("creates a Node.js 20 status lambda with the expected env vars", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::Lambda::Function", {
+      FunctionName: "horde-test-status-updater",
+      Runtime: "nodejs20.x",
+      Handler: "index.handler",
+      Timeout: 30,
+      MemorySize: 256,
+      Environment: {
+        Variables: Match.objectLike({
+          RUNS_TABLE: Match.anyValue(),
+          ARTIFACTS_BUCKET: Match.anyValue(),
+        }),
+      },
+    });
+  });
+
+  it("creates an EventBridge rule matching STOPPED ECS tasks on this cluster", () => {
+    const t = synth();
+    const rules = t.findResources("AWS::Events::Rule");
+    const statusRules = Object.values(rules).filter(
+      (r) => r.Properties.Name === "horde-test-status",
+    );
+    expect(statusRules).toHaveLength(1);
+    const rule = statusRules[0];
+    expect(rule.Properties.State).toBe("ENABLED");
+    expect(rule.Properties.EventPattern.source).toEqual(["aws.ecs"]);
+    expect(rule.Properties.EventPattern["detail-type"]).toEqual(["ECS Task State Change"]);
+    expect(rule.Properties.EventPattern.detail.lastStatus).toEqual(["STOPPED"]);
+    const clusterArn = rule.Properties.EventPattern.detail.clusterArn;
+    expect(Array.isArray(clusterArn)).toBe(true);
+    expect(clusterArn.length).toBeGreaterThan(0);
+    const targets = rule.Properties.Targets ?? [];
+    expect(targets.length).toBeGreaterThan(0);
+    expect(targets[0].Arn).toBeDefined();
+  });
+
+  it("grants EventBridge lambda:InvokeFunction on the status lambda", () => {
+    synth().hasResourceProperties("AWS::Lambda::Permission", {
+      Action: "lambda:InvokeFunction",
+      Principal: "events.amazonaws.com",
+    });
+  });
+
+  it("grants the status lambda exactly Query+GetItem+UpdateItem on the table + by-instance GSI", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::Policy");
+    const lambdaPolicies = Object.values(policies).filter((p) =>
+      (p.Properties.Roles ?? []).some(
+        (r: { Ref?: string }) => typeof r === "object" && r.Ref?.includes("StatusLambdaServiceRole"),
+      ),
+    );
+    expect(lambdaPolicies).toHaveLength(1);
+
+    const stmts = lambdaPolicies[0].Properties.PolicyDocument.Statement as Array<{
+      Sid?: string;
+      Action: string | string[];
+      Resource: unknown;
+    }>;
+    const dynamo = stmts.find((s) => s.Sid === "DynamoRunsTableRW");
+    expect(dynamo).toBeDefined();
+    const actions = Array.isArray(dynamo!.Action) ? dynamo!.Action : [dynamo!.Action];
+    expect(actions.sort()).toEqual([
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+    ]);
+    const resources = Array.isArray(dynamo!.Resource) ? dynamo!.Resource : [dynamo!.Resource];
+    const resourceStr = JSON.stringify(resources);
+    expect(resourceStr).toContain("index/by-instance");
+    expect(resourceStr).not.toContain("index/*");
+  });
+
+  it("grants the status lambda s3:GetObject (and ListBucket) on the artifacts bucket", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::Policy");
+    const lambdaPolicies = Object.values(policies).filter((p) =>
+      (p.Properties.Roles ?? []).some(
+        (r: { Ref?: string }) => typeof r === "object" && r.Ref?.includes("StatusLambdaServiceRole"),
+      ),
+    );
+    const stmts = lambdaPolicies[0].Properties.PolicyDocument.Statement as Array<{
+      Sid?: string;
+      Action: string | string[];
+    }>;
+    const s3Stmt = stmts.find((s) => s.Sid === "ArtifactsRead");
+    expect(s3Stmt).toBeDefined();
+    const actions = Array.isArray(s3Stmt!.Action) ? s3Stmt!.Action : [s3Stmt!.Action];
+    expect(actions).toEqual(expect.arrayContaining(["s3:GetObject", "s3:ListBucket"]));
+    for (const a of actions) {
+      expect(a).not.toMatch(/^s3:Put/);
+      expect(a).not.toMatch(/^s3:Delete/);
+    }
+  });
+
+  it("does NOT grant the status lambda ecs/ssm/secrets permissions", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::Policy");
+    const lambdaPolicies = Object.values(policies).filter((p) =>
+      (p.Properties.Roles ?? []).some(
+        (r: { Ref?: string }) => typeof r === "object" && r.Ref?.includes("StatusLambdaServiceRole"),
+      ),
+    );
+    const allActions = lambdaPolicies
+      .flatMap((p) => p.Properties.PolicyDocument.Statement ?? [])
+      .flatMap((s: { Action: string | string[] }) =>
+        Array.isArray(s.Action) ? s.Action : [s.Action],
+      );
+    for (const a of allActions) {
+      expect(a).not.toMatch(/^ecs:/);
+      expect(a).not.toMatch(/^ssm:/);
+      expect(a).not.toMatch(/^secretsmanager:/);
+    }
+  });
+});

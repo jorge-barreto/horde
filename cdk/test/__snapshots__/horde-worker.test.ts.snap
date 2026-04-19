@@ -472,6 +472,44 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       },
       "Type": "AWS::IAM::Role",
     },
+    "HordeTaskRoleDefaultPolicyFE6D288A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:PutObject",
+                "s3:AbortMultipartUpload",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "HordeArtifactsBucket1A7FD4A4",
+                        "Arn",
+                      ],
+                    },
+                    "/horde-runs/*",
+                  ],
+                ],
+              },
+              "Sid": "ArtifactsWrite",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "HordeTaskRoleDefaultPolicyFE6D288A",
+        "Roles": [
+          {
+            "Ref": "HordeTaskRole4CD3769C",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "HordeVpcB5939D5D": {
       "Properties": {
         "CidrBlock": "10.0.0.0/16",

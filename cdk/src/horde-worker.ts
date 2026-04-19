@@ -182,6 +182,17 @@ export class HordeWorker extends Construct {
       this.artifactsBucket = bucket;
     }
 
+    // Task role: write-only access to its own artifact prefix.
+    // Reading happens via the CLI (with the cli-user managed policy).
+    this.taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "ArtifactsWrite",
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
+        resources: [`${this.artifactsBucket.bucketArn}/horde-runs/*`],
+      }),
+    );
+
     this.container = this.taskDefinition.addContainer("worker", {
       containerName: "horde-worker",
       image: props.workerImage,

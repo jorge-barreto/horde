@@ -125,6 +125,46 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     });
   });
 
+  it("scopes the task role to PutObject/AbortMultipartUpload on horde-runs/* only", () => {
+    const t = synth();
+    t.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: "ArtifactsWrite",
+            Effect: "Allow",
+            Action: ["s3:PutObject", "s3:AbortMultipartUpload"],
+            Resource: Match.objectLike({
+              "Fn::Join": Match.arrayWith([
+                Match.arrayWith([Match.stringLikeRegexp(".*horde-runs/\\*")]),
+              ]),
+            }),
+          }),
+        ]),
+      }),
+      Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp("HordeTaskRole.*") }]),
+    });
+  });
+
+  it("does NOT grant the task role secretsmanager access", () => {
+    const t = synth();
+    const policies = t.findResources("AWS::IAM::Policy");
+    for (const [_id, policy] of Object.entries(policies)) {
+      const roles = policy.Properties.Roles ?? [];
+      const isTaskRolePolicy = roles.some((r: { Ref?: string }) =>
+        typeof r === "object" && r.Ref?.includes("TaskRole") && !r.Ref?.includes("ExecutionRole"),
+      );
+      if (!isTaskRolePolicy) continue;
+      const stmts = policy.Properties.PolicyDocument.Statement ?? [];
+      for (const s of stmts) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        for (const a of actions) {
+          expect(typeof a === "string" ? a : "").not.toMatch(/^secretsmanager:/);
+        }
+      }
+    }
+  });
+
   it("matches the saved snapshot", () => {
     expect(synth().toJSON()).toMatchSnapshot();
   });

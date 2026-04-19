@@ -22,6 +22,10 @@ func TestSlug(t *testing.T) {
 		{"unicode", "https://github.com/café/repo.git", "caf-repo"},
 		{"repeated separators", "https://github.com/a--b/__c.git", "a-b-c"},
 		{"leading/trailing junk", "https://github.com/-org-/-repo-.git", "org-repo"},
+		// CDK e2e fixture: cdk/e2e/app.ts hardcodes this slug; if Slug ever
+		// changes its hashing/normalization, the e2e test (and `horde push`
+		// against the cdke2e stack) will break — this case prevents that.
+		{"cdk e2e fixture", "https://github.com/jorge-barreto/horde-cdke2e.git", "jorge-barreto-horde-cdke2e"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

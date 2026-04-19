@@ -222,6 +222,16 @@ func newECSHarness(t *testing.T) *harness {
 	if os.Getenv("HORDE_E2E_ECS") != "1" {
 		t.Skip("ECS integration: HORDE_E2E_ECS != 1")
 	}
+	return newECSHarnessForRepo(t, ecsHarnessRepoURL)
+}
+
+// newECSHarnessForRepo is the same as newECSHarness but parameterized on the
+// repo URL whose slug derives the SSM config path. The CDK e2e tests use this
+// to point at a separate stack without re-implementing the harness setup.
+//
+// Caller is responsible for skip-gating; this function never skips.
+func newECSHarnessForRepo(t *testing.T, repoURL string) *harness {
+	t.Helper()
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -250,7 +260,7 @@ func newECSHarness(t *testing.T) *harness {
 		}
 	}
 	runGit("init")
-	runGit("remote", "add", "origin", ecsHarnessRepoURL)
+	runGit("remote", "add", "origin", repoURL)
 	runGit("config", "user.name", "integration-test")
 	runGit("config", "user.email", "test@test.com")
 
@@ -270,7 +280,7 @@ func newECSHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("loading AWS config (profile=%q): %v", os.Getenv("AWS_PROFILE"), err)
 	}
-	slug, err := bootstrap.Slug(ecsHarnessRepoURL)
+	slug, err := bootstrap.Slug(repoURL)
 	if err != nil {
 		t.Fatalf("deriving slug: %v", err)
 	}

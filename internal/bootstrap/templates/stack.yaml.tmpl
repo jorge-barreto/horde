@@ -282,6 +282,62 @@ Resources:
                 Ref: "AWS::Region"
               awslogs-stream-prefix: ecs
 
+  RunsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "horde-runs-{{.Slug}}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: repo
+          AttributeType: S
+        - AttributeName: ticket
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: started_at
+          AttributeType: S
+        - AttributeName: instance_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: by-repo
+          KeySchema:
+            - AttributeName: repo
+              KeyType: HASH
+            - AttributeName: started_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: by-ticket
+          KeySchema:
+            - AttributeName: ticket
+              KeyType: HASH
+            - AttributeName: started_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: by-status
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: started_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: by-instance
+          KeySchema:
+            - AttributeName: instance_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-runs"
+
 Outputs:
   VpcId:
     Value:
@@ -340,3 +396,9 @@ Outputs:
       Ref: LogGroup
     Export:
       Name: "horde-{{.Slug}}-log-group"
+
+  RunsTableName:
+    Value:
+      Ref: RunsTable
+    Export:
+      Name: "horde-{{.Slug}}-runs-table"

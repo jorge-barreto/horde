@@ -127,6 +127,7 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"TaskRole",
 		"LogGroup",
 		"WorkerTaskDefinition",
+		"RunsTable",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -136,6 +137,50 @@ func TestRender_ResourcesPresent(t *testing.T) {
 				t.Errorf("resource %q missing from rendered template", id)
 			}
 		})
+	}
+}
+
+func TestRender_RunsTableGSIs(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	resources := m["Resources"].(map[string]any)
+	runs, ok := resources["RunsTable"].(map[string]any)
+	if !ok {
+		t.Fatalf("RunsTable is not a map, got %T", resources["RunsTable"])
+	}
+	props, ok := runs["Properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("RunsTable.Properties is not a map, got %T", runs["Properties"])
+	}
+	if got := props["BillingMode"]; got != "PAY_PER_REQUEST" {
+		t.Errorf("BillingMode = %v, want PAY_PER_REQUEST", got)
+	}
+	gsis, ok := props["GlobalSecondaryIndexes"].([]any)
+	if !ok {
+		t.Fatalf("GSI list is not a slice, got %T", props["GlobalSecondaryIndexes"])
+	}
+	wantIndexes := map[string]bool{"by-repo": false, "by-ticket": false, "by-status": false, "by-instance": false}
+	for _, raw := range gsis {
+		gsi, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("GSI entry is not a map, got %T", raw)
+		}
+		name, _ := gsi["IndexName"].(string)
+		if _, want := wantIndexes[name]; want {
+			wantIndexes[name] = true
+		}
+	}
+	for name, seen := range wantIndexes {
+		if !seen {
+			t.Errorf("GSI %q missing", name)
+		}
 	}
 }
 
@@ -163,6 +208,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 		"WorkerSecurityGroupId",
 		"EcrRepositoryUri",
 		"LogGroupName",
+		"RunsTableName",
 	}
 	for _, id := range expectedIDs {
 		id := id

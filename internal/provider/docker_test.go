@@ -1979,36 +1979,36 @@ func TestCopyDir(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error on read-only destination", func(t *testing.T) {
+	t.Run("returns error when destination parent is a regular file", func(t *testing.T) {
 		t.Parallel()
 
-		if os.Getuid() == 0 {
-			t.Skip("test requires non-root to enforce filesystem permissions")
-		}
-
+		// Permission-based variants of this test had to skip under root
+		// (chmod 0o555 is a no-op for UID 0). Use an ENOTDIR-class trigger
+		// instead: the destination's parent component is a regular file,
+		// so os.MkdirAll inside copyDir fails for every UID with "not a
+		// directory". This exercises the same write-error propagation path
+		// without relying on filesystem permissions.
 		src := t.TempDir()
-		dst := filepath.Join(t.TempDir(), "locked")
-
-		// Create a source file inside a subdirectory.
 		if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
 			t.Fatalf("creating subdir: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(src, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
-			t.Fatalf("writing file: %v", err)
+			t.Fatalf("writing source file: %v", err)
 		}
 
-		// Create destination and lock it so child writes fail.
-		if err := os.MkdirAll(dst, 0o755); err != nil {
-			t.Fatalf("creating dst: %v", err)
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+			t.Fatalf("writing blocker file: %v", err)
 		}
-		if err := os.Chmod(dst, 0o555); err != nil {
-			t.Fatalf("chmod dst: %v", err)
-		}
-		t.Cleanup(func() { os.Chmod(dst, 0o755) })
+		// dst sits *under* a regular file; MkdirAll cannot traverse it.
+		dst := filepath.Join(blocker, "would-be-dir")
 
 		err := copyDir(src, dst)
 		if err == nil {
-			t.Fatal("expected error for read-only destination, got nil")
+			t.Fatal("expected error when dst parent is a regular file, got nil")
+		}
+		if !strings.Contains(err.Error(), "creating") {
+			t.Errorf("expected wrapped 'creating' error, got: %v", err)
 		}
 	})
 }

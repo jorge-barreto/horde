@@ -185,7 +185,7 @@ horde maps these to run statuses: 0 → `success`, 1/2/3/4/6 → `failed`, 5 →
 
 Runs have a maximum duration. Default: 24 hours. Override with `--timeout` on `horde launch`.
 
-- **Docker provider:** timeout is enforced lazily. Each `status`, `results`, or `list` call checks `timeout_at` against the current time. If a run has exceeded its timeout, horde calls `Kill()` and marks the run as `killed`.
+- **Docker provider:** timeout is enforced lazily. Each `status`, `results`, or `list` call checks `timeout_at` against the current time. If a run has exceeded its timeout, horde calls `Kill()` — copying `.orc/audit/` and `.orc/artifacts/` best-effort, extracting `total_cost_usd` and `exit_code` from `run-result.json` if present — and marks the run as `killed`.
 - **ECS provider:** The CDK construct sets `stopTimeout` on the Fargate task definition. Additionally, horde records the timeout in DynamoDB. The EventBridge Lambda checks the timeout and stops overdue tasks.
 
 The timeout covers the entire run including git clone, orc execution, and artifact upload.

@@ -380,6 +380,25 @@ func ReadRunResult(homeDir string, run *store.Run) (cost *float64, exitCode *int
 	return rr.TotalCostUSD, rr.ExitCode
 }
 
+// SaveContainerLog writes captured container logs to <resultsDir>/container.log.
+// Both the docker provider (Finalize) and the kill command call this — host
+// filesystem failures (disk full, permission denied) are logged to stderr
+// rather than swallowed so users notice when their logs aren't being saved.
+// runID is included in the warning to disambiguate when multiple runs are
+// being finalized in the same call (e.g. horde list).
+func SaveContainerLog(resultsDir, runID string, logData []byte) {
+	if len(logData) == 0 {
+		return
+	}
+	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: creating results dir for run %s: %v\n", runID, err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: saving container log for run %s: %v\n", runID, err)
+	}
+}
+
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -455,9 +474,8 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			}
 
 			if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
-				if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-					os.MkdirAll(resultsDir, 0o755)
-					os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+				if logData, err := io.ReadAll(logs); err == nil {
+					SaveContainerLog(resultsDir, run.ID, logData)
 				}
 				logs.Close()
 			}
@@ -518,9 +536,8 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		}
 
 		if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
-			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-				os.MkdirAll(resultsDir, 0o755)
-				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+			if logData, err := io.ReadAll(logs); err == nil {
+				SaveContainerLog(resultsDir, run.ID, logData)
 			}
 			logs.Close()
 		}

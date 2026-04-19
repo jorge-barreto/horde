@@ -587,9 +587,8 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 
 				// Capture container logs before stopping
 				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
-					if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-						os.MkdirAll(resultsDir, 0o755)
-						os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+					if logData, err := io.ReadAll(logs); err == nil {
+						provider.SaveContainerLog(resultsDir, run.ID, logData)
 					}
 					logs.Close()
 				}

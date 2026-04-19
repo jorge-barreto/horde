@@ -2222,3 +2222,58 @@ func TestDockerProvider_HydrateRun_ConfigMissingWorkspace(t *testing.T) {
 		t.Fatalf("missing workspace should not fail hydrate: %v", err)
 	}
 }
+
+func TestSaveContainerLog_Empty(t *testing.T) {
+	t.Parallel()
+	// Empty payload is a no-op: no directory created, no file written, no warning.
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "results")
+	SaveContainerLog(logsDir, "r-empty", nil)
+	if _, err := os.Stat(logsDir); err == nil {
+		t.Errorf("results dir was created for empty payload, want no-op")
+	}
+}
+
+func TestSaveContainerLog_Success(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "results")
+	SaveContainerLog(logsDir, "r-ok", []byte("hello\n"))
+	got, err := os.ReadFile(filepath.Join(logsDir, "container.log"))
+	if err != nil {
+		t.Fatalf("reading saved log: %v", err)
+	}
+	if string(got) != "hello\n" {
+		t.Errorf("log content = %q, want %q", string(got), "hello\n")
+	}
+}
+
+func TestSaveContainerLog_WarnsOnMkdirFailure(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("test requires non-root to enforce filesystem permissions")
+	}
+	// Captures stderr in-process; cannot run in parallel because
+	// os.Stderr is process-wide.
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatalf("chmod parent: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o755) })
+
+	origStderr := os.Stderr
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating stderr pipe: %v", err)
+	}
+	os.Stderr = pw
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	SaveContainerLog(filepath.Join(parent, "child"), "r-fail", []byte("data"))
+	pw.Close()
+	os.Stderr = origStderr
+	stderr, _ := io.ReadAll(pr)
+
+	if !strings.Contains(string(stderr), "warning: creating results dir for run r-fail") {
+		t.Errorf("stderr missing mkdir warning, got: %s", string(stderr))
+	}
+}

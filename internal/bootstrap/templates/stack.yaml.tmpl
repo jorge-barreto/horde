@@ -250,6 +250,24 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: "horde-{{.Slug}}-task"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ArtifactsWrite
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - Fn::Sub: "${ArtifactsBucket.Arn}/*"
+              - Sid: SecretsRead
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - Ref: AnthropicApiKeySecret
+                  - Ref: GitTokenSecret
       Tags:
         - Key: Name
           Value: "horde-{{.Slug}}-task-role"
@@ -414,6 +432,73 @@ Resources:
               Bool:
                 "aws:SecureTransport": "false"
 
+  CliUserManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName:
+        Fn::Sub: "horde-{{.Slug}}-cli-${AWS::Region}"
+      Description: "Permissions required by the horde CLI to launch, inspect, and terminate runs"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SsmRead
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - Fn::Sub: "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/horde/{{.Slug}}/config"
+          - Sid: EcsRun
+            Effect: Allow
+            Action:
+              - ecs:RunTask
+              - ecs:DescribeTasks
+              - ecs:StopTask
+              - ecs:ListTasks
+            Resource: "*"
+            Condition:
+              ArnEquals:
+                "ecs:cluster":
+                  Fn::GetAtt: [EcsCluster, Arn]
+          - Sid: EcsPassRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - Fn::GetAtt: [TaskRole, Arn]
+              - Fn::GetAtt: [TaskExecutionRole, Arn]
+            Condition:
+              StringEquals:
+                "iam:PassedToService": "ecs-tasks.amazonaws.com"
+          - Sid: DynamoRunsTable
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource:
+              - Fn::GetAtt: [RunsTable, Arn]
+              - Fn::Sub: "${RunsTable.Arn}/index/*"
+          - Sid: LogsRead
+            Effect: Allow
+            Action:
+              - logs:GetLogEvents
+              - logs:FilterLogEvents
+              - logs:DescribeLogStreams
+            Resource:
+              - Fn::GetAtt: [LogGroup, Arn]
+              - Fn::Sub: "${LogGroup.Arn}:*"
+          - Sid: ArtifactsRead
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - Fn::GetAtt: [ArtifactsBucket, Arn]
+              - Fn::Sub: "${ArtifactsBucket.Arn}/*"
+
 Outputs:
   VpcId:
     Value:
@@ -496,3 +581,9 @@ Outputs:
       Ref: GitTokenSecret
     Export:
       Name: "horde-{{.Slug}}-git-token-arn"
+
+  CliUserManagedPolicyArn:
+    Value:
+      Ref: CliUserManagedPolicy
+    Export:
+      Name: "horde-{{.Slug}}-cli-policy-arn"

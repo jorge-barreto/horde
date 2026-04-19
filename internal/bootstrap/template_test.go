@@ -135,6 +135,7 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"GitTokenSecret",
 		"ArtifactsBucket",
 		"ArtifactsBucketPolicy",
+		"CliUserManagedPolicy",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -219,6 +220,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 		"ArtifactsBucketName",
 		"AnthropicApiKeySecretArn",
 		"GitTokenSecretArn",
+		"CliUserManagedPolicyArn",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -309,6 +311,114 @@ func TestRender_TaskDefSecrets(t *testing.T) {
 	for name, seen := range wantRefs {
 		if !seen {
 			t.Errorf("secret referencing %q missing", name)
+		}
+	}
+}
+
+func TestRender_TaskRoleHasPolicies(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	resources := m["Resources"].(map[string]any)
+	role, ok := resources["TaskRole"].(map[string]any)
+	if !ok {
+		t.Fatalf("TaskRole is not a map, got %T", resources["TaskRole"])
+	}
+	props, ok := role["Properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("TaskRole.Properties is not a map, got %T", role["Properties"])
+	}
+	policies, ok := props["Policies"].([]any)
+	if !ok {
+		t.Fatalf("TaskRole.Policies is not a slice, got %T", props["Policies"])
+	}
+	if len(policies) < 1 {
+		t.Fatalf("expected at least 1 inline policy on TaskRole, got %d", len(policies))
+	}
+	first, ok := policies[0].(map[string]any)
+	if !ok {
+		t.Fatalf("TaskRole.Policies[0] is not a map, got %T", policies[0])
+	}
+	doc, ok := first["PolicyDocument"].(map[string]any)
+	if !ok {
+		t.Fatalf("TaskRole.Policies[0].PolicyDocument is not a map, got %T", first["PolicyDocument"])
+	}
+	statements, ok := doc["Statement"].([]any)
+	if !ok {
+		t.Fatalf("TaskRole.Policies[0].PolicyDocument.Statement is not a slice, got %T", doc["Statement"])
+	}
+	wantSids := map[string]bool{"ArtifactsWrite": false, "SecretsRead": false}
+	for _, raw := range statements {
+		st, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("statement is not a map, got %T", raw)
+		}
+		sid, _ := st["Sid"].(string)
+		if _, want := wantSids[sid]; want {
+			wantSids[sid] = true
+		}
+	}
+	for sid, seen := range wantSids {
+		if !seen {
+			t.Errorf("TaskRole inline policy missing Sid %q", sid)
+		}
+	}
+}
+
+func TestRender_CliPolicyStatements(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	resources := m["Resources"].(map[string]any)
+	policy, ok := resources["CliUserManagedPolicy"].(map[string]any)
+	if !ok {
+		t.Fatalf("CliUserManagedPolicy is not a map, got %T", resources["CliUserManagedPolicy"])
+	}
+	props, ok := policy["Properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("CliUserManagedPolicy.Properties is not a map, got %T", policy["Properties"])
+	}
+	doc, ok := props["PolicyDocument"].(map[string]any)
+	if !ok {
+		t.Fatalf("CliUserManagedPolicy.Properties.PolicyDocument is not a map, got %T", props["PolicyDocument"])
+	}
+	statements, ok := doc["Statement"].([]any)
+	if !ok {
+		t.Fatalf("CliUserManagedPolicy PolicyDocument.Statement is not a slice, got %T", doc["Statement"])
+	}
+	wantSids := map[string]bool{
+		"SsmRead":         false,
+		"EcsRun":          false,
+		"EcsPassRole":     false,
+		"DynamoRunsTable": false,
+		"LogsRead":        false,
+		"ArtifactsRead":   false,
+	}
+	for _, raw := range statements {
+		st, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("statement is not a map, got %T", raw)
+		}
+		sid, _ := st["Sid"].(string)
+		if _, want := wantSids[sid]; want {
+			wantSids[sid] = true
+		}
+	}
+	for sid, seen := range wantSids {
+		if !seen {
+			t.Errorf("CliUserManagedPolicy missing statement with Sid %q", sid)
 		}
 	}
 }

@@ -1,7 +1,17 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "horde stack for project {{.Slug}}"
 
-Parameters: {}
+Parameters:
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: "Claude API key used by the worker container"
+    MinLength: 1
+  GitToken:
+    Type: String
+    NoEcho: true
+    Description: "Git provider token used by the worker container for clone/push"
+    MinLength: 1
 
 Resources:
   VPC:
@@ -273,6 +283,13 @@ Resources:
             Fn::Sub: "${EcrRepository.RepositoryUri}:latest"
           Essential: true
           Environment: []
+          Secrets:
+            - Name: CLAUDE_CODE_OAUTH_TOKEN
+              ValueFrom:
+                Ref: AnthropicApiKeySecret
+            - Name: GIT_TOKEN
+              ValueFrom:
+                Ref: GitTokenSecret
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -338,6 +355,65 @@ Resources:
         - Key: Name
           Value: "horde-{{.Slug}}-runs"
 
+  AnthropicApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: "horde-{{.Slug}}-anthropic-api-key"
+      Description: "Claude API key for the horde worker"
+      SecretString:
+        Ref: AnthropicApiKey
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-anthropic-api-key"
+
+  GitTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: "horde-{{.Slug}}-git-token"
+      Description: "Git token for the horde worker"
+      SecretString:
+        Ref: GitToken
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-git-token"
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: "horde-artifacts-{{.Slug}}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Name
+          Value: "horde-{{.Slug}}-artifacts"
+
+  ArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: ArtifactsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - Fn::GetAtt: [ArtifactsBucket, Arn]
+              - Fn::Sub: "${ArtifactsBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
 Outputs:
   VpcId:
     Value:
@@ -402,3 +478,21 @@ Outputs:
       Ref: RunsTable
     Export:
       Name: "horde-{{.Slug}}-runs-table"
+
+  ArtifactsBucketName:
+    Value:
+      Ref: ArtifactsBucket
+    Export:
+      Name: "horde-{{.Slug}}-artifacts-bucket"
+
+  AnthropicApiKeySecretArn:
+    Value:
+      Ref: AnthropicApiKeySecret
+    Export:
+      Name: "horde-{{.Slug}}-anthropic-api-key-arn"
+
+  GitTokenSecretArn:
+    Value:
+      Ref: GitTokenSecret
+    Export:
+      Name: "horde-{{.Slug}}-git-token-arn"

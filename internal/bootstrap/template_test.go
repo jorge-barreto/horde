@@ -76,6 +76,9 @@ func TestRender_ContainsSlug(t *testing.T) {
 		"horde-myproj-vpc-id",
 		"horde-myproj",
 		"/ecs/horde-worker-myproj",
+		"horde-myproj-anthropic-api-key",
+		"horde-myproj-git-token",
+		"horde-artifacts-myproj-",
 	}
 	for _, sub := range expected {
 		if !strings.Contains(s, sub) {
@@ -128,6 +131,10 @@ func TestRender_ResourcesPresent(t *testing.T) {
 		"LogGroup",
 		"WorkerTaskDefinition",
 		"RunsTable",
+		"AnthropicApiKeySecret",
+		"GitTokenSecret",
+		"ArtifactsBucket",
+		"ArtifactsBucketPolicy",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -209,6 +216,9 @@ func TestRender_OutputsPresent(t *testing.T) {
 		"EcrRepositoryUri",
 		"LogGroupName",
 		"RunsTableName",
+		"ArtifactsBucketName",
+		"AnthropicApiKeySecretArn",
+		"GitTokenSecretArn",
 	}
 	for _, id := range expectedIDs {
 		id := id
@@ -218,6 +228,88 @@ func TestRender_OutputsPresent(t *testing.T) {
 				t.Errorf("output %q missing from rendered template", id)
 			}
 		})
+	}
+}
+
+func TestRender_ParametersPresent(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	params, ok := m["Parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("Parameters is not a map, got %T", m["Parameters"])
+	}
+	for _, name := range []string{"AnthropicApiKey", "GitToken"} {
+		entry, ok := params[name].(map[string]any)
+		if !ok {
+			t.Errorf("parameter %q missing or wrong shape, got %T", name, params[name])
+			continue
+		}
+		if ne, _ := entry["NoEcho"].(bool); !ne {
+			t.Errorf("parameter %q: NoEcho = %v, want true", name, entry["NoEcho"])
+		}
+	}
+}
+
+func TestRender_TaskDefSecrets(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v", err)
+	}
+	resources := m["Resources"].(map[string]any)
+	td, ok := resources["WorkerTaskDefinition"].(map[string]any)
+	if !ok {
+		t.Fatalf("WorkerTaskDefinition is not a map, got %T", resources["WorkerTaskDefinition"])
+	}
+	props, ok := td["Properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("WorkerTaskDefinition.Properties is not a map, got %T", td["Properties"])
+	}
+	containers, ok := props["ContainerDefinitions"].([]any)
+	if !ok || len(containers) == 0 {
+		t.Fatalf("ContainerDefinitions missing or empty: %T", props["ContainerDefinitions"])
+	}
+	container, ok := containers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("ContainerDefinitions[0] is not a map, got %T", containers[0])
+	}
+	secrets, ok := container["Secrets"].([]any)
+	if !ok {
+		t.Fatalf("Secrets is not a slice, got %T", container["Secrets"])
+	}
+	if len(secrets) != 2 {
+		t.Fatalf("expected 2 secrets, got %d", len(secrets))
+	}
+	wantRefs := map[string]bool{"AnthropicApiKeySecret": false, "GitTokenSecret": false}
+	for _, raw := range secrets {
+		s, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("secret entry is not a map, got %T", raw)
+		}
+		vf, ok := s["ValueFrom"].(map[string]any)
+		if !ok {
+			t.Fatalf("ValueFrom is not a map, got %T", s["ValueFrom"])
+		}
+		ref, _ := vf["Ref"].(string)
+		if _, want := wantRefs[ref]; want {
+			wantRefs[ref] = true
+		}
+	}
+	for name, seen := range wantRefs {
+		if !seen {
+			t.Errorf("secret referencing %q missing", name)
+		}
 	}
 }
 

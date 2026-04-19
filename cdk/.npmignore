@@ -1,0 +1,10 @@
+# Source - ship compiled lib/ only.
+src/
+test/
+tsconfig.json
+jest.config.js
+node_modules/
+coverage/
+cdk.out/
+*.tgz
+.gitignore

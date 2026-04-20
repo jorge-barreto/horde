@@ -9,7 +9,9 @@ See [SPEC.md](SPEC.md) for the full design.
 ## Prerequisites
 
 - Go (1.24+)
-- Docker
+- Docker — required for local mode and for `horde push` (which builds the worker image)
+- AWS account with credentials configured (only for the v0.2 AWS path) — either [Path A](#path-a--cloudformation-bootstrap-no-cdk-required) or [Path B](#path-b--cdk-construct-teams-with-an-existing-cdk-app) below
+- Node.js 18+ (only for Path B, which uses CDK)
 
 ## Install
 
@@ -37,6 +39,74 @@ Edit `.env` and fill in:
   | Workflows        | Read/Write | Push changes to `.github/workflows/`  |
 
 Run `horde docs env` for more detail on token setup and security.
+
+## Quickstart: AWS (v0.2)
+
+Stand up the cloud backend once, then every `horde launch` from the project runs on ECS Fargate. Two provisioning paths — pick one.
+
+### Path A — CloudFormation bootstrap (no CDK required)
+
+```bash
+horde bootstrap init                  # writes .horde/cloudformation.yaml
+horde bootstrap deploy                # prompts for CLAUDE_CODE_OAUTH_TOKEN + GIT_TOKEN, ~5 min cold
+horde push                            # build + upload worker image to ECR
+```
+
+In CI/headless contexts, set `CLAUDE_CODE_OAUTH_TOKEN` and `GIT_TOKEN` as environment variables instead of answering prompts. Attach the managed policy the stack exports (`horde-<slug>-cli-policy-arn`) to the IAM user or role that will run `horde launch`. Full flow: `horde docs bootstrap`.
+
+### Path B — CDK construct (teams with an existing CDK app)
+
+Use [`examples/cdk-consumer/`](examples/cdk-consumer/) as a starting point: copy the directory into a new CDK app (or merge `app.ts` into your existing stack), edit the `SLUG` constant to match your git remote (`owner-repo`, lowercased, non-alphanumerics → `-`), then:
+
+```bash
+npm install                           # pulls @horde.io/cdk from npmjs
+npm run deploy                        # ~5 min cold
+
+# Populate the empty secrets the stack created:
+aws secretsmanager put-secret-value --secret-id horde-<slug>-claude-code-oauth-token --secret-string "$CLAUDE_CODE_OAUTH_TOKEN"
+aws secretsmanager put-secret-value --secret-id horde-<slug>-git-token              --secret-string "$GIT_TOKEN"
+
+# From your project directory:
+horde push                            # build + upload worker image
+```
+
+Attach the `CliUserManagedPolicyArn` output to the IAM user or role that will run `horde launch`. Full flow: `horde docs cdk`.
+
+### Launch
+
+Once the stack is up and the image is pushed, from any repo whose git remote matches the slug:
+
+```bash
+horde launch PROJ-123                 # provider auto-detects from SSM
+horde status PROJ-123
+horde status PROJ-123 --json
+```
+
+Example `horde status --json` output:
+
+```json
+{
+  "id": "a1b2c3d4e5f6",
+  "ticket": "PROJ-123",
+  "workflow": "default",
+  "branch": "horde/PROJ-123",
+  "status": "running",
+  "instance_id": "arn:aws:ecs:us-east-1:123456789012:task/horde-acme-widgets/abc123",
+  "duration_seconds": 42.7,
+  "launched_by": "you@example.com",
+  "started_at": "2026-04-20T14:02:17Z"
+}
+```
+
+### Teardown
+
+```bash
+# Path A:
+horde bootstrap destroy
+
+# Path B (from the CDK app directory):
+npm run destroy
+```
 
 ## Usage
 

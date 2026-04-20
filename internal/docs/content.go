@@ -57,7 +57,7 @@ var topics = []Topic{
 	},
 	{
 		Name:    "cdk",
-		Title:   "CDK Construct (@horde/cdk)",
+		Title:   "CDK Construct (@horde.io/cdk)",
 		Summary: "Provision AWS infrastructure from your existing CDK app",
 		Content: topicCDK,
 	},
@@ -693,10 +693,10 @@ What's NOT tested end-to-end
   work.
 `
 
-const topicCDK = `CDK Construct (@horde/cdk)
+const topicCDK = `CDK Construct (@horde.io/cdk)
 ==========================
 
-Teams that already use AWS CDK can import the @horde/cdk npm package and
+Teams that already use AWS CDK can import the @horde.io/cdk npm package and
 provision every AWS resource horde needs from inside their own CDK app.
 This is the alternative to 'horde bootstrap' (which uses CloudFormation
 directly).
@@ -704,7 +704,7 @@ directly).
 Install
 -------
 
-    npm install @horde/cdk aws-cdk-lib constructs
+    npm install @horde.io/cdk aws-cdk-lib constructs
 
 Both aws-cdk-lib (^2) and constructs (^10) are peer dependencies. The
 status-sync Lambda ships pre-bundled, so consumer synth does not require
@@ -717,7 +717,7 @@ Usage
     import * as ecr from "aws-cdk-lib/aws-ecr";
     import * as ecs from "aws-cdk-lib/aws-ecs";
     import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
-    import { HordeWorker } from "@horde/cdk";
+    import { HordeWorker } from "@horde.io/cdk";
 
     const app = new App();
     const stack = new Stack(app, "HordeStack");
@@ -774,7 +774,7 @@ CDK vs. CloudFormation
 ----------------------
 
 Use 'horde bootstrap' if you don't already use CDK and want a single
-'horde bootstrap deploy' command. Use @horde/cdk if you have an existing
+'horde bootstrap deploy' command. Use @horde.io/cdk if you have an existing
 CDK app and want the construct in your own pipeline. Both produce the
 same SSM JSON shape (internal/config/ssm.go::HordeConfig), so the CLI
 can't tell them apart.

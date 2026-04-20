@@ -138,7 +138,7 @@ func TestInitProviderAndStore(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: []string{"auto-detecting provider", "deploy the @horde/cdk construct"},
+			errContains: []string{"auto-detecting provider", "deploy the @horde.io/cdk construct"},
 		},
 		{
 			name:     "default SSM access denied",

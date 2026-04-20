@@ -1,11 +1,11 @@
-# @horde/cdk
+# @horde.io/cdk
 
 AWS CDK construct that provisions the infrastructure [horde](https://github.com/jorge-barreto/horde) needs to run worker tasks on ECS Fargate: VPC, cluster, task definition, DynamoDB runs table with GSIs, S3 artifacts bucket, SSM config parameter, EventBridge rule, status-sync Lambda, scoped IAM, and a managed policy for CLI users.
 
 ## Install
 
 ```bash
-npm install @horde/cdk aws-cdk-lib constructs
+npm install @horde.io/cdk aws-cdk-lib constructs
 ```
 
 `aws-cdk-lib` (^2) and `constructs` (^10) are peer dependencies — install them in your CDK app.
@@ -17,7 +17,7 @@ import { App, Stack } from "aws-cdk-lib";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
-import { HordeWorker } from "@horde/cdk";
+import { HordeWorker } from "@horde.io/cdk";
 
 const app = new App();
 const stack = new Stack(app, "HordeStack");

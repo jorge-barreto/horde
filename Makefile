@@ -33,7 +33,7 @@ check: vet
 # Reads AWS creds from .env. Skips if HORDE_E2E_CDK != 1, so setting the
 # env var is the only gesture of intent.
 #
-#   e2e-up    Deploy the @horde/cdk stack, populate secrets, push the
+#   e2e-up    Deploy the @horde.io/cdk stack, populate secrets, push the
 #             worker image. ~5 min cold, ~2 min warm.
 #   e2e-test  Run the full TestECS_* suite plus TestECSCDK_Smoke against
 #             the deployed stack. ~15-20 min.

@@ -23,7 +23,7 @@ import (
 )
 
 // containerName is the container name in the ECS task definition.
-// Must match the name set by the @horde/cdk construct.
+// Must match the name set by the @horde.io/cdk construct.
 const containerName = "horde-worker"
 
 // maxConsecutiveDescribeFailures is the number of consecutive DescribeTasks

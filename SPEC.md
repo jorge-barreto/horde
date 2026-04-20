@@ -599,7 +599,7 @@ Shipped providers:
 Teams import a CDK construct into their existing infra stack. It creates everything horde needs.
 
 ```typescript
-import { HordeWorker } from '@horde/cdk';
+import { HordeWorker } from '@horde.io/cdk';
 
 new HordeWorker(this, 'Horde', {
   vpc: existingVpc,                             // optional — creates one if not provided

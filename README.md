@@ -40,7 +40,7 @@ Run `horde docs env` for more detail on token setup and security.
 
 ## Usage
 
-All commands require a provider. For local Docker mode, pass `--provider docker`. Omit the flag when an AWS stack (provisioned via `horde bootstrap` or the [`@horde/cdk`](cdk/) construct) is deployed — horde auto-detects via SSM.
+All commands require a provider. For local Docker mode, pass `--provider docker`. Omit the flag when an AWS stack (provisioned via `horde bootstrap` or the [`@horde.io/cdk`](cdk/) construct) is deployed — horde auto-detects via SSM.
 
 ```bash
 # Launch a run

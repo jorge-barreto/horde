@@ -24,7 +24,7 @@ import (
 	"github.com/jorge-barreto/horde/internal/awscfg"
 )
 
-// CDK e2e tests verify the @horde/cdk construct against real AWS. The stack
+// CDK e2e tests verify the @horde.io/cdk construct against real AWS. The stack
 // is brought up once (TestECSCDK_Bringup), exercised any number of times
 // (TestECSCDK_Smoke), and torn down explicitly (TestECSCDK_Teardown). State
 // flows between phases via /tmp/horde-cdk-e2e-state.json.

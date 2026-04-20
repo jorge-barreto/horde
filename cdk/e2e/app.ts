@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// E2E smoke stack for @horde/cdk. Not for production. Deploys a real ECS
+// E2E smoke stack for @horde.io/cdk. Not for production. Deploys a real ECS
 // stack under a dedicated slug so the existing TestECS_* harness pattern
 // can verify the construct end-to-end.
 //
@@ -27,7 +27,7 @@ const stack = new cdk.Stack(app, "HordeCdkE2E", {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION ?? "us-east-1",
   },
-  description: "E2E smoke stack for @horde/cdk. Not for production.",
+  description: "E2E smoke stack for @horde.io/cdk. Not for production.",
 });
 
 const repo = new ecr.Repository(stack, "WorkerRepo", {

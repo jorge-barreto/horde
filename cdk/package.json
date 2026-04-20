@@ -1,5 +1,5 @@
 {
-  "name": "@horde/cdk",
+  "name": "@horde.io/cdk",
   "version": "0.1.0",
   "description": "AWS CDK construct that provisions the infrastructure required by horde (https://github.com/jorge-barreto/horde): ECS Fargate cluster, DynamoDB runs table, S3 artifacts bucket, SSM config parameter, EventBridge status sync, and scoped IAM.",
   "license": "MIT",

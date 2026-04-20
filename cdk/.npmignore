@@ -8,3 +8,8 @@ coverage/
 cdk.out/
 *.tgz
 .gitignore
+
+# The status-lambda tsc output is superseded by the esbuild bundle
+# (lib/status-lambda/bundle.js) that the construct references. Ship
+# only the bundle + type declarations.
+lib/status-lambda/index.js

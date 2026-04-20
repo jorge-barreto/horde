@@ -410,7 +410,7 @@ describe("HordeWorker status-sync (5fh.12/13/14)", () => {
     t.hasResourceProperties("AWS::Lambda::Function", {
       FunctionName: "horde-test-status-updater",
       Runtime: "nodejs20.x",
-      Handler: "index.handler",
+      Handler: "bundle.handler",
       Timeout: 30,
       MemorySize: 256,
       Environment: {

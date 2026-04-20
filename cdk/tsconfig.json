@@ -25,5 +25,5 @@
     "typeRoots": ["./node_modules/@types"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "lib", "cdk.out", "test", "coverage", "e2e"]
+  "exclude": ["node_modules", "lib", "cdk.out", "test", "coverage", "e2e", "src/**/*.test.ts"]
 }

@@ -815,7 +815,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2edc83a8d588c3115f291ebb3ff24ae097a182b0a01355338e91d41be4d1e111.zip",
+          "S3Key": "d49e59bc2307f54ecfcca2d232c9841f440130d5d82529053545cfc5f435af26.zip",
         },
         "Environment": {
           "Variables": {
@@ -828,7 +828,12 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
           },
         },
         "FunctionName": "horde-test-status-updater",
-        "Handler": "index.handler",
+        "Handler": "bundle.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "HordeStatusLambdaLogGroup6FA19F17",
+          },
+        },
         "MemorySize": 256,
         "Role": {
           "Fn::GetAtt": [
@@ -847,28 +852,20 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       },
       "Type": "AWS::Lambda::Function",
     },
-    "HordeStatusLambdaLogRetentionAC34FAEB": {
+    "HordeStatusLambdaLogGroup6FA19F17": {
+      "DeletionPolicy": "Delete",
       "Properties": {
-        "LogGroupName": {
-          "Fn::Join": [
-            "",
-            [
-              "/aws/lambda/",
-              {
-                "Ref": "HordeStatusLambda42500299",
-              },
-            ],
-          ],
-        },
+        "LogGroupName": "/aws/lambda/horde-test-status-updater",
         "RetentionInDays": 30,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A",
-            "Arn",
-          ],
-        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
       },
-      "Type": "Custom::LogRetention",
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
     },
     "HordeStatusLambdaServiceRole2315265C": {
       "Properties": {
@@ -1487,83 +1484,6 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A": {
-      "DependsOn": [
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2819175352ad1ce0dae768e83fc328fb70fb5f10b4a8ff0ccbcb791f02b0716d.zip",
-        },
-        "Handler": "index.handler",
-        "Role": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "logs:PutRetentionPolicy",
-                "logs:DeleteRetentionPolicy",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "Roles": [
-          {
-            "Ref": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
   },
   "Rules": {
@@ -2207,7 +2127,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2edc83a8d588c3115f291ebb3ff24ae097a182b0a01355338e91d41be4d1e111.zip",
+          "S3Key": "d49e59bc2307f54ecfcca2d232c9841f440130d5d82529053545cfc5f435af26.zip",
         },
         "Environment": {
           "Variables": {
@@ -2220,7 +2140,12 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
           },
         },
         "FunctionName": "horde-test-status-updater",
-        "Handler": "index.handler",
+        "Handler": "bundle.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "HordeStatusLambdaLogGroup6FA19F17",
+          },
+        },
         "MemorySize": 256,
         "Role": {
           "Fn::GetAtt": [
@@ -2239,28 +2164,20 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       },
       "Type": "AWS::Lambda::Function",
     },
-    "HordeStatusLambdaLogRetentionAC34FAEB": {
+    "HordeStatusLambdaLogGroup6FA19F17": {
+      "DeletionPolicy": "Delete",
       "Properties": {
-        "LogGroupName": {
-          "Fn::Join": [
-            "",
-            [
-              "/aws/lambda/",
-              {
-                "Ref": "HordeStatusLambda42500299",
-              },
-            ],
-          ],
-        },
+        "LogGroupName": "/aws/lambda/horde-test-status-updater",
         "RetentionInDays": 30,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A",
-            "Arn",
-          ],
-        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
       },
-      "Type": "Custom::LogRetention",
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
     },
     "HordeStatusLambdaServiceRole2315265C": {
       "Properties": {
@@ -2879,83 +2796,6 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A": {
-      "DependsOn": [
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2819175352ad1ce0dae768e83fc328fb70fb5f10b4a8ff0ccbcb791f02b0716d.zip",
-        },
-        "Handler": "index.handler",
-        "Role": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "logs:PutRetentionPolicy",
-                "logs:DeleteRetentionPolicy",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "Roles": [
-          {
-            "Ref": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "ProvidedBucket8A3897F1": {
       "DeletionPolicy": "Retain",
@@ -3607,7 +3447,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2edc83a8d588c3115f291ebb3ff24ae097a182b0a01355338e91d41be4d1e111.zip",
+          "S3Key": "d49e59bc2307f54ecfcca2d232c9841f440130d5d82529053545cfc5f435af26.zip",
         },
         "Environment": {
           "Variables": {
@@ -3620,7 +3460,12 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
           },
         },
         "FunctionName": "horde-test-status-updater",
-        "Handler": "index.handler",
+        "Handler": "bundle.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "HordeStatusLambdaLogGroup6FA19F17",
+          },
+        },
         "MemorySize": 256,
         "Role": {
           "Fn::GetAtt": [
@@ -3639,28 +3484,20 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       },
       "Type": "AWS::Lambda::Function",
     },
-    "HordeStatusLambdaLogRetentionAC34FAEB": {
+    "HordeStatusLambdaLogGroup6FA19F17": {
+      "DeletionPolicy": "Delete",
       "Properties": {
-        "LogGroupName": {
-          "Fn::Join": [
-            "",
-            [
-              "/aws/lambda/",
-              {
-                "Ref": "HordeStatusLambda42500299",
-              },
-            ],
-          ],
-        },
+        "LogGroupName": "/aws/lambda/horde-test-status-updater",
         "RetentionInDays": 30,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A",
-            "Arn",
-          ],
-        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
       },
-      "Type": "Custom::LogRetention",
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
     },
     "HordeStatusLambdaServiceRole2315265C": {
       "Properties": {
@@ -3952,83 +3789,6 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A": {
-      "DependsOn": [
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2819175352ad1ce0dae768e83fc328fb70fb5f10b4a8ff0ccbcb791f02b0716d.zip",
-        },
-        "Handler": "index.handler",
-        "Role": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "logs:PutRetentionPolicy",
-                "logs:DeleteRetentionPolicy",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "Roles": [
-          {
-            "Ref": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "ProvidedBucket8A3897F1": {
       "DeletionPolicy": "Retain",
@@ -5211,7 +4971,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2edc83a8d588c3115f291ebb3ff24ae097a182b0a01355338e91d41be4d1e111.zip",
+          "S3Key": "d49e59bc2307f54ecfcca2d232c9841f440130d5d82529053545cfc5f435af26.zip",
         },
         "Environment": {
           "Variables": {
@@ -5224,7 +4984,12 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
           },
         },
         "FunctionName": "horde-test-status-updater",
-        "Handler": "index.handler",
+        "Handler": "bundle.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "HordeStatusLambdaLogGroup6FA19F17",
+          },
+        },
         "MemorySize": 256,
         "Role": {
           "Fn::GetAtt": [
@@ -5243,28 +5008,20 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Function",
     },
-    "HordeStatusLambdaLogRetentionAC34FAEB": {
+    "HordeStatusLambdaLogGroup6FA19F17": {
+      "DeletionPolicy": "Delete",
       "Properties": {
-        "LogGroupName": {
-          "Fn::Join": [
-            "",
-            [
-              "/aws/lambda/",
-              {
-                "Ref": "HordeStatusLambda42500299",
-              },
-            ],
-          ],
-        },
+        "LogGroupName": "/aws/lambda/horde-test-status-updater",
         "RetentionInDays": 30,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A",
-            "Arn",
-          ],
-        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
       },
-      "Type": "Custom::LogRetention",
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
     },
     "HordeStatusLambdaServiceRole2315265C": {
       "Properties": {
@@ -5556,83 +5313,6 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A": {
-      "DependsOn": [
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "2819175352ad1ce0dae768e83fc328fb70fb5f10b4a8ff0ccbcb791f02b0716d.zip",
-        },
-        "Handler": "index.handler",
-        "Role": {
-          "Fn::GetAtt": [
-            "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "logs:PutRetentionPolicy",
-                "logs:DeleteRetentionPolicy",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
-        "Roles": [
-          {
-            "Ref": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "ProvidedVpcA394A274": {
       "Properties": {

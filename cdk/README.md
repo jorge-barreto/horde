@@ -2,8 +2,6 @@
 
 AWS CDK construct that provisions the infrastructure [horde](https://github.com/jorge-barreto/horde) needs to run worker tasks on ECS Fargate: VPC, cluster, task definition, DynamoDB runs table with GSIs, S3 artifacts bucket, SSM config parameter, EventBridge rule, status-sync Lambda, scoped IAM, and a managed policy for CLI users.
 
-> Status: scaffold only. The `HordeWorker` construct lands in subsequent commits. See `horde` epic 5fh.
-
 ## Install
 
 ```bash
@@ -45,6 +43,23 @@ new HordeWorker(stack, "Horde", {
 
 ```bash
 npm install
-npm run build
+npm run build   # tsc + esbuild bundle for the status Lambda
 npm test
 ```
+
+The status Lambda is bundled at package build time (via `esbuild`) into
+`lib/status-lambda/bundle.js` and shipped pre-compiled. Consumers do not
+need Docker or a local `esbuild` install to synth — the construct uses
+`lambda.Code.fromAsset` on the published bundle.
+
+## Releasing
+
+Bump the version in `package.json`, rebuild and test, then publish:
+
+```bash
+npm version patch    # or minor / major
+npm publish          # prepublishOnly hook runs clean+build+test
+```
+
+`prepublishOnly` runs `npm run clean && npm run build && npm test` before
+the tarball is uploaded, so a broken build never reaches the registry.

@@ -706,7 +706,9 @@ Install
 
     npm install @horde/cdk aws-cdk-lib constructs
 
-Both aws-cdk-lib (^2) and constructs (^10) are peer dependencies.
+Both aws-cdk-lib (^2) and constructs (^10) are peer dependencies. The
+status-sync Lambda ships pre-bundled, so consumer synth does not require
+Docker or a local esbuild install.
 
 Usage
 -----

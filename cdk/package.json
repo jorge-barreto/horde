@@ -8,14 +8,17 @@
   "files": [
     "lib/**/*.js",
     "lib/**/*.d.ts",
+    "!lib/status-lambda/index.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run bundle-lambda",
+    "bundle-lambda": "esbuild src/status-lambda/index.ts --bundle --platform=node --target=node20 --external:@aws-sdk/* --outfile=lib/status-lambda/bundle.js",
     "watch": "tsc -w",
     "test": "jest --passWithNoTests",
-    "clean": "rm -rf lib coverage cdk.out"
+    "clean": "rm -rf lib coverage cdk.out",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "engines": {
     "node": ">=18"

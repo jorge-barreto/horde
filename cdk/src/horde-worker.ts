@@ -10,7 +10,6 @@ import { Construct } from "constructs";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as lambda_nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as path from "path";
 
 import type { HordeWorkerProps } from "./horde-worker-props";
@@ -133,7 +132,7 @@ export class HordeWorker extends Construct {
   public readonly cliUserPolicy: iam.ManagedPolicy;
 
   /** Lambda that reconciles run status from ECS Task State Change events. */
-  public readonly statusLambda: lambda_nodejs.NodejsFunction;
+  public readonly statusLambda: lambda.Function;
 
   /** EventBridge rule routing STOPPED task events to `statusLambda`. */
   public readonly statusEventRule: events.Rule;
@@ -386,10 +385,15 @@ export class HordeWorker extends Construct {
       ],
     });
 
-    this.statusLambda = new lambda_nodejs.NodejsFunction(this, "StatusLambda", {
+    // The Lambda is pre-bundled at package build time (see package.json
+    // `build` script: esbuild --bundle ... --outfile=lib/status-lambda/bundle.js).
+    // Shipping a bundled .js — rather than a NodejsFunction that esbuilds at
+    // consumer synth time — means consumers don't need Docker or a local
+    // esbuild install, and synth doesn't probe the consumer's package-lock.
+    this.statusLambda = new lambda.Function(this, "StatusLambda", {
       functionName: `horde-${slug}-status-updater`,
-      entry: path.join(__dirname, "status-lambda", "index.ts"),
-      handler: "handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "status-lambda")),
+      handler: "bundle.handler",
       runtime: lambda.Runtime.NODEJS_20_X,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -397,13 +401,11 @@ export class HordeWorker extends Construct {
         RUNS_TABLE: this.runsTable.tableName,
         ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
       },
-      bundling: {
-        minify: false,
-        sourceMap: false,
-        target: "node20",
-        externalModules: ["@aws-sdk/*"],
-      },
-      logRetention: retention,
+      logGroup: new logs.LogGroup(this, "StatusLambdaLogGroup", {
+        logGroupName: `/aws/lambda/horde-${slug}-status-updater`,
+        retention,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
     });
     cdk.Tags.of(this.statusLambda).add("Name", `horde-${slug}-status-lambda`);
 

@@ -95,9 +95,11 @@ Mounts use Docker's `host:container` format. Host paths are relative to the proj
 ## Testing
 
 ```bash
-go test -short ./...                                   # unit tests only (fast, no Docker)
-go test -v -count=1 -timeout 10m ./test/integration/   # Docker integration tests
-go test -v -count=1 -timeout 30m -run TestECS ./test/integration/   # ECS integration tests (real AWS)
+make unit-test         # fast Go tests, no Docker, no AWS. What CI runs.
+make integration-test  # real Docker, real horde, real orc (~2 min). Also CI.
+make e2e-up            # developer-local only: deploy AWS stack (not CI)
+make e2e-test          # run full TestECS_* suite against deployed stack
+make e2e-down          # always run when done with e2e
 ```
 
 Unit tests use fake Docker shell scripts — no real containers. Docker integration tests launch real Docker containers running real orc with script-only workflows against a real SQLite store. They exercise the full status detection chain: launch, timeout, kill, and external stop scenarios, and take ~1-2 minutes.

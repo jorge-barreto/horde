@@ -1,4 +1,4 @@
-.PHONY: build install test vet worker docker-build check e2e-up e2e-test e2e-down
+.PHONY: build install unit-test integration-test bootstrap-validate-test vet worker docker-build check e2e-up e2e-test e2e-down
 
 build:
 	go build ./cmd/horde
@@ -6,11 +6,38 @@ build:
 install:
 	go install ./cmd/horde
 
-test:
-	go test ./...
+# Fast tier: no Docker, no AWS. Must stay green on every commit.
+# Excludes cdk/ because it's a Node package; its node_modules/ contains
+# scaffold files with %name% placeholders that Go's ./... walker cannot
+# parse ("invalid input file name"). Listing our own packages explicitly
+# keeps CI green regardless of what npm installs underneath cdk/.
+unit-test:
+	go test -short ./cmd/... ./internal/... ./test/...
+
+# Docker tier: real containers, real horde binary, real orc. ~2 min.
+# Preflight docker on PATH so a missing daemon doesn't silently pass
+# via testing.Short()-style skips inside the suite.
+#
+# Unsets HORDE_E2E_AWS / HORDE_E2E_ECS so this target stays Docker-only
+# regardless of what .env has. AWS-backed tests live under e2e-* and
+# (for CloudFormation template validation) bootstrap-validate-test.
+integration-test:
+	@command -v docker >/dev/null 2>&1 || { \
+	  echo 'integration-test requires docker on PATH; install Docker or use make unit-test' >&2; \
+	  exit 1; \
+	}
+	@HORDE_E2E_AWS=0 HORDE_E2E_ECS=0 HORDE_E2E_CDK=0 \
+	  go test -count=1 -timeout 10m ./test/integration/
+
+# Free AWS-backed check: CloudFormation ValidateTemplate on the rendered
+# bootstrap template. Creates no resources, no account charges. Requires
+# a live SSO token and HORDE_E2E_AWS=1 (set in .env locally; never in CI).
+bootstrap-validate-test:
+	@$(E2E_ENV) && export HORDE_E2E_AWS=1 && \
+	  go test -v -count=1 -timeout 1m -run TestBootstrap_ValidateTemplate ./test/integration/
 
 vet:
-	go vet ./...
+	go vet ./cmd/... ./internal/... ./test/...
 
 worker:
 	docker build -t horde-worker:latest docker/

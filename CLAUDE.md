@@ -15,17 +15,19 @@ Cloud launcher for orc workflows. See SPEC.md for design, ORC_CONTRACT_EXPECTATI
 ## Commands
 
 ```bash
-go build ./cmd/horde          # build
-go test -short ./...           # unit tests only (fast, no Docker)
-go vet ./...                   # lint
+make build                    # build cmd/horde
+make unit-test                # fast Go tests; no Docker, no AWS. What CI runs on every PR.
+make integration-test         # real Docker, real horde, real orc (~2 min). CI runs this too.
+make vet                      # go vet
 
-# Integration tests — real Docker, real orc, real horde (~2 min)
-go test -v -count=1 -timeout 10m ./test/integration/
+# ECS end-to-end tests — real AWS stack, developer-local only (never CI).
+# Needs `.env` with AWS_PROFILE + HORDE_E2E_*=1 and a live SSO token.
+make e2e-up                   # deploy CDK stack (~5 min cold / ~2 min warm)
+make e2e-test                 # run full TestECS_* suite against it (~15 min)
+make e2e-down                 # destroy stack (~3 min). ALWAYS run when done.
 
-# ECS end-to-end tests — real AWS stack (~2 min parallel).
-# Gated by HORDE_E2E_ECS=1 (set in .env). HORDE_E2E_ECS_KEEP=1 reuses the
-# stack between runs. See `horde docs ecs-integration`.
-go test -v -count=1 -timeout 30m -run TestECS ./test/integration/
+# Free AWS-backed check (no resources created, no charges).
+make bootstrap-validate-test  # ValidateTemplate on rendered CloudFormation
 ```
 
 ## Git

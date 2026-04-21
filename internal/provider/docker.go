@@ -93,11 +93,23 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 		if err := os.MkdirAll(wsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating workspace directory: %w", err)
 		}
+		// The container runs as UID 1000 (user `horde` in the base image).
+		// Bind-mounted host dirs keep host ownership inside the container,
+		// so if horde is invoked from a host user with UID != 1000 (e.g.
+		// GitHub Actions' `runner` at UID 1001), the container user can't
+		// write to the workspace. Chmod after MkdirAll because umask can
+		// strip the world-write bit from the initial mode argument.
+		if err := os.Chmod(wsDir, 0o777); err != nil {
+			return nil, fmt.Errorf("chmod workspace directory: %w", err)
+		}
 		allMounts = append(allMounts, wsDir+":/workspace")
 
 		sessionsDir := SessionsPath(opts.HomeDir, opts.RunID)
 		if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating sessions directory: %w", err)
+		}
+		if err := os.Chmod(sessionsDir, 0o777); err != nil {
+			return nil, fmt.Errorf("chmod sessions directory: %w", err)
 		}
 		allMounts = append(allMounts, sessionsDir+":/home/horde/.claude")
 	}

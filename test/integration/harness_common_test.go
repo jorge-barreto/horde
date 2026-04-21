@@ -186,6 +186,24 @@ func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string 
 		}
 	})
 
+	// If the test fails, dump container logs BEFORE the rm cleanup runs.
+	// t.Cleanup is LIFO, so this registration runs first during teardown.
+	h.t.Cleanup(func() {
+		if !h.t.Failed() {
+			return
+		}
+		cid := h.driver.InstanceID(runID)
+		if cid == "" {
+			return
+		}
+		logs, err := h.driver.FetchContainerLogs(cid)
+		if err != nil {
+			h.t.Logf("container-logs fetch failed for %s: %v", runID, err)
+			return
+		}
+		h.t.Logf("--- container logs for run %s (instance %s) ---\n%s\n--- end logs ---", runID, cid, logs)
+	})
+
 	return runID
 }
 

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same branch — PRs that push again don't
+# need the previous run's unfinished work.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    name: unit-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - run: make vet
+
+      - run: make unit-test
+
+  integration-test:
+    name: integration-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      # ubuntu-latest ships Docker pre-installed; preflight so we fail
+      # loudly rather than skipping if the runner image ever changes.
+      - run: docker info
+
+      - run: make integration-test
+
+  cdk-test:
+    name: cdk-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cdk/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm test

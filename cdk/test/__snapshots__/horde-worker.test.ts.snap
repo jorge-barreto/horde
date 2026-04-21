@@ -1,0 +1,1517 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
+{
+  "Outputs": {
+    "HordeCliUserManagedPolicyArn09A94DB5": {
+      "Description": "Attach this managed policy to IAM principals that run the horde CLI",
+      "Value": {
+        "Ref": "HordeCliUserPolicy7E962E7B",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F": {
+      "DependsOn": [
+        "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
+          "S3Key": "faa95a81ae7d7373f3e1f242268f904eb748d8d0fdd306e8a6fe515a1905a7d6.zip",
+        },
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Lambda function for auto-deleting objects in ",
+              {
+                "Ref": "HordeArtifactsBucket1A7FD4A4",
+              },
+              " S3 bucket.",
+            ],
+          ],
+        },
+        "Handler": "index.handler",
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeArtifactsBucket1A7FD4A4": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "BucketName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-artifacts-test-",
+              {
+                "Ref": "AWS::AccountId",
+              },
+            ],
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "Tags": [
+          {
+            "Key": "aws-cdk:auto-delete-objects",
+            "Value": "true",
+          },
+          {
+            "Key": "Name",
+            "Value": "horde-test-artifacts",
+          },
+        ],
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeArtifactsBucketAutoDeleteObjectsCustomResource5ED8AE6A": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "HordeArtifactsBucketPolicy035E46DD",
+      ],
+      "Properties": {
+        "BucketName": {
+          "Ref": "HordeArtifactsBucket1A7FD4A4",
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "Custom::S3AutoDeleteObjects",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeArtifactsBucketPolicy035E46DD": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "HordeArtifactsBucket1A7FD4A4",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:PutBucketPolicy",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::GetAtt": [
+                    "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+                    "Arn",
+                  ],
+                },
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "HordeCliUserPolicy7E962E7B": {
+      "Properties": {
+        "Description": "Permissions required by the horde CLI to launch, inspect, and terminate runs",
+        "ManagedPolicyName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-test-cli-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Path": "/",
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:111111111111:parameter",
+                    {
+                      "Ref": "HordeConfigParameterA1D17F8F",
+                    },
+                  ],
+                ],
+              },
+              "Sid": "SsmRead",
+            },
+            {
+              "Action": [
+                "ecs:RunTask",
+                "ecs:DescribeTasks",
+                "ecs:StopTask",
+                "ecs:ListTasks",
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Fn::GetAtt": [
+                      "HordeClusterA7629518",
+                      "Arn",
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "EcsRun",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ecs-tasks.amazonaws.com",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeTaskRole4CD3769C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "HordeExecutionRole89AE651A",
+                    "Arn",
+                  ],
+                },
+              ],
+              "Sid": "EcsPassRole",
+            },
+            {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeRunsTableAC562C05",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeRunsTableAC562C05",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "DynamoRunsTable",
+            },
+            {
+              "Action": [
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents",
+                "logs:DescribeLogStreams",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeLogGroup1EE05984",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeLogGroup1EE05984",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "LogsRead",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "ArtifactsRead",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::ManagedPolicy",
+    },
+    "HordeClusterA7629518": {
+      "Properties": {
+        "ClusterName": "horde-test",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-cluster",
+          },
+        ],
+      },
+      "Type": "AWS::ECS::Cluster",
+    },
+    "HordeConfigParameterA1D17F8F": {
+      "Properties": {
+        "Description": "horde CLI configuration for project test",
+        "Name": "/horde/test/config",
+        "Tags": {
+          "Name": "horde-test",
+        },
+        "Type": "String",
+        "Value": {
+          "Fn::Join": [
+            "",
+            [
+              "{"cluster_arn":"",
+              {
+                "Fn::GetAtt": [
+                  "HordeClusterA7629518",
+                  "Arn",
+                ],
+              },
+              "","task_definition_arn":"",
+              {
+                "Ref": "HordeTaskDefinition1A4F86D0",
+              },
+              "","subnets":[",
+              {
+                "Fn::Join": [
+                  ",",
+                  [
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          """,
+                          {
+                            "Ref": "HordeVpcprivateSubnet1Subnet50085241",
+                          },
+                          """,
+                        ],
+                      ],
+                    },
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          """,
+                          {
+                            "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
+                          },
+                          """,
+                        ],
+                      ],
+                    },
+                  ],
+                ],
+              },
+              "],"security_group":"",
+              {
+                "Fn::GetAtt": [
+                  "HordeWorkerSecurityGroupC1335488",
+                  "GroupId",
+                ],
+              },
+              "","assign_public_ip":"DISABLED","log_group":"",
+              {
+                "Ref": "HordeLogGroup1EE05984",
+              },
+              "","log_stream_prefix":"ecs","artifacts_bucket":"",
+              {
+                "Ref": "HordeArtifactsBucket1A7FD4A4",
+              },
+              "","runs_table":"",
+              {
+                "Ref": "HordeRunsTableAC562C05",
+              },
+              "","ecr_repo_uri":"111111111111.dkr.ecr.us-east-1.",
+              {
+                "Ref": "AWS::URLSuffix",
+              },
+              "/horde-test","max_concurrent":5,"default_timeout_minutes":1440}",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "HordeExecutionRole89AE651A": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "horde worker task execution role for test",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+              ],
+            ],
+          },
+        ],
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-test-exec-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-exec-role",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeExecutionRoleDefaultPolicy71A29943": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeLogGroup1EE05984",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:111111111111:secret:horde/claude-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:111111111111:secret:horde/git-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "HordeExecutionRoleDefaultPolicy71A29943",
+        "Roles": [
+          {
+            "Ref": "HordeExecutionRole89AE651A",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "HordeLogGroup1EE05984": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/ecs/horde-worker-test",
+        "RetentionInDays": 30,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeRunsTableAC562C05": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "repo",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "started_at",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "ticket",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "status",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "instance_id",
+            "AttributeType": "S",
+          },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "by-repo",
+            "KeySchema": [
+              {
+                "AttributeName": "repo",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "started_at",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "by-ticket",
+            "KeySchema": [
+              {
+                "AttributeName": "ticket",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "started_at",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "by-status",
+            "KeySchema": [
+              {
+                "AttributeName": "status",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "started_at",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "by-instance",
+            "KeySchema": [
+              {
+                "AttributeName": "instance_id",
+                "KeyType": "HASH",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH",
+          },
+        ],
+        "TableName": "horde-runs-test",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-runs",
+          },
+        ],
+      },
+      "Type": "AWS::DynamoDB::Table",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeStatusEventRule69A0B39F": {
+      "Properties": {
+        "Description": "Route STOPPED ECS task events on the horde-test cluster to the status lambda",
+        "EventPattern": {
+          "detail": {
+            "clusterArn": [
+              {
+                "Fn::GetAtt": [
+                  "HordeClusterA7629518",
+                  "Arn",
+                ],
+              },
+            ],
+            "lastStatus": [
+              "STOPPED",
+            ],
+          },
+          "detail-type": [
+            "ECS Task State Change",
+          ],
+          "source": [
+            "aws.ecs",
+          ],
+        },
+        "Name": "horde-test-status",
+        "State": "ENABLED",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "HordeStatusLambda42500299",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "HordeStatusEventRuleAllowEventRuleTestStackHordeStatusLambda3DEEE142BB879D21": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "HordeStatusLambda42500299",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "HordeStatusEventRule69A0B39F",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "HordeStatusLambda42500299": {
+      "DependsOn": [
+        "HordeStatusLambdaServiceRoleDefaultPolicyCF6764C1",
+        "HordeStatusLambdaServiceRole2315265C",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
+          "S3Key": "d49e59bc2307f54ecfcca2d232c9841f440130d5d82529053545cfc5f435af26.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "ARTIFACTS_BUCKET": {
+              "Ref": "HordeArtifactsBucket1A7FD4A4",
+            },
+            "RUNS_TABLE": {
+              "Ref": "HordeRunsTableAC562C05",
+            },
+          },
+        },
+        "FunctionName": "horde-test-status-updater",
+        "Handler": "bundle.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "HordeStatusLambdaLogGroup6FA19F17",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "HordeStatusLambdaServiceRole2315265C",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs20.x",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-status-lambda",
+          },
+        ],
+        "Timeout": 30,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "HordeStatusLambdaLogGroup6FA19F17": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/horde-test-status-updater",
+        "RetentionInDays": 30,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeStatusLambdaServiceRole2315265C": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-status-lambda",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeStatusLambdaServiceRoleDefaultPolicyCF6764C1": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:Query",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeRunsTableAC562C05",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeRunsTableAC562C05",
+                          "Arn",
+                        ],
+                      },
+                      "/index/by-instance",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "DynamoRunsTableRW",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeArtifactsBucket1A7FD4A4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeArtifactsBucket1A7FD4A4",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "ArtifactsRead",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "HordeStatusLambdaServiceRoleDefaultPolicyCF6764C1",
+        "Roles": [
+          {
+            "Ref": "HordeStatusLambdaServiceRole2315265C",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "HordeTaskDefinition1A4F86D0": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Essential": true,
+            "Image": "public.ecr.aws/horde/test:latest",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "HordeLogGroup1EE05984",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "ecs",
+              },
+            },
+            "Name": "horde-worker",
+            "Secrets": [
+              {
+                "Name": "CLAUDE_CODE_OAUTH_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:111111111111:secret:horde/claude",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "GIT_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:111111111111:secret:horde/git",
+                    ],
+                  ],
+                },
+              },
+            ],
+            "StopTimeout": 120,
+          },
+        ],
+        "Cpu": "1024",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "HordeExecutionRole89AE651A",
+            "Arn",
+          ],
+        },
+        "Family": "horde-test",
+        "Memory": "4096",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "HordeTaskRole4CD3769C",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "HordeTaskRole4CD3769C": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "horde worker task role for test",
+        "RoleName": {
+          "Fn::Join": [
+            "",
+            [
+              "horde-test-task-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-task-role",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HordeTaskRoleDefaultPolicyFE6D288A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:PutObject",
+                "s3:AbortMultipartUpload",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "HordeArtifactsBucket1A7FD4A4",
+                        "Arn",
+                      ],
+                    },
+                    "/horde-runs/*",
+                  ],
+                ],
+              },
+              "Sid": "ArtifactsWrite",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "HordeTaskRoleDefaultPolicyFE6D288A",
+        "Roles": [
+          {
+            "Ref": "HordeTaskRole4CD3769C",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "HordeVpcB5939D5D": {
+      "Properties": {
+        "CidrBlock": "10.0.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-vpc",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::VPC",
+    },
+    "HordeVpcIGW2D4B66FE": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-vpc",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::InternetGateway",
+    },
+    "HordeVpcVPCGWAEEB195C": {
+      "Properties": {
+        "InternetGatewayId": {
+          "Ref": "HordeVpcIGW2D4B66FE",
+        },
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+    },
+    "HordeVpcprivateSubnet1DefaultRoute184FFD8B": {
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "HordeVpcpublicSubnet1NATGateway73FD7C1D",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet1RouteTableE564B7A0",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcprivateSubnet1RouteTableAssociationE29E1B5E": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet1RouteTableE564B7A0",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcprivateSubnet1Subnet50085241",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcprivateSubnet1RouteTableE564B7A0": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcprivateSubnet1Subnet50085241": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.2.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeVpcprivateSubnet2DefaultRoute791A061F": {
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "HordeVpcpublicSubnet1NATGateway73FD7C1D",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet2RouteTableB22C6503",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcprivateSubnet2RouteTableAssociationAAC23162": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcprivateSubnet2RouteTableB22C6503",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcprivateSubnet2RouteTableB22C6503": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcprivateSubnet2Subnet9297B1D5": {
+      "Properties": {
+        "AvailabilityZone": "dummy1b",
+        "CidrBlock": "10.0.3.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/privateSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeVpcpublicSubnet1DefaultRoute071AE970": {
+      "DependsOn": [
+        "HordeVpcVPCGWAEEB195C",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "HordeVpcIGW2D4B66FE",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet1RouteTableC1B700AC",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcpublicSubnet1EIP9B0718C2": {
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::EIP",
+    },
+    "HordeVpcpublicSubnet1NATGateway73FD7C1D": {
+      "DependsOn": [
+        "HordeVpcpublicSubnet1DefaultRoute071AE970",
+        "HordeVpcpublicSubnet1RouteTableAssociation962A9F88",
+      ],
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "HordeVpcpublicSubnet1EIP9B0718C2",
+            "AllocationId",
+          ],
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::NatGateway",
+    },
+    "HordeVpcpublicSubnet1RouteTableAssociation962A9F88": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet1RouteTableC1B700AC",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcpublicSubnet1RouteTableC1B700AC": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcpublicSubnet1Subnet246CEB9F": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.0.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeVpcpublicSubnet2DefaultRoute9C55E756": {
+      "DependsOn": [
+        "HordeVpcVPCGWAEEB195C",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "HordeVpcIGW2D4B66FE",
+        },
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet2RouteTable1D5D20BC",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "HordeVpcpublicSubnet2RouteTable1D5D20BC": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "HordeVpcpublicSubnet2RouteTableAssociationE804D12F": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "HordeVpcpublicSubnet2RouteTable1D5D20BC",
+        },
+        "SubnetId": {
+          "Ref": "HordeVpcpublicSubnet2Subnet6A9C5AB6",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "HordeVpcpublicSubnet2Subnet6A9C5AB6": {
+      "Properties": {
+        "AvailabilityZone": "dummy1b",
+        "CidrBlock": "10.0.1.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Horde/Vpc/publicSubnet2",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "HordeWorkerSecurityGroupC1335488": {
+      "Properties": {
+        "GroupDescription": "horde worker egress-only (443 outbound for git/api/ecr)",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "https outbound",
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-worker-sg",
+          },
+        ],
+        "VpcId": {
+          "Ref": "HordeVpcB5939D5D",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;

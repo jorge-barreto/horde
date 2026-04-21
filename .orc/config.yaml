@@ -87,8 +87,8 @@ phases:
 
   - name: test
     type: script
-    description: Run the full test suite
-    run: cd $PROJECT_ROOT && make test
+    description: Run the fast unit-test tier (no Docker, no AWS)
+    run: cd $PROJECT_ROOT && make unit-test
     timeout: 5
     loop:
       goto: implement

@@ -425,12 +425,12 @@ func TestDiagnostic(t *testing.T) {
 		{
 			name: "not found",
 			err:  &NotFoundError{Path: "/horde/config", Err: fmt.Errorf("underlying")},
-			want: []string{"/horde/config", "deploy the @horde/cdk construct"},
+			want: []string{"/horde/config", "deploy the @horde.io/cdk construct"},
 		},
 		{
 			name: "access denied",
 			err:  &AccessDeniedError{Path: "/horde/config", Err: fmt.Errorf("underlying")},
-			want: []string{"/horde/config", "attach the horde CLI user managed policy", "@horde/cdk construct"},
+			want: []string{"/horde/config", "attach the horde CLI user managed policy", "@horde.io/cdk construct"},
 		},
 		{
 			name: "parse error",
@@ -446,12 +446,12 @@ func TestDiagnostic(t *testing.T) {
 		{
 			name: "wrapped not found",
 			err:  fmt.Errorf("wrapped: %w", &NotFoundError{Path: "/horde/config", Err: fmt.Errorf("underlying")}),
-			want: []string{"/horde/config", "deploy the @horde/cdk construct"},
+			want: []string{"/horde/config", "deploy the @horde.io/cdk construct"},
 		},
 		{
 			name: "wrapped access denied",
 			err:  fmt.Errorf("wrapped: %w", &AccessDeniedError{Path: "/horde/config", Err: fmt.Errorf("underlying")}),
-			want: []string{"/horde/config", "attach the horde CLI user managed policy", "@horde/cdk construct"},
+			want: []string{"/horde/config", "attach the horde CLI user managed policy", "@horde.io/cdk construct"},
 		},
 		{
 			name: "wrapped parse error",

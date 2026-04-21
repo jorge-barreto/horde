@@ -92,7 +92,7 @@ horde results <run-id>
 horde list [--all]                              # active runs for current repo; --all includes completed/failed
 horde health                                    # v0.3
 horde sweep                                     # v0.3
-horde retry <run-id>                            # v0.4
+horde retry <run-id>                            # re-launch with same params; preserves --workflow/--branch
 horde init                                      # v0.4
 horde artifacts <run-id> [path]                 # v0.4
 horde stats [--range=<duration>]                # v0.4
@@ -185,7 +185,7 @@ horde maps these to run statuses: 0 → `success`, 1/2/3/4/6 → `failed`, 5 →
 
 Runs have a maximum duration. Default: 24 hours. Override with `--timeout` on `horde launch`.
 
-- **Docker provider:** timeout is enforced lazily. Each `status`, `results`, or `list` call checks `timeout_at` against the current time. If a run has exceeded its timeout, horde calls `Kill()` — copying `.orc/audit/` and `.orc/artifacts/` best-effort, extracting `total_cost_usd` and `exit_code` from `run-result.json` if present — and marks the run as `killed`.
+- **Docker provider:** timeout is enforced lazily. Each `status`, `results`, or `list` call checks `timeout_at` against the current time. If a run has exceeded its timeout, horde calls `Stop()` — copying `.orc/audit/` and `.orc/artifacts/` best-effort, extracting `total_cost_usd` and `exit_code` from `run-result.json` if present — and marks the run as `killed`.
 - **ECS provider:** The CDK construct sets `stopTimeout` on the Fargate task definition. Additionally, horde records the timeout in DynamoDB. The EventBridge Lambda checks the timeout and stops overdue tasks.
 
 The timeout covers the entire run including git clone, orc execution, and artifact upload.
@@ -420,10 +420,11 @@ type Store interface {
 type RunUpdate struct {
     Status       *Status
     InstanceID   *string
-    Metadata     map[string]string // nil = don't update
+    Metadata     map[string]string // nil = don't update; non-nil (even empty) = overwrite
     ExitCode     *int
     CompletedAt  *time.Time
     TotalCostUSD *float64
+    TimeoutAt    *time.Time
 }
 ```
 
@@ -540,8 +541,9 @@ type Provider interface {
     Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error)
     Status(ctx context.Context, instanceID string) (*InstanceStatus, error)
     Logs(ctx context.Context, instanceID string, follow bool) (io.ReadCloser, error)
-    Kill(ctx context.Context, opts KillOpts) error
+    Stop(ctx context.Context, opts StopOpts) error
     ReadFile(ctx context.Context, opts ReadFileOpts) ([]byte, error)
+    HydrateRun(ctx context.Context, opts HydrateOpts) error
     Finalize(ctx context.Context, run *store.Run, homeDir string) error
 }
 
@@ -551,7 +553,10 @@ type LaunchOpts struct {
     Branch   string
     Workflow string
     RunID    string
-    EnvFile  string            // path to .env file (docker provider)
+    EnvFile  string   // path to .env file (docker provider)
+    Mounts   []string // volume mounts in docker format (host:container)
+    HomeDir  string   // home directory for workspace path resolution
+    OrcArgs  []string // extra orc flags passed through via -- (opaque)
 }
 
 type LaunchResult struct {
@@ -560,13 +565,13 @@ type LaunchResult struct {
 }
 
 type InstanceStatus struct {
-    State      string // pending, running, stopping, stopped, unknown
+    State      string // running, stopped, unknown — see StateRunning / StateStopped / StateUnknown
     ExitCode   *int   // nil while running
     StartedAt  time.Time
     FinishedAt *time.Time // nil while running
 }
 
-type KillOpts struct {
+type StopOpts struct {
     InstanceID string // container ID or ECS task ARN
     ResultsDir string // per-run results directory for artifact copy (docker); empty to skip copy
 }
@@ -579,7 +584,7 @@ type ReadFileOpts struct {
 }
 ```
 
-`KillOpts.ResultsDir` is used by the docker provider to copy `.orc/audit/` and `.orc/artifacts/` from the container before removal. The ECS provider ignores it — ECS artifacts are uploaded to S3 by the entrypoint before the task stops.
+`StopOpts.ResultsDir` is used by the docker provider to copy `.orc/audit/` and `.orc/artifacts/` from the container before removal. The ECS provider ignores it — ECS artifacts are uploaded to S3 by the entrypoint before the task stops.
 
 `ReadFile` is used by `horde results` to read `run-result.json`. The caller checks the run's status in the store first — if the run is still in progress, it reports that without calling `ReadFile`. The caller passes a logical path relative to the project root (e.g., `.orc/audit/<ticket>/run-result.json`) along with the run ID and provider metadata. Each provider resolves the path internally:
 - **docker**: reads from the local results store (`~/.horde/results/<run-id>/`) where `.orc/audit/` and `.orc/artifacts/` were copied at completion
@@ -594,7 +599,7 @@ Shipped providers:
 Teams import a CDK construct into their existing infra stack. It creates everything horde needs.
 
 ```typescript
-import { HordeWorker } from '@horde/cdk';
+import { HordeWorker } from '@horde.io/cdk';
 
 new HordeWorker(this, 'Horde', {
   vpc: existingVpc,                             // optional — creates one if not provided
@@ -748,7 +753,6 @@ Enterprise trust. What a security team needs to approve production use.
 
 What makes teams love the tool.
 
-- **`horde retry <run-id>`**: re-launches with the same parameters (ticket, branch, workflow). Does not resume — starts fresh.
 - **Onboarding**: `horde init` validates setup (Docker daemon running, image available, `.env` present for docker; AWS credentials valid, SSM parameter readable for ECS). Generates `.env.example` template.
 - **Notification webhook**: configurable URL in SSM config, JSON POST on run completion/failure. Payload includes: run_id, ticket, status, exit_code, cost, duration, launched_by. Enables Slack/PagerDuty/custom integrations.
 - **Artifact browsing**: `horde artifacts <run-id>` lists artifact files. `horde artifacts <run-id> <path>` downloads a specific file. For ECS, reads from S3 listing.

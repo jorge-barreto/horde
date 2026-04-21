@@ -1305,6 +1305,44 @@ func TestDockerProvider_Finalize_NoInstanceID(t *testing.T) {
 	}
 }
 
+// TestDockerProvider_Finalize_StatusError covers the docker-daemon-error
+// branch: when p.Status returns an error other than "no such container",
+// Finalize must propagate it wrapped with "checking instance status:".
+// Without this test a regression in the error wrap would slip past the
+// 17 other Finalize cases, all of which exercise successful Status calls.
+func TestDockerProvider_Finalize_StatusError(t *testing.T) {
+	dir := t.TempDir()
+	// Inspect fails with stderr that is NOT "no such container"; Status
+	// returns the wrapped error rather than treating it as Unknown.
+	writeFakeDocker(t, dir, `
+case "$1" in
+  inspect)
+    echo "Error: cannot connect to the Docker daemon" >&2
+    exit 1
+    ;;
+esac
+`)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	run := &store.Run{
+		ID:         "r-status-err",
+		InstanceID: "cid",
+		Status:     store.StatusRunning,
+		Ticket:     "T-1",
+		TimeoutAt:  time.Now().Add(time.Hour),
+	}
+	err := NewDockerProvider().Finalize(context.Background(), run, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error from Finalize when Status fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "checking instance status:") {
+		t.Errorf("error wrap = %q, want it to contain %q", err.Error(), "checking instance status:")
+	}
+	if !strings.Contains(err.Error(), "cannot connect to the Docker daemon") {
+		t.Errorf("error = %q, want it to contain inner stderr", err.Error())
+	}
+}
+
 func TestDockerProvider_Finalize_RunningWithMarker(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeDocker(t, dir, runningDockerScript())
@@ -1941,36 +1979,36 @@ func TestCopyDir(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error on read-only destination", func(t *testing.T) {
+	t.Run("returns error when destination parent is a regular file", func(t *testing.T) {
 		t.Parallel()
 
-		if os.Getuid() == 0 {
-			t.Skip("test requires non-root to enforce filesystem permissions")
-		}
-
+		// Permission-based variants of this test had to skip under root
+		// (chmod 0o555 is a no-op for UID 0). Use an ENOTDIR-class trigger
+		// instead: the destination's parent component is a regular file,
+		// so os.MkdirAll inside copyDir fails for every UID with "not a
+		// directory". This exercises the same write-error propagation path
+		// without relying on filesystem permissions.
 		src := t.TempDir()
-		dst := filepath.Join(t.TempDir(), "locked")
-
-		// Create a source file inside a subdirectory.
 		if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
 			t.Fatalf("creating subdir: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(src, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
-			t.Fatalf("writing file: %v", err)
+			t.Fatalf("writing source file: %v", err)
 		}
 
-		// Create destination and lock it so child writes fail.
-		if err := os.MkdirAll(dst, 0o755); err != nil {
-			t.Fatalf("creating dst: %v", err)
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+			t.Fatalf("writing blocker file: %v", err)
 		}
-		if err := os.Chmod(dst, 0o555); err != nil {
-			t.Fatalf("chmod dst: %v", err)
-		}
-		t.Cleanup(func() { os.Chmod(dst, 0o755) })
+		// dst sits *under* a regular file; MkdirAll cannot traverse it.
+		dst := filepath.Join(blocker, "would-be-dir")
 
 		err := copyDir(src, dst)
 		if err == nil {
-			t.Fatal("expected error for read-only destination, got nil")
+			t.Fatal("expected error when dst parent is a regular file, got nil")
+		}
+		if !strings.Contains(err.Error(), "creating") {
+			t.Errorf("expected wrapped 'creating' error, got: %v", err)
 		}
 	})
 }
@@ -2182,5 +2220,140 @@ func TestDockerProvider_HydrateRun_ConfigMissingWorkspace(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("missing workspace should not fail hydrate: %v", err)
+	}
+}
+
+func TestResolveStoppedExitCode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		markerData []byte
+		markerErr  error
+		instExit   *int
+		wantStatus store.Status
+		wantCode   *int
+	}{
+		{
+			name:       "marker present overrides docker exit",
+			markerData: []byte("0\n"),
+			markerErr:  nil,
+			instExit:   intPtr(143), // docker SIGTERM — should be ignored
+			wantStatus: store.StatusSuccess,
+			wantCode:   intPtr(0),
+		},
+		{
+			name:       "marker present with failure code",
+			markerData: []byte("3"),
+			markerErr:  nil,
+			instExit:   nil,
+			wantStatus: store.StatusFailed,
+			wantCode:   intPtr(3),
+		},
+		{
+			name:       "marker present with kill code 5",
+			markerData: []byte("5"),
+			markerErr:  nil,
+			instExit:   nil,
+			wantStatus: store.StatusKilled,
+			wantCode:   intPtr(5),
+		},
+		{
+			name:       "unparseable marker defaults to 1",
+			markerData: []byte("garbage"),
+			markerErr:  nil,
+			instExit:   intPtr(0),
+			wantStatus: store.StatusFailed, // 1 → failed
+			wantCode:   intPtr(1),
+		},
+		{
+			name:       "marker missing falls through to docker exit",
+			markerData: nil,
+			markerErr:  errors.New("no such file"),
+			instExit:   intPtr(0),
+			wantStatus: store.StatusSuccess,
+			wantCode:   intPtr(0),
+		},
+		{
+			name:       "no marker and no docker exit returns failed nil",
+			markerData: nil,
+			markerErr:  errors.New("no such file"),
+			instExit:   nil,
+			wantStatus: store.StatusFailed,
+			wantCode:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotStatus, gotCode := resolveStoppedExitCode(tc.markerData, tc.markerErr, tc.instExit, "test-run")
+			if gotStatus != tc.wantStatus {
+				t.Errorf("status = %q, want %q", gotStatus, tc.wantStatus)
+			}
+			if (gotCode == nil) != (tc.wantCode == nil) {
+				t.Errorf("exitCode nilness = %v, want %v (got %v want %v)",
+					gotCode == nil, tc.wantCode == nil, gotCode, tc.wantCode)
+				return
+			}
+			if gotCode != nil && *gotCode != *tc.wantCode {
+				t.Errorf("exitCode = %d, want %d", *gotCode, *tc.wantCode)
+			}
+		})
+	}
+}
+
+func intPtr(i int) *int { return &i }
+
+func TestSaveContainerLog_Empty(t *testing.T) {
+	t.Parallel()
+	// Empty payload is a no-op: no directory created, no file written, no warning.
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "results")
+	SaveContainerLog(logsDir, "r-empty", nil)
+	if _, err := os.Stat(logsDir); err == nil {
+		t.Errorf("results dir was created for empty payload, want no-op")
+	}
+}
+
+func TestSaveContainerLog_Success(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "results")
+	SaveContainerLog(logsDir, "r-ok", []byte("hello\n"))
+	got, err := os.ReadFile(filepath.Join(logsDir, "container.log"))
+	if err != nil {
+		t.Fatalf("reading saved log: %v", err)
+	}
+	if string(got) != "hello\n" {
+		t.Errorf("log content = %q, want %q", string(got), "hello\n")
+	}
+}
+
+func TestSaveContainerLog_WarnsOnMkdirFailure(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("test requires non-root to enforce filesystem permissions")
+	}
+	// Captures stderr in-process; cannot run in parallel because
+	// os.Stderr is process-wide.
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatalf("chmod parent: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o755) })
+
+	origStderr := os.Stderr
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating stderr pipe: %v", err)
+	}
+	os.Stderr = pw
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	SaveContainerLog(filepath.Join(parent, "child"), "r-fail", []byte("data"))
+	pw.Close()
+	os.Stderr = origStderr
+	stderr, _ := io.ReadAll(pr)
+
+	if !strings.Contains(string(stderr), "warning: creating results dir for run r-fail") {
+		t.Errorf("stderr missing mkdir warning, got: %s", string(stderr))
 	}
 }

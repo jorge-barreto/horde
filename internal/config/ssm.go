@@ -92,15 +92,15 @@ func Diagnostic(err error) string {
 	}
 	var nf *NotFoundError
 	if errors.As(err, &nf) {
-		return fmt.Sprintf("ssm parameter %q not found\n\nhint: deploy the @horde/cdk construct to create the SSM parameter.\nSee: https://github.com/jorge-barreto/horde/tree/main/cdk", nf.Path)
+		return fmt.Sprintf("ssm parameter %q not found\n\nhint: deploy the @horde.io/cdk construct to create the SSM parameter.\nSee: https://github.com/jorge-barreto/horde/tree/main/cdk", nf.Path)
 	}
 	var ad *AccessDeniedError
 	if errors.As(err, &ad) {
-		return fmt.Sprintf("access denied reading ssm parameter %q\n\nhint: attach the horde CLI user managed policy to your IAM role or user.\nThe policy ARN is an output of the @horde/cdk construct.", ad.Path)
+		return fmt.Sprintf("access denied reading ssm parameter %q\n\nhint: attach the horde CLI user managed policy to your IAM role or user.\nThe policy ARN is an output of the @horde.io/cdk construct.", ad.Path)
 	}
 	var pe *ParseError
 	if errors.As(err, &pe) {
-		return fmt.Sprintf("parsing ssm parameter %q: %v\n\nhint: the SSM parameter is malformed. Re-deploy the @horde/cdk construct to regenerate it.", pe.Path, pe.Err)
+		return fmt.Sprintf("parsing ssm parameter %q: %v\n\nhint: the SSM parameter is malformed. Re-deploy the @horde.io/cdk construct to regenerate it.", pe.Path, pe.Err)
 	}
 	return err.Error()
 }

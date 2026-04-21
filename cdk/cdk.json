@@ -1,0 +1,9 @@
+{
+  "app": "npx ts-node --prefer-ts-exts e2e/app.ts",
+  "context": {
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:checkSecretUsage": true
+  },
+  "watch": { "exclude": ["node_modules/**", "lib/**", "cdk.out/**", "test/**"] },
+  "output": "cdk.out"
+}

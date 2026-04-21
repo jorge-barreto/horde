@@ -43,8 +43,12 @@ Thumbs.db
 
 # CDK
 cdk/node_modules/
-cdk/lib/*.js
-cdk/lib/*.d.ts
-cdk/test/*.js
-cdk/test/*.d.ts
+cdk/lib/**/*.js
+cdk/lib/**/*.d.ts
+cdk/test/**/*.js
+cdk/test/**/*.d.ts
 cdk/cdk.out/
+# CDK writes cached context (AZs, AMIs, etc.) here on synth. Checking it in
+# is the upstream recommendation for apps, but we treat cdk/ as a library
+# and cdk/e2e/ as a throwaway test app, so regenerating is fine.
+cdk/cdk.context.json

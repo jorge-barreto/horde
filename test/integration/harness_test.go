@@ -70,7 +70,13 @@ func TestMain(m *testing.M) {
 	// whole suite of ECS tests share one stack (by default, with
 	// HORDE_E2E_ECS_KEEP=1, the stack survives between runs for fast
 	// iteration — destroy it explicitly with `horde bootstrap destroy`).
-	if os.Getenv("HORDE_E2E_ECS") == "1" {
+	//
+	// When HORDE_E2E_ECS_BACKEND=cdk the stack is managed externally via
+	// `make e2e-up` / `make e2e-down` — skip TestMain's deploy/destroy.
+	manageBootstrap := os.Getenv("HORDE_E2E_ECS") == "1" &&
+		os.Getenv("HORDE_E2E_ECS_BACKEND") != "cdk"
+
+	if manageBootstrap {
 		if err := ensureECSStack(repoRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "ECS stack setup failed: %v\n", err)
 			os.Exit(1)
@@ -81,7 +87,7 @@ func TestMain(m *testing.M) {
 
 	// Only destroy the stack if the user explicitly opted in by UNsetting
 	// HORDE_E2E_ECS_KEEP. Default behavior is to keep the stack alive.
-	if os.Getenv("HORDE_E2E_ECS") == "1" && os.Getenv("HORDE_E2E_ECS_KEEP") != "1" {
+	if manageBootstrap && os.Getenv("HORDE_E2E_ECS_KEEP") != "1" {
 		fmt.Fprintln(os.Stderr, "HORDE_E2E_ECS_KEEP unset — destroying stack")
 		destroyECSStack(repoRoot)
 	}

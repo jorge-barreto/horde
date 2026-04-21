@@ -68,5 +68,10 @@ type Store interface {
 	ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error)
 	FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
 	CountActive(ctx context.Context) (int, error)
+	// ListActive returns all runs in pending or running status across every
+	// repo, sorted by started_at descending (newest first). The pending /
+	// running statuses are interleaved by start time — implementations that
+	// fetch them in separate queries must merge-sort before returning so
+	// callers can rely on a stable cross-status ordering.
 	ListActive(ctx context.Context) ([]*Run, error)
 }

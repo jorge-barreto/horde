@@ -1,0 +1,10 @@
+# Minimal orc workflow that just echoes and exits 0. Useful for proving
+# end-to-end wiring (horde launch -> ECS task -> status sync -> success)
+# without needing real claude-code credentials.
+name: demo
+ticket-pattern: 'DEMO-[\w-]+'
+phases:
+  - name: echo
+    type: script
+    run: echo "demo workflow ran for $TICKET"
+    timeout: 1

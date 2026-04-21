@@ -1,0 +1,49 @@
+{
+  "name": "@horde.io/cdk",
+  "version": "0.1.0",
+  "description": "AWS CDK construct that provisions the infrastructure required by horde (https://github.com/jorge-barreto/horde): ECS Fargate cluster, DynamoDB runs table, S3 artifacts bucket, SSM config parameter, EventBridge status sync, and scoped IAM.",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "!lib/status-lambda/index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && npm run bundle-lambda",
+    "bundle-lambda": "esbuild src/status-lambda/index.ts --bundle --platform=node --target=node20 --external:@aws-sdk/* --outfile=lib/status-lambda/bundle.js",
+    "watch": "tsc -w",
+    "test": "jest --passWithNoTests",
+    "clean": "rm -rf lib coverage cdk.out",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.150.0",
+    "constructs": "^10.3.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@types/aws-lambda": "^8.10.140",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.12.7",
+    "aws-cdk": "^2.150.0",
+    "aws-cdk-lib": "^2.150.0",
+    "aws-sdk-client-mock": "^4.0.1",
+    "constructs": "^10.3.0",
+    "esbuild": "^0.23.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

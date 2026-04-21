@@ -1,0 +1,23 @@
+{
+  "name": "horde-cdk-consumer-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Minimal example CDK app that provisions a horde worker cluster via @horde.io/cdk.",
+  "license": "MIT",
+  "scripts": {
+    "synth": "cdk synth --app 'npx ts-node --prefer-ts-exts app.ts'",
+    "deploy": "cdk deploy --app 'npx ts-node --prefer-ts-exts app.ts'",
+    "destroy": "cdk destroy --app 'npx ts-node --prefer-ts-exts app.ts'"
+  },
+  "dependencies": {
+    "@horde.io/cdk": "^0.1.0",
+    "aws-cdk-lib": "^2.150.0",
+    "constructs": "^10.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "aws-cdk": "^2.150.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

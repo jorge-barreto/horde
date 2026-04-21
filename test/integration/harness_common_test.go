@@ -43,6 +43,10 @@ type harness struct {
 	repoRoot      string // horde repo root
 	driver        instanceDriver
 	hordeProvider string // "docker" or "aws-ecs"; prepended to every horde invocation
+	// extraEnv is appended to every horde subprocess invocation. Used by
+	// the CDK e2e harness to set HORDE_SSM_PATH so the SSM lookup goes to
+	// the CDK-deployed stack regardless of the workspace's git remote.
+	extraEnv []string
 }
 
 // TrackRunForCleanup registers a run for driver-specific teardown. For the
@@ -116,6 +120,7 @@ func (h *harness) env() []string {
 			}
 		}
 	}
+	filtered = append(filtered, h.extraEnv...)
 	return filtered
 }
 
@@ -179,6 +184,24 @@ func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string 
 		if cid != "" && h.hordeProvider == "docker" {
 			exec.Command("docker", "rm", "-f", cid).Run()
 		}
+	})
+
+	// If the test fails, dump container logs BEFORE the rm cleanup runs.
+	// t.Cleanup is LIFO, so this registration runs first during teardown.
+	h.t.Cleanup(func() {
+		if !h.t.Failed() {
+			return
+		}
+		cid := h.driver.InstanceID(runID)
+		if cid == "" {
+			return
+		}
+		logs, err := h.driver.FetchContainerLogs(cid)
+		if err != nil {
+			h.t.Logf("container-logs fetch failed for %s: %v", runID, err)
+			return
+		}
+		h.t.Logf("--- container logs for run %s (instance %s) ---\n%s\n--- end logs ---", runID, cid, logs)
 	})
 
 	return runID

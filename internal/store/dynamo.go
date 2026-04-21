@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -474,5 +475,11 @@ func (s *DynamoStore) ListActive(ctx context.Context) ([]*Run, error) {
 			input.ExclusiveStartKey = out.LastEvaluatedKey
 		}
 	}
+	// Each per-status query is sorted by started_at desc within its block,
+	// but the Store contract is global descending across statuses. Sort
+	// once after concatenation so callers see the same order as SQLite.
+	sort.SliceStable(runs, func(i, j int) bool {
+		return runs[i].StartedAt.After(runs[j].StartedAt)
+	})
 	return runs, nil
 }

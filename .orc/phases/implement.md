@@ -17,7 +17,7 @@ You are implementing changes for a single work item.
 5. Implement the changes described in the bead plan.
 6. Write or update tests as specified in the bead plan.
 7. Run `make build` to verify compilation.
-8. Run `make test` to verify no regressions.
+8. Run `make unit-test` to verify no regressions.
 9. If any test fails, fix it before finishing. Do NOT leave failing tests.
 
 ## Scope Rules
@@ -42,4 +42,4 @@ Your ONLY task is what is described in `$ARTIFACTS_DIR/bead-plan.md`. Nothing el
 - Every new exported function needs a test. Follow the testing patterns in the package's existing `_test.go` file.
 - Use the Edit tool for targeted changes — don't rewrite entire files unless the plan calls for a new file.
 - Match the existing code style in each file you touch.
-- Run `make test` as your final action. If it fails, fix it.
+- Run `make unit-test` as your final action. If it fails, fix it.

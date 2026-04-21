@@ -39,8 +39,8 @@ Read `$ARTIFACTS_DIR/plan.md` for the overall plan context.
 ## Step 2: Run Verification
 
 ```bash
-cd $PROJECT_ROOT && make build && go vet ./...
-cd $PROJECT_ROOT && make test
+cd $PROJECT_ROOT && make build && make vet
+cd $PROJECT_ROOT && make unit-test
 ```
 
 If tests fail, note the failures — they become automatic BLOCKING findings.

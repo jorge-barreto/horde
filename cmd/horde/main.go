@@ -43,6 +43,20 @@ func main() {
 	}
 }
 
+// setOutputs assigns w to the root command's Writer/ErrWriter and to every
+// subcommand. urfave/cli v3 initializes a subcommand's nil Writer to
+// os.Stdout independently of the parent, so simply setting Writer on the
+// root has no effect on subcommand output. Tests use this to capture
+// JSON output via a bytes.Buffer instead of swapping os.Stdout.
+func setOutputs(app *cli.Command, w io.Writer) {
+	app.Writer = w
+	app.ErrWriter = w
+	for _, sub := range app.Commands {
+		sub.Writer = w
+		sub.ErrWriter = w
+	}
+}
+
 func newApp() *cli.Command {
 	return &cli.Command{
 		Name:  "horde",
@@ -190,17 +204,13 @@ kill some runs before launching more.`,
 				return fmt.Errorf("checking active runs: %w", err)
 			}
 			// Reconcile stale records: container may have died since last check.
+			// Reconciliation is best-effort — a failed Finalize/UpdateRun must
+			// not block the new launch, but we log so users can diagnose if
+			// duplicate-ticket protection misbehaves due to a stuck record.
 			stillActive := active[:0]
 			for _, r := range active {
-				origStatus := r.Status
-				_ = prov.Finalize(ctx, r, homeDir)
-				if r.Status != origStatus {
-					_ = st.UpdateRun(ctx, r.ID, &store.RunUpdate{
-						Status:       &r.Status,
-						ExitCode:     r.ExitCode,
-						CompletedAt:  r.CompletedAt,
-						TotalCostUSD: r.TotalCostUSD,
-					})
+				if err := finalizeAndSync(ctx, prov, st, r, homeDir); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 				}
 				if r.Status == store.StatusPending || r.Status == store.StatusRunning {
 					stillActive = append(stillActive, r)
@@ -327,19 +337,8 @@ resumes any interrupted agent session. Override with explicit orc args:
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			origStatus := run.Status
-			if err := prov.Finalize(ctx, run, homeDir); err != nil {
+			if err := finalizeAndSync(ctx, prov, st, run, homeDir); err != nil {
 				return err
-			}
-			if run.Status != origStatus {
-				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-					Status:       &run.Status,
-					ExitCode:     run.ExitCode,
-					CompletedAt:  run.CompletedAt,
-					TotalCostUSD: run.TotalCostUSD,
-				}); err != nil {
-					return fmt.Errorf("updating run: %w", err)
-				}
 			}
 
 			if run.Status == store.StatusPending {
@@ -464,19 +463,8 @@ result collection.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			origStatus := run.Status
-			if err := prov.Finalize(ctx, run, homeDir); err != nil {
+			if err := finalizeAndSync(ctx, prov, st, run, homeDir); err != nil {
 				return err
-			}
-			if run.Status != origStatus {
-				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-					Status:       &run.Status,
-					ExitCode:     run.ExitCode,
-					CompletedAt:  run.CompletedAt,
-					TotalCostUSD: run.TotalCostUSD,
-				}); err != nil {
-					return fmt.Errorf("updating run: %w", err)
-				}
 			}
 			if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
 				if dp, ok := prov.(*provider.DockerProvider); ok {
@@ -484,7 +472,7 @@ result collection.`,
 				}
 			}
 			if cmd.Bool("json") {
-				return writeJSON(statusToV1(run))
+				return writeJSONTo(cmd.Writer, statusToV1(run))
 			}
 			printRunStatus(run)
 			return nil
@@ -600,19 +588,8 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			origStatus := run.Status
-			if err := prov.Finalize(ctx, run, homeDir); err != nil {
+			if err := finalizeAndSync(ctx, prov, st, run, homeDir); err != nil {
 				return err
-			}
-			if run.Status != origStatus {
-				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-					Status:       &run.Status,
-					ExitCode:     run.ExitCode,
-					CompletedAt:  run.CompletedAt,
-					TotalCostUSD: run.TotalCostUSD,
-				}); err != nil {
-					return fmt.Errorf("updating run: %w", err)
-				}
 			}
 			if run.Status.IsTerminal() {
 				return fmt.Errorf("run %s is already %s", runID, run.Status)
@@ -624,9 +601,8 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 
 				// Capture container logs before stopping
 				if logs, err := prov.Logs(ctx, run.InstanceID, false); err == nil {
-					if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-						os.MkdirAll(resultsDir, 0o755)
-						os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+					if logData, err := io.ReadAll(logs); err == nil {
+						provider.SaveContainerLog(resultsDir, run.ID, logData)
 					}
 					logs.Close()
 				}
@@ -638,15 +614,10 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 					return fmt.Errorf("killing run: %w", err)
 				}
 
-				// Best-effort: read run-result.json for cost and exit code
-				resultPath := filepath.Join(resultsDir, provider.AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
-				if data, err := os.ReadFile(resultPath); err == nil {
-					var rr provider.RunResult
-					if json.Unmarshal(data, &rr) == nil {
-						cost = rr.TotalCostUSD
-						exitCode = rr.ExitCode
-					}
-				}
+				// Best-effort: read run-result.json for cost and exit code.
+				// orc may have crashed before writing it — the helper returns
+				// nils in that case and we record killed without those fields.
+				cost, exitCode = provider.ReadRunResult(homeDir, run)
 			}
 			killedStatus := store.StatusKilled
 			now := time.Now()
@@ -693,23 +664,12 @@ information if the result file is missing (e.g., orc crashed early).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			origStatus := run.Status
-			if err := prov.Finalize(ctx, run, homeDir); err != nil {
+			if err := finalizeAndSync(ctx, prov, st, run, homeDir); err != nil {
 				return err
-			}
-			if run.Status != origStatus {
-				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-					Status:       &run.Status,
-					ExitCode:     run.ExitCode,
-					CompletedAt:  run.CompletedAt,
-					TotalCostUSD: run.TotalCostUSD,
-				}); err != nil {
-					return fmt.Errorf("updating run: %w", err)
-				}
 			}
 			if run.Status == store.StatusPending || run.Status == store.StatusRunning {
 				if cmd.Bool("json") {
-					return writeJSON(partialResultsToV1(run))
+					return writeJSONTo(cmd.Writer, partialResultsToV1(run))
 				}
 				fmt.Printf("Run %s is still in progress (status: %s)\n", run.ID, run.Status)
 				return nil
@@ -723,7 +683,7 @@ information if the result file is missing (e.g., orc crashed early).`,
 			})
 			if err != nil {
 				if cmd.Bool("json") {
-					return writeJSON(partialResultsToV1(run))
+					return writeJSONTo(cmd.Writer, partialResultsToV1(run))
 				}
 				printPartialResults(run)
 				return nil
@@ -731,13 +691,13 @@ information if the result file is missing (e.g., orc crashed early).`,
 			var result fullRunResult
 			if err := json.Unmarshal(data, &result); err != nil {
 				if cmd.Bool("json") {
-					return writeJSON(partialResultsToV1(run))
+					return writeJSONTo(cmd.Writer, partialResultsToV1(run))
 				}
 				printPartialResults(run)
 				return nil
 			}
 			if cmd.Bool("json") {
-				return writeJSON(fullResultsToV1(run, &result))
+				return writeJSONTo(cmd.Writer, fullResultsToV1(run, &result))
 			}
 			printFullResults(run, &result)
 			return nil
@@ -788,20 +748,9 @@ include completed, failed, and killed runs.`,
 			}
 
 			for _, run := range runs {
-				origStatus := run.Status
-				if err := prov.Finalize(ctx, run, homeDir); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: checking run %s: %v\n", run.ID, err)
+				if err := finalizeAndSync(ctx, prov, st, run, homeDir); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 					continue
-				}
-				if run.Status != origStatus {
-					if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-						Status:       &run.Status,
-						ExitCode:     run.ExitCode,
-						CompletedAt:  run.CompletedAt,
-						TotalCostUSD: run.TotalCostUSD,
-					}); err != nil {
-						fmt.Fprintf(os.Stderr, "warning: updating run %s: %v\n", run.ID, err)
-					}
 				}
 				if dp, ok := prov.(*provider.DockerProvider); ok {
 					if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
@@ -821,7 +770,7 @@ include completed, failed, and killed runs.`,
 			}
 
 			if cmd.Bool("json") {
-				return writeJSON(listToV1(runs))
+				return writeJSONTo(cmd.Writer, listToV1(runs))
 			}
 
 			if len(runs) == 0 {
@@ -978,19 +927,8 @@ directly (e.g., 'orc run --resume'), or fix issues manually.`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			origStatus := run.Status
-			if err := prov.Finalize(ctx, run, homeDir); err != nil {
+			if err := finalizeAndSync(ctx, prov, st, run, homeDir); err != nil {
 				return err
-			}
-			if run.Status != origStatus {
-				if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
-					Status:       &run.Status,
-					ExitCode:     run.ExitCode,
-					CompletedAt:  run.CompletedAt,
-					TotalCostUSD: run.TotalCostUSD,
-				}); err != nil {
-					return fmt.Errorf("updating run: %w", err)
-				}
 			}
 
 			if run.InstanceID == "" {
@@ -1298,4 +1236,31 @@ func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provi
 // from the stored run record. If --provider is set, it overrides the stored value.
 func initFromRunID(ctx context.Context, cmd *cli.Command, runID string) (provider.Provider, store.Store, *store.Run, func(), error) {
 	return initFromRunIDWith(ctx, cmd.String("provider"), cmd.String("profile"), runID, defaultFactoryDeps())
+}
+
+// finalizeAndSync runs prov.Finalize on the in-memory run and persists any
+// resulting status change via st.UpdateRun. The pattern was duplicated at 7
+// sites — extracting it keeps the Finalize+UpdateRun protocol in one place
+// so a fix to either side only has to be made once.
+//
+// Callers that want to abort on failure check the returned error directly;
+// callers that want best-effort reconciliation (launch reconciliation, list)
+// log the error and continue. Either way the run pointer is mutated in place.
+func finalizeAndSync(ctx context.Context, prov provider.Provider, st store.Store, run *store.Run, homeDir string) error {
+	origStatus := run.Status
+	if err := prov.Finalize(ctx, run, homeDir); err != nil {
+		return fmt.Errorf("finalizing run %s: %w", run.ID, err)
+	}
+	if run.Status == origStatus {
+		return nil
+	}
+	if err := st.UpdateRun(ctx, run.ID, &store.RunUpdate{
+		Status:       &run.Status,
+		ExitCode:     run.ExitCode,
+		CompletedAt:  run.CompletedAt,
+		TotalCostUSD: run.TotalCostUSD,
+	}); err != nil {
+		return fmt.Errorf("updating run %s: %w", run.ID, err)
+	}
+	return nil
 }

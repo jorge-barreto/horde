@@ -55,6 +55,12 @@ var topics = []Topic{
 		Summary: "How to run the end-to-end ECS test suite against a real AWS account",
 		Content: topicECSIntegration,
 	},
+	{
+		Name:    "cdk",
+		Title:   "CDK Construct (@horde.io/cdk)",
+		Summary: "Provision AWS infrastructure from your existing CDK app",
+		Content: topicCDK,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -685,4 +691,143 @@ What's NOT tested end-to-end
 - 'horde logs --follow' in the integration suite. The CLI implementation
   exists and works manually; an automated streaming-mode test is future
   work.
+`
+
+const topicCDK = `CDK Construct (@horde.io/cdk)
+==========================
+
+Teams that already use AWS CDK can import the @horde.io/cdk npm package and
+provision every AWS resource horde needs from inside their own CDK app.
+This is the alternative to 'horde bootstrap' (which uses CloudFormation
+directly).
+
+Install
+-------
+
+    npm install @horde.io/cdk aws-cdk-lib constructs
+
+Both aws-cdk-lib (^2) and constructs (^10) are peer dependencies. The
+status-sync Lambda ships pre-bundled, so consumer synth does not require
+Docker or a local esbuild install.
+
+Usage
+-----
+
+    import { App, Stack } from "aws-cdk-lib";
+    import * as ecr from "aws-cdk-lib/aws-ecr";
+    import * as ecs from "aws-cdk-lib/aws-ecs";
+    import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+    import { HordeWorker } from "@horde.io/cdk";
+
+    const app = new App();
+    const stack = new Stack(app, "HordeStack");
+
+    const repo = new ecr.Repository(stack, "WorkerImage", {
+      repositoryName: "horde-my-org-my-repo",
+    });
+
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "my-org-my-repo",
+      workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(
+          stack, "ClaudeToken", "horde/claude-code-oauth-token"),
+        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(
+          stack, "GitToken", "horde/git-token"),
+      },
+    });
+
+What it provisions
+------------------
+
+Same surface as 'horde bootstrap' (CloudFormation flavor):
+
+  - VPC with public + private subnets and one NAT gateway (or BYO via
+    the 'vpc' prop)
+  - ECS Fargate cluster + Fargate task definition (1 vCPU / 4 GB by
+    default; tunable via 'cpu' / 'memoryMiB' props)
+  - DynamoDB horde-runs-<slug> table with 4 GSIs (by-repo, by-ticket,
+    by-status, by-instance)
+  - S3 artifacts bucket with public-access blocked, SSE-S3, and a
+    deny-non-TLS bucket policy (or BYO via 'artifactsBucket' prop)
+  - Egress-only worker security group (443 outbound)
+  - SSM /horde/<slug>/config parameter consumed by the CLI
+  - EventBridge rule + status-sync Lambda (Node 20) that updates run
+    rows in DynamoDB on STOPPED ECS task events
+  - Scoped IAM task role, execution role, status Lambda role
+  - Managed policy for the horde CLI, exposed as CfnOutput
+    CliUserManagedPolicyArn — attach to the IAM principals that
+    will run the CLI
+
+Config defaults
+---------------
+
+  cpu                       1024 (1 vCPU)
+  memoryMiB                 4096 (4 GB)
+  maxConcurrent             5
+  defaultTimeoutMinutes     1440 (24 h)
+  logRetentionDays          30
+  ssmParameterPath          /horde/<projectSlug>/config
+
+CDK vs. CloudFormation
+----------------------
+
+Use 'horde bootstrap' if you don't already use CDK and want a single
+'horde bootstrap deploy' command. Use @horde.io/cdk if you have an existing
+CDK app and want the construct in your own pipeline. Both produce the
+same SSM JSON shape (internal/config/ssm.go::HordeConfig), so the CLI
+can't tell them apart.
+
+End-to-end verification
+-----------------------
+
+The construct ships with a real-AWS smoke test gated by HORDE_E2E_CDK=1.
+Three independent test functions, run as separate 'go test -run'
+invocations so the stack lifetime is decoupled from the test runs:
+
+    HORDE_E2E_CDK=1 go test -v -timeout 20m -run TestECSCDK_Bringup ./test/integration/
+    HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Smoke    ./test/integration/
+    HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Teardown ./test/integration/
+
+Bring-up runs 'cdk deploy', builds the worker image via 'make docker-build',
+and pushes it to the freshly-created ECR repo. State is written to
+/tmp/horde-cdk-e2e-state.json so subsequent test runs can find the stack.
+
+Smoke launches one quick-success workflow against the deployed stack and
+asserts the status-sync Lambda updates the DynamoDB row to status=success
+within 8 minutes. Re-run as often as you like — each invocation costs a
+few cents of Fargate time.
+
+Teardown empties the ECR repo + S3 artifacts bucket, then 'cdk destroy'.
+Idempotent: works even if the state file is missing.
+
+Full-suite verification (recommended before shipping a release)
+---------------------------------------------------------------
+
+Smoke alone exercises one happy-path workflow. To run every ECS test
+('TestECSLaunch*', 'TestECSStatus*', 'TestECSLogs*', 'TestECSKill*',
+'TestECSList*', 'TestECSLifecycle*', 'TestECSHydrate*') against the CDK
+stack, set HORDE_E2E_ECS_BACKEND=cdk in addition to HORDE_E2E_ECS=1:
+
+    HORDE_E2E_CDK=1 go test -v -timeout 20m -run TestECSCDK_Bringup    ./test/integration/
+    HORDE_E2E_ECS=1 HORDE_E2E_ECS_BACKEND=cdk go test -v -timeout 30m \
+        -run TestECS -skip TestECSSmoke ./test/integration/
+    HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Teardown   ./test/integration/
+
+This runs every CLI surface (launch/status/logs/kill/list/hydrate/
+lifecycle) through the CDK-deployed stack, giving symmetric coverage
+with the CF bootstrap path. 'TestECSSmoke' is skipped because it
+hardcodes the CF slug internally; all other TestECS_* tests honor the
+backend switch.
+
+Backend selection via HORDE_E2E_ECS_BACKEND:
+
+    (unset) or cf    Default. CloudFormation bootstrap stack.
+    cdk              CDK-deployed stack. Requires TestECSCDK_Bringup
+                     to have populated /tmp/horde-cdk-e2e-state.json.
+
+Cost: this stack runs its own NAT Gateway (~$32/mo idle) since it can't
+share infrastructure with the bootstrap CF stack. Always tear down when
+you're done.
 `

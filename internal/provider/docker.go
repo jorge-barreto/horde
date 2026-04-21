@@ -93,11 +93,23 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 		if err := os.MkdirAll(wsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating workspace directory: %w", err)
 		}
+		// The container runs as UID 1000 (user `horde` in the base image).
+		// Bind-mounted host dirs keep host ownership inside the container,
+		// so if horde is invoked from a host user with UID != 1000 (e.g.
+		// GitHub Actions' `runner` at UID 1001), the container user can't
+		// write to the workspace. Chmod after MkdirAll because umask can
+		// strip the world-write bit from the initial mode argument.
+		if err := os.Chmod(wsDir, 0o777); err != nil {
+			return nil, fmt.Errorf("chmod workspace directory: %w", err)
+		}
 		allMounts = append(allMounts, wsDir+":/workspace")
 
 		sessionsDir := SessionsPath(opts.HomeDir, opts.RunID)
 		if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating sessions directory: %w", err)
+		}
+		if err := os.Chmod(sessionsDir, 0o777); err != nil {
+			return nil, fmt.Errorf("chmod sessions directory: %w", err)
 		}
 		allMounts = append(allMounts, sessionsDir+":/home/horde/.claude")
 	}
@@ -354,6 +366,34 @@ func mapExitCode(code int) store.Status {
 	}
 }
 
+// resolveStoppedExitCode picks the authoritative exit code (and resulting
+// run status) for a container that has finished. Source priority:
+//
+//  1. The host-side .horde-exit-code marker (orc's own exit). Container
+//     stays alive via sleep infinity, so docker's exit code reflects how
+//     the container process died, not orc's result.
+//  2. Docker's reported exit code (instExit), used only when the marker
+//     file is missing or unreadable.
+//  3. StatusFailed with no exit code, when neither source is available.
+//     Today the docker client always populates instExit so case (3) is
+//     unreachable in production — the helper exists to keep this fallback
+//     covered by tests if Status() behavior changes.
+//
+// runID is used only for the unparseable-marker warning, never for control flow.
+func resolveStoppedExitCode(markerData []byte, markerErr error, instExit *int, runID string) (store.Status, *int) {
+	if markerErr == nil {
+		code := 1
+		if n, _ := fmt.Sscanf(strings.TrimSpace(string(markerData)), "%d", &code); n == 0 {
+			fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", runID)
+		}
+		return mapExitCode(code), &code
+	}
+	if instExit != nil {
+		return mapExitCode(*instExit), instExit
+	}
+	return store.StatusFailed, nil
+}
+
 // RunResult is the subset of orc's run-result.json that horde reads when
 // finalizing a run. Both the Docker and ECS providers, plus the kill command,
 // parse the same fields with the same JSON tags — kept in one place to
@@ -361,6 +401,42 @@ func mapExitCode(code int) store.Status {
 type RunResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
+}
+
+// ReadRunResult parses run-result.json from the local results directory for
+// the given run. Returns (nil, nil) when the file is absent or malformed —
+// the file is best-effort and missing/garbage values are non-fatal (the run
+// itself may have crashed before orc could write it).
+func ReadRunResult(homeDir string, run *store.Run) (cost *float64, exitCode *int) {
+	resultPath := filepath.Join(LocalResultsDir(homeDir, run.ID), AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		return nil, nil
+	}
+	var rr RunResult
+	if json.Unmarshal(data, &rr) != nil {
+		return nil, nil
+	}
+	return rr.TotalCostUSD, rr.ExitCode
+}
+
+// SaveContainerLog writes captured container logs to <resultsDir>/container.log.
+// Both the docker provider (Finalize) and the kill command call this — host
+// filesystem failures (disk full, permission denied) are logged to stderr
+// rather than swallowed so users notice when their logs aren't being saved.
+// runID is included in the warning to disambiguate when multiple runs are
+// being finalized in the same call (e.g. horde list).
+func SaveContainerLog(resultsDir, runID string, logData []byte) {
+	if len(logData) == 0 {
+		return
+	}
+	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: creating results dir for run %s: %v\n", runID, err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: saving container log for run %s: %v\n", runID, err)
+	}
 }
 
 func copyDir(src, dst string) error {
@@ -438,9 +514,8 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			}
 
 			if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
-				if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-					os.MkdirAll(resultsDir, 0o755)
-					os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+				if logData, err := io.ReadAll(logs); err == nil {
+					SaveContainerLog(resultsDir, run.ID, logData)
 				}
 				logs.Close()
 			}
@@ -501,9 +576,8 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		}
 
 		if logs, err := p.Logs(ctx, run.InstanceID, false); err == nil {
-			if logData, err := io.ReadAll(logs); err == nil && len(logData) > 0 {
-				os.MkdirAll(resultsDir, 0o755)
-				os.WriteFile(filepath.Join(resultsDir, "container.log"), logData, 0o644)
+			if logData, err := io.ReadAll(logs); err == nil {
+				SaveContainerLog(resultsDir, run.ID, logData)
 			}
 			logs.Close()
 		}
@@ -526,22 +600,9 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 
 		// Check orc's exit marker on host workspace first — docker's exit code
 		// reflects how the container process (sleep infinity) died, not orc's result.
-		var newStatus store.Status
-		var exitCode *int
 		markerPath := filepath.Join(WorkspacePath(homeDir, run.ID), ".horde-exit-code")
-		if data, err := os.ReadFile(markerPath); err == nil {
-			code := 1
-			if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &code); n == 0 {
-				fmt.Fprintf(os.Stderr, "warning: could not parse exit code from marker file for run %s, defaulting to 1\n", run.ID)
-			}
-			exitCode = &code
-			newStatus = mapExitCode(code)
-		} else if instanceStatus.ExitCode != nil {
-			exitCode = instanceStatus.ExitCode
-			newStatus = mapExitCode(*instanceStatus.ExitCode)
-		} else {
-			newStatus = store.StatusFailed
-		}
+		markerData, markerErr := os.ReadFile(markerPath)
+		newStatus, exitCode := resolveStoppedExitCode(markerData, markerErr, instanceStatus.ExitCode, run.ID)
 
 		now := time.Now()
 		run.Status = newStatus

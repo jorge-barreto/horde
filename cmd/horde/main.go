@@ -27,6 +27,14 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// Overridden at build time via -ldflags '-X main.version=... -X main.commit=... -X main.buildDate=...'.
+// make build / make install populate these from git; goreleaser uses the tag.
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
+
 func main() {
 	// Merge .env from cwd into the process environment (real env wins). This
 	// lets commands like `horde bootstrap deploy` pick up CLAUDE_CODE_OAUTH_TOKEN
@@ -59,8 +67,9 @@ func setOutputs(app *cli.Command, w io.Writer) {
 
 func newApp() *cli.Command {
 	return &cli.Command{
-		Name:  "horde",
-		Usage: "Cloud launcher for orc workflows",
+		Name:    "horde",
+		Usage:   "Cloud launcher for orc workflows",
+		Version: fmt.Sprintf("%s (%s, built %s)", version, commit, buildDate),
 		Description: `horde runs orc workflows on ephemeral containers (Docker locally,
 ECS Fargate in AWS). It clones a repo, runs orc, collects results, and tears down.
 

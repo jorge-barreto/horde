@@ -10,7 +10,7 @@
     "destroy": "cdk destroy --app 'npx ts-node --prefer-ts-exts app.ts'"
   },
   "dependencies": {
-    "@horde.io/cdk": "^0.1.0",
+    "@horde.io/cdk": "^0.2.0",
     "aws-cdk-lib": "^2.150.0",
     "constructs": "^10.3.0"
   },

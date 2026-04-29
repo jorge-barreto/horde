@@ -265,14 +265,27 @@ export class HordeWorker extends Construct {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
-    // Task role: write-only access to its own artifact prefix.
-    // Reading happens via the CLI (with the cli-user managed policy).
+    // Task role: read+write on its own artifact prefix, plus ListBucket on
+    // the bucket. Read+List are needed because the worker entrypoint runs
+    // `aws s3 sync s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/`
+    // (docker/entrypoint.sh) to restore prior agent session state — the
+    // sync calls ListObjectsV2 (s3:ListBucket) and GetObject. Mirrors the
+    // task-role IAM in internal/bootstrap/templates/stack.yaml.tmpl so the
+    // CDK and CloudFormation onboarding paths stay in lockstep.
     this.taskRole.addToPolicy(
       new iam.PolicyStatement({
         sid: "ArtifactsWrite",
         effect: iam.Effect.ALLOW,
-        actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
+        actions: ["s3:PutObject", "s3:AbortMultipartUpload", "s3:GetObject"],
         resources: [`${this.artifactsBucket.bucketArn}/horde-runs/*`],
+      }),
+    );
+    this.taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "ArtifactsList",
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:ListBucket"],
+        resources: [this.artifactsBucket.bucketArn],
       }),
     );
 

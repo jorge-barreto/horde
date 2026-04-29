@@ -1104,6 +1104,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
               "Action": [
                 "s3:PutObject",
                 "s3:AbortMultipartUpload",
+                "s3:GetObject",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -1121,6 +1122,17 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
                 ],
               },
               "Sid": "ArtifactsWrite",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeArtifactsBucket1A7FD4A4",
+                  "Arn",
+                ],
+              },
+              "Sid": "ArtifactsList",
             },
           ],
           "Version": "2012-10-17",
@@ -2416,6 +2428,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
               "Action": [
                 "s3:PutObject",
                 "s3:AbortMultipartUpload",
+                "s3:GetObject",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -2433,6 +2446,17 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
                 ],
               },
               "Sid": "ArtifactsWrite",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "ProvidedBucket8A3897F1",
+                  "Arn",
+                ],
+              },
+              "Sid": "ArtifactsList",
             },
           ],
           "Version": "2012-10-17",
@@ -3736,6 +3760,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
               "Action": [
                 "s3:PutObject",
                 "s3:AbortMultipartUpload",
+                "s3:GetObject",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -3753,6 +3778,17 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
                 ],
               },
               "Sid": "ArtifactsWrite",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "ProvidedBucket8A3897F1",
+                  "Arn",
+                ],
+              },
+              "Sid": "ArtifactsList",
             },
           ],
           "Version": "2012-10-17",
@@ -5260,6 +5296,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
               "Action": [
                 "s3:PutObject",
                 "s3:AbortMultipartUpload",
+                "s3:GetObject",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -5277,6 +5314,17 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
                 ],
               },
               "Sid": "ArtifactsWrite",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeArtifactsBucket1A7FD4A4",
+                  "Arn",
+                ],
+              },
+              "Sid": "ArtifactsList",
             },
           ],
           "Version": "2012-10-17",

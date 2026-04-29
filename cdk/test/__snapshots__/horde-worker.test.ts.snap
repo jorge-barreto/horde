@@ -1104,6 +1104,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
               "Action": [
                 "s3:PutObject",
                 "s3:AbortMultipartUpload",
+                "s3:GetObject",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -1121,6 +1122,17 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
                 ],
               },
               "Sid": "ArtifactsWrite",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeArtifactsBucket1A7FD4A4",
+                  "Arn",
+                ],
+              },
+              "Sid": "ArtifactsList",
             },
           ],
           "Version": "2012-10-17",

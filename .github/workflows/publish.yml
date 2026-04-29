@@ -23,17 +23,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24: ships npm >= 11.5.1, which is required for trusted-publisher
+      # OIDC publish. Node 22 LTS still bundles npm 10.x; with npm 10 the
+      # publish PUT goes out unauthenticated and the registry returns E404
+      # (anonymous PUT on a scoped package is masked as 404, not 401/403, per
+      # npm docs). In-place upgrading via 'npm install -g npm@latest' is also
+      # currently broken on the hosted runner image — see
+      # actions/runner-images#13883 (promise-retry MODULE_NOT_FOUND mid-install).
+      # Bumping node-version is the canonical fix per npm's trusted-publishers
+      # docs example.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
           cache: npm
           cache-dependency-path: cdk/package-lock.json
-
-      # Trusted-publisher OIDC publish requires npm >= 11.5.1; node 22 LTS
-      # ships npm 10.x, which sends the publish PUT unauthenticated and the
-      # registry 404s. Upgrade before any registry writes.
-      - run: npm install --global npm@latest
 
       - run: npm ci
 
@@ -41,4 +45,7 @@ jobs:
 
       - run: npm test
 
-      - run: npm publish --provenance --access public
+      # No --provenance flag: signing is on by default with trusted publishing
+      # since the npm 11 GA. No NODE_AUTH_TOKEN env: a legacy auth header
+      # would preempt the OIDC handshake.
+      - run: npm publish --access public

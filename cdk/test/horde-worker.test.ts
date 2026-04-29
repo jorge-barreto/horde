@@ -125,7 +125,7 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     });
   });
 
-  it("scopes the task role to PutObject/AbortMultipartUpload on horde-runs/* only", () => {
+  it("grants the task role read+write on horde-runs/* and ListBucket on the bucket", () => {
     const t = synth();
     t.hasResourceProperties("AWS::IAM::Policy", {
       PolicyDocument: Match.objectLike({
@@ -133,12 +133,22 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
           Match.objectLike({
             Sid: "ArtifactsWrite",
             Effect: "Allow",
-            Action: ["s3:PutObject", "s3:AbortMultipartUpload"],
+            Action: Match.arrayWith([
+              "s3:PutObject",
+              "s3:AbortMultipartUpload",
+              "s3:GetObject",
+            ]),
             Resource: Match.objectLike({
               "Fn::Join": Match.arrayWith([
                 Match.arrayWith([Match.stringLikeRegexp(".*horde-runs/\\*")]),
               ]),
             }),
+          }),
+          Match.objectLike({
+            Sid: "ArtifactsList",
+            Effect: "Allow",
+            Action: "s3:ListBucket",
+            Resource: { "Fn::GetAtt": Match.arrayWith([Match.stringLikeRegexp("ArtifactsBucket.*"), "Arn"]) },
           }),
         ]),
       }),

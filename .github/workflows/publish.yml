@@ -1,0 +1,39 @@
+name: publish-cdk
+
+# Publish @horde.io/cdk on every v-prefix tag. Auth is npm trusted-publisher
+# OIDC — no NODE_AUTH_TOKEN, no secrets in the repo. One-time setup at
+# https://www.npmjs.com/package/@horde.io/cdk/access must link this repo +
+# workflow + job before the first tag is cut.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-cdk:
+    name: publish-cdk
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: cdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: cdk/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm test
+
+      - run: npm publish --provenance --access public

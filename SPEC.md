@@ -84,7 +84,7 @@ The status Lambda:
 ## CLI Commands
 
 ```
-horde launch [--branch=<branch>] [--workflow=<name>] [--timeout=<duration>] [--force] <ticket>
+horde launch --workflow=<name> [--branch=<branch>] [--timeout=<duration>] [--force] <ticket>
 horde status <run-id>
 horde logs <run-id> [--follow]
 horde kill <run-id>
@@ -106,14 +106,14 @@ Global flags:
 
 `--json` applies to: `status`, `results`, `list`, `health`. Output schemas are stable per major version.
 
-horde doesn't understand tickets, waves, or beads. `horde launch` runs `orc run <ticket> --auto --no-color` on an ephemeral instance. orc's workflow decides whether the ticket is an epic, whether to loop, etc.
+horde doesn't understand tickets, waves, or beads. `horde launch` runs `orc run -w <workflow> <ticket> --auto --no-color` on an ephemeral instance. The workflow is always passed explicitly — `--workflow` is a required flag — so audit and artifact paths are predictable (`.orc/audit/<workflow>/<ticket>/`). orc's workflow decides whether the ticket is an epic, whether to loop, etc.
 
 ## Run Lifecycle
 
 ### 1. Launch
 
 ```
-horde launch PROJ-123
+horde launch --workflow implement-ticket PROJ-123
 ```
 
 horde:
@@ -281,12 +281,8 @@ if [ -n "${BRANCH:-}" ]; then
     fi
 fi
 
-# Run orc
-if [ -n "${WORKFLOW:-}" ]; then
-    orc run -w "$WORKFLOW" "$TICKET" --auto --no-color
-else
-    orc run "$TICKET" --auto --no-color
-fi
+# Run orc — WORKFLOW is always set (horde rejects launches without --workflow).
+orc run -w "$WORKFLOW" "$TICKET" --auto --no-color
 EXIT_CODE=$?
 
 # Upload artifacts to S3 (ECS only — env vars are absent in docker mode)
@@ -320,7 +316,7 @@ The provider maps `LaunchOpts` to container environment variables:
 | `REPO_URL` | `LaunchOpts.Repo` | Normalized, no scheme (e.g., `github.com/org/repo.git`) |
 | `TICKET` | `LaunchOpts.Ticket` | Passed as argument to `orc run` |
 | `BRANCH` | `LaunchOpts.Branch` | Empty if not specified (entrypoint skips checkout) |
-| `WORKFLOW` | `LaunchOpts.Workflow` | Empty if default workflow |
+| `WORKFLOW` | `LaunchOpts.Workflow` | Always non-empty — `horde launch` requires `--workflow` |
 | `RUN_ID` | `LaunchOpts.RunID` | Used by S3 upload path (ECS only) |
 | `ARTIFACTS_BUCKET` | ECS config (SSM) | Absent in docker mode — triggers S3 upload when present |
 | `CLAUDE_CODE_OAUTH_TOKEN` | `.env` (docker) / Secrets Manager (ECS) | Claude CLI auth token (from `claude setup-token`) |
@@ -440,7 +436,7 @@ Lean schema for local testing. Not shared, not the production path.
 | repo | TEXT | Repository URL |
 | ticket | TEXT | ID passed to orc run |
 | branch | TEXT | Git branch (empty = repo default) |
-| workflow | TEXT | orc workflow name (empty = default) |
+| workflow | TEXT | orc workflow name (required at launch; empty only on legacy rows) |
 | provider | TEXT | docker |
 | instance_id | TEXT | Container ID |
 | metadata | TEXT | JSON-encoded map[string]string — provider-specific data (NULL if none) |
@@ -470,7 +466,7 @@ This is the production store — shared across the team. Every developer with AW
 | repo | S | Repository URL |
 | ticket | S | ID passed to orc run |
 | branch | S | Git branch (empty = repo default) |
-| workflow | S | orc workflow name (empty = default) |
+| workflow | S | orc workflow name (required at launch; empty only on legacy rows) |
 | provider | S | aws-ecs |
 | instance_id | S | ECS task ARN |
 | status | S | pending, running, success, failed, killed |

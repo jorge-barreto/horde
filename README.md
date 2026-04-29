@@ -77,7 +77,7 @@ Attach the `CliUserManagedPolicyArn` output to the IAM user or role that will ru
 Once the stack is up and the image is pushed, from any repo whose git remote matches the slug:
 
 ```bash
-horde launch PROJ-123                 # provider auto-detects from SSM
+horde launch --workflow implement-ticket PROJ-123   # provider auto-detects from SSM
 horde status PROJ-123
 horde status PROJ-123 --json
 ```
@@ -113,10 +113,10 @@ npm run destroy
 All commands require a provider. For local Docker mode, pass `--provider docker`. Omit the flag when an AWS stack (provisioned via `horde bootstrap` or the [`@horde.io/cdk`](cdk/) construct) is deployed — horde auto-detects via SSM.
 
 ```bash
-# Launch a run
-horde launch --provider docker PROJ-123
-horde launch --provider docker PROJ-123 --branch feature/xyz
-horde launch --provider docker PROJ-123 --workflow bugfix --timeout 30m
+# Launch a run (--workflow is required)
+horde launch --provider docker --workflow implement-ticket PROJ-123
+horde launch --provider docker --workflow implement-ticket PROJ-123 --branch feature/xyz
+horde launch --provider docker --workflow bugfix PROJ-123 --timeout 30m
 
 # Monitor
 horde status <run-id>

@@ -500,6 +500,39 @@ describe("HordeWorker status-sync (5fh.12/13/14)", () => {
     }
   });
 
+  it("includes caller-declared extra secrets in the task-def secrets array", () => {
+    const app = new App();
+    const stack = new Stack(app, "TestStackExtras", {
+      env: { account: "111111111111", region: "us-east-1" },
+    });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "test",
+      workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
+        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+        REVIEW_GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Review", "horde/review-git-token"),
+        STRIPE_API_KEY: secretsmanager.Secret.fromSecretNameV2(stack, "Stripe", "prepdesk/stripe-api-key"),
+      },
+    });
+    const t = Template.fromStack(stack);
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "horde-worker",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "CLAUDE_CODE_OAUTH_TOKEN" }),
+            Match.objectLike({ Name: "GIT_TOKEN" }),
+            Match.objectLike({ Name: "REVIEW_GIT_TOKEN" }),
+            Match.objectLike({ Name: "STRIPE_API_KEY" }),
+          ]),
+        }),
+      ]),
+    });
+  });
+
   it("does NOT grant the status lambda ecs/ssm/secrets permissions", () => {
     const t = synth();
     const policies = t.findResources("AWS::IAM::Policy");

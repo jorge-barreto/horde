@@ -68,7 +68,7 @@ target (or `cd cdk && npm ci && npm run build && npm test` for cdk-test).
 ## Key Design Decisions
 
 - Git is a hard requirement — repo URL inferred from local git remote
-- Optional project config in `.horde/config.yaml` (volume mounts); secrets from `.env` file (gitignored) via `docker run --env-file`
+- Optional project config in `.horde/config.yaml` (volume mounts; `secrets:` block declares extra env-var secrets beyond the two canonical `CLAUDE_CODE_OAUTH_TOKEN`/`GIT_TOKEN` — see `horde docs config`); secrets from `.env` file (gitignored) via `docker run --env-file`
 - GIT_TOKEN protected via `GIT_ASKPASS` credential helper — never in process args or `.git/config`
 - SQLite for local run history (`~/.horde/horde.db`); DynamoDB for shared team history (v0.2)
 - Store selection follows provider: docker → SQLite, aws-ecs → DynamoDB

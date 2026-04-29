@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jorge-barreto/horde/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,7 +24,7 @@ func TestRender_EmptySlug(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out, err := Render(tc.in)
+			out, err := Render(tc.in, nil)
 			if err == nil {
 				t.Fatalf("expected error for slug %q, got nil", tc.in)
 			}
@@ -39,7 +40,7 @@ func TestRender_EmptySlug(t *testing.T) {
 
 func TestRender_ValidYAML(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestRender_ValidYAML(t *testing.T) {
 
 func TestRender_ContainsSlug(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestRender_ContainsSlug(t *testing.T) {
 
 func TestRender_ResourcesPresent(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestRender_ResourcesPresent(t *testing.T) {
 
 func TestRender_RunsTableGSIs(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestRender_RunsTableGSIs(t *testing.T) {
 
 func TestRender_OutputsPresent(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -242,7 +243,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 
 func TestRender_ParametersPresent(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -273,7 +274,7 @@ func TestRender_ParametersPresent(t *testing.T) {
 // common secret prefixes never appear in the output.
 func TestRender_NoSecretsLeaked(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestRender_NoSecretsLeaked(t *testing.T) {
 
 func TestRender_TaskDefSecrets(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -360,7 +361,7 @@ func TestRender_TaskDefSecrets(t *testing.T) {
 
 func TestRender_TaskRoleHasPolicies(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -416,7 +417,7 @@ func TestRender_TaskRoleHasPolicies(t *testing.T) {
 
 func TestRender_CliPolicyStatements(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -468,7 +469,7 @@ func TestRender_CliPolicyStatements(t *testing.T) {
 
 func TestRender_SsmConfigParameter(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -489,7 +490,7 @@ func TestRender_SsmConfigParameter(t *testing.T) {
 
 func TestRender_StatusLambdaPython(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -532,13 +533,78 @@ func TestRender_StatusLambdaPython(t *testing.T) {
 	}
 }
 
+func TestRender_ExtraSecrets_TaskDefAndIAM(t *testing.T) {
+	t.Parallel()
+	extras := []config.ExtraAWSSecret{
+		{EnvName: "STRIPE_API_KEY", SecretName: "prepdesk/stripe-api-key"},
+		{EnvName: "REVIEW_GIT_TOKEN", SecretName: "horde/review-git-token"},
+	}
+	out, err := Render("myproj", extras)
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(out, &m); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(out))
+	}
+	resources := m["Resources"].(map[string]any)
+
+	td := resources["WorkerTaskDefinition"].(map[string]any)
+	props := td["Properties"].(map[string]any)
+	containers := props["ContainerDefinitions"].([]any)
+	container := containers[0].(map[string]any)
+	secrets := container["Secrets"].([]any)
+	if len(secrets) != 4 {
+		t.Fatalf("expected 4 secrets (2 canonical + 2 extra), got %d", len(secrets))
+	}
+	gotEnvNames := map[string]bool{}
+	for _, raw := range secrets {
+		s := raw.(map[string]any)
+		gotEnvNames[s["Name"].(string)] = true
+	}
+	for _, want := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "GIT_TOKEN", "STRIPE_API_KEY", "REVIEW_GIT_TOKEN"} {
+		if !gotEnvNames[want] {
+			t.Errorf("Secrets array missing %q", want)
+		}
+	}
+
+	// IAM grants for both task and execution roles must include each
+	// extra secret name (Fn::Sub'd into a wildcard ARN).
+	rendered := string(out)
+	for _, name := range []string{"prepdesk/stripe-api-key", "horde/review-git-token"} {
+		// Each extra appears twice — once in TaskExecutionRole.Resource,
+		// once in TaskRole.Resource. And again in WorkerTaskDefinition's
+		// Secrets ValueFrom. So we expect at least 3 occurrences.
+		if got := strings.Count(rendered, name); got < 3 {
+			t.Errorf("extra secret %q should appear at least 3 times (2 IAM + 1 task-def), got %d", name, got)
+		}
+	}
+}
+
+func TestRender_NoExtras_NoExtraLines(t *testing.T) {
+	t.Parallel()
+	out, err := Render("myproj", nil)
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	s := string(out)
+	// Sanity: stale "ExtraSecrets" identifier should never appear in
+	// output (would mean template var leaked).
+	if strings.Contains(s, "ExtraSecrets") {
+		t.Errorf("rendered template contains stray template identifier ExtraSecrets")
+	}
+	if strings.Contains(s, "{{") {
+		t.Errorf("rendered template contains unsubstituted template directive")
+	}
+}
+
 func TestRender_CfnLint(t *testing.T) {
 	t.Parallel()
 	path, err := exec.LookPath("cfn-lint")
 	if err != nil {
 		t.Skip("cfn-lint not installed")
 	}
-	out, err := Render("myproj")
+	out, err := Render("myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}

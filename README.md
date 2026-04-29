@@ -40,6 +40,22 @@ Edit `.env` and fill in:
 
 Run `horde docs env` for more detail on token setup and security.
 
+### Additional secrets
+
+Projects can declare extra environment-variable secrets in `.horde/config.yaml`:
+
+```yaml
+secrets:
+  REVIEW_GIT_TOKEN:
+    env: REVIEW_GIT_TOKEN              # docker: read from .env
+    aws-secret: horde/review-git-token # ecs: name of pre-existing Secrets Manager entry
+  STRIPE_API_KEY:
+    env: STRIPE_API_KEY
+    aws-secret: prepdesk/stripe-api-key
+```
+
+Each entry's per-provider source is picked at launch time. The two canonical secrets (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) are auto-seeded; declare them only to override. ECS extras must already exist in Secrets Manager — `horde bootstrap init`/`deploy` wires the IAM grants and task-definition references but does not create the secrets themselves. Full schema: `horde docs config`.
+
 ## Quickstart: AWS (v0.2)
 
 Stand up the cloud backend once, then every `horde launch` from the project runs on ECS Fargate. Two provisioning paths — pick one.

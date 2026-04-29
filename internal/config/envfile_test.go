@@ -47,9 +47,9 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 		wantErr string
 	}{
 		{"missing file", false, "", "opening .env file"},
-		{"missing CLAUDE_CODE_OAUTH_TOKEN", true, "GIT_TOKEN=ghp_xxx\n", "validating .env file: missing required key CLAUDE_CODE_OAUTH_TOKEN"},
-		{"missing GIT_TOKEN", true, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-xxx\n", "validating .env file: missing required key GIT_TOKEN"},
-		{"empty file", true, "", "validating .env file: missing required key CLAUDE_CODE_OAUTH_TOKEN"},
+		{"missing CLAUDE_CODE_OAUTH_TOKEN", true, "GIT_TOKEN=ghp_xxx\n", "missing required key(s): CLAUDE_CODE_OAUTH_TOKEN"},
+		{"missing GIT_TOKEN", true, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-xxx\n", "missing required key(s): GIT_TOKEN"},
+		{"empty file", true, "", "missing required key(s): CLAUDE_CODE_OAUTH_TOKEN, GIT_TOKEN"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,6 +68,42 @@ func TestValidateEnvFile_Errors(t *testing.T) {
 				t.Errorf("ValidateEnvFile() error = %q, want it to contain %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateEnvFileFor_SpecDriven(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := "CLAUDE_CODE_OAUTH_TOKEN=sk\nGIT_TOKEN=ghp\nREVIEW_GIT_TOKEN=rev\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	spec := MergeSecrets(SecretSpec{
+		"REVIEW_GIT_TOKEN": {Env: "REVIEW_GIT_TOKEN", AWSSecret: "horde/review"},
+	})
+	if _, err := ValidateEnvFileFor(dir, spec); err != nil {
+		t.Fatalf("ValidateEnvFileFor() error: %v", err)
+	}
+}
+
+func TestValidateEnvFileFor_NamesUnknownKey(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := "CLAUDE_CODE_OAUTH_TOKEN=sk\nGIT_TOKEN=ghp\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	spec := MergeSecrets(SecretSpec{
+		"STRIPE_API_KEY": {Env: "STRIPE_API_KEY", AWSSecret: "p/stripe"},
+	})
+	_, err := ValidateEnvFileFor(dir, spec)
+	if err == nil {
+		t.Fatal("expected error for missing STRIPE_API_KEY")
+	}
+	if !strings.Contains(err.Error(), "STRIPE_API_KEY") {
+		t.Errorf("error should name the missing key: %v", err)
 	}
 }
 

@@ -131,6 +131,11 @@ Schema
     mounts:
       - <host-path>:<container-path>
 
+    secrets:
+      <CONTAINER_ENV_VAR>:
+        env: <HOST_ENV_VAR>            # docker provider source
+        aws-secret: <SECRETS_MANAGER_NAME>  # ECS provider source
+
 Fields
 ------
 
@@ -152,6 +157,56 @@ mounts (list of strings, optional):
 
     The container's project root is /workspace — this is where horde
     clones the repo inside the container.
+
+secrets (map, optional):
+
+    Caller-declared secrets injected into the worker container as env
+    vars. The map key is the env-var name as seen inside the container.
+    Each entry can declare multiple per-provider sources; the active
+    provider picks the matching one.
+
+    Two source kinds are supported in v0.2:
+
+        env: <NAME>          The host env-var name to read from .env on
+                             the docker provider.
+        aws-secret: <NAME>   The AWS Secrets Manager secret name (no
+                             ARN) for the ECS provider. Caller is
+                             responsible for creating the secret before
+                             running 'horde bootstrap deploy'.
+
+    Two canonical secrets — CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN —
+    are auto-seeded with their default sources, so you do not need to
+    declare them unless overriding. Re-declaring a canonical replaces
+    the default source map entirely (no field-level merge).
+
+    Validation: at 'horde launch' time, every declared secret must
+    have a source matching the active provider, and (for docker) the
+    referenced .env keys must exist. horde refuses to launch otherwise
+    with a single error message naming every missing secret/key.
+
+    Docker provider note: horde injects all keys from .env via
+    'docker run --env-file', so the host-side name is also visible
+    inside the container. A remap (host MY_REVIEW_TOKEN -> container
+    REVIEW_GIT_TOKEN) makes the container env include both names with
+    the same value. The contract is that the spec-declared container
+    name is set; horde does not isolate host-side names from the
+    container.
+
+    ECS note: extra aws-secret entries are baked into the task
+    definition by 'horde bootstrap init' / 'horde bootstrap deploy';
+    redeploy the stack after editing this list. Fargate caps secret
+    references per task definition at roughly 16 — practical projects
+    will not hit this, but mention it for transparency.
+
+    Example:
+
+        secrets:
+          REVIEW_GIT_TOKEN:
+            env: REVIEW_GIT_TOKEN
+            aws-secret: horde/review-git-token
+          STRIPE_API_KEY:
+            env: STRIPE_API_KEY
+            aws-secret: prepdesk/stripe-api-key
 
 File Location
 -------------
@@ -450,10 +505,18 @@ Security
 Validation
 ----------
 
-horde validates the .env file before every launch. It checks that both
-CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN keys are present (but does not
-verify that the values are valid tokens — that fails later at clone
-or orc execution time).
+horde validates the .env file before every launch. The required keys
+are driven by the merged secret spec (see 'horde docs config'):
+
+  - The two canonical secrets, CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN,
+    are always required unless overridden in .horde/config.yaml's
+    secrets: block.
+  - Any additional secret declared with an env: source contributes its
+    referenced host env-var name to the required set.
+
+If a key is missing, the launch fails with a single error message
+naming every missing key. Values are not verified — invalid tokens
+surface later at clone time or during orc execution.
 `
 
 const topicHydrate = `Hydrating Run Results

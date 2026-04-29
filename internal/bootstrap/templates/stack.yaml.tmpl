@@ -247,6 +247,9 @@ Resources:
                 Resource:
                   - Ref: ClaudeCodeOauthTokenSecret
                   - Ref: GitTokenSecret
+{{- range .ExtraSecrets }}
+                  - Fn::Sub: "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:{{ .SecretName }}-*"
+{{- end }}
       Tags:
         - Key: Name
           Value: "horde-{{.Slug}}-exec-role"
@@ -284,6 +287,9 @@ Resources:
                 Resource:
                   - Ref: ClaudeCodeOauthTokenSecret
                   - Ref: GitTokenSecret
+{{- range .ExtraSecrets }}
+                  - Fn::Sub: "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:{{ .SecretName }}-*"
+{{- end }}
       Tags:
         - Key: Name
           Value: "horde-{{.Slug}}-task-role"
@@ -324,6 +330,11 @@ Resources:
             - Name: GIT_TOKEN
               ValueFrom:
                 Ref: GitTokenSecret
+{{- range .ExtraSecrets }}
+            - Name: {{ .EnvName }}
+              ValueFrom:
+                Fn::Sub: "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:{{ .SecretName }}"
+{{- end }}
           LogConfiguration:
             LogDriver: awslogs
             Options:

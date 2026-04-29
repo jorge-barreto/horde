@@ -1,0 +1,9 @@
+name: horde-test
+ticket-pattern: 'TEST-[\w-]+'
+phases:
+  - name: dump-env
+    type: script
+    run: |
+      mkdir -p .orc/artifacts/$TICKET
+      env > .orc/artifacts/$TICKET/env-dump.txt
+    timeout: 1

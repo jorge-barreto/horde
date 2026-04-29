@@ -8,9 +8,21 @@ import (
 	"strings"
 )
 
-// ValidateEnvFile checks that dir/.env exists and contains CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN.
-// Returns the absolute path to the .env file on success.
+// ValidateEnvFile checks that dir/.env exists and contains the two
+// canonical secrets (CLAUDE_CODE_OAUTH_TOKEN, GIT_TOKEN). Equivalent to
+// ValidateEnvFileFor(dir, DefaultSecrets()).
+//
+// Prefer ValidateEnvFileFor at call sites that have a merged SecretSpec —
+// it enforces every declared docker source, not only the two canonicals.
 func ValidateEnvFile(dir string) (string, error) {
+	return ValidateEnvFileFor(dir, DefaultSecrets())
+}
+
+// ValidateEnvFileFor checks that dir/.env exists and contains every host
+// env-var name referenced by the spec's docker (Env) sources. Returns the
+// absolute path to the .env file on success. The error names every
+// missing key in one pass so callers don't have to fix .env iteratively.
+func ValidateEnvFileFor(dir string, spec SecretSpec) (string, error) {
 	envPath := filepath.Join(dir, ".env")
 
 	f, err := os.Open(envPath)
@@ -39,11 +51,14 @@ func ValidateEnvFile(dir string) (string, error) {
 		return "", fmt.Errorf("reading .env file: %w", err)
 	}
 
-	required := []string{"CLAUDE_CODE_OAUTH_TOKEN", "GIT_TOKEN"}
-	for _, key := range required {
+	var missing []string
+	for _, key := range spec.EnvKeys() {
 		if !keys[key] {
-			return "", fmt.Errorf("validating .env file: missing required key %s", key)
+			missing = append(missing, key)
 		}
+	}
+	if len(missing) > 0 {
+		return "", fmt.Errorf("validating .env file: missing required key(s): %s", strings.Join(missing, ", "))
 	}
 
 	return envPath, nil

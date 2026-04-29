@@ -1,4 +1,28 @@
 # Project-level horde configuration.
+# Full schema: `horde docs config`.
+
 # Volume mounts in host:container format (host side relative to project root).
 mounts:
   - .beads:/workspace/.beads
+
+# Caller-declared env-var secrets injected into the worker container.
+# The two canonicals (CLAUDE_CODE_OAUTH_TOKEN, GIT_TOKEN) are auto-seeded
+# with their default sources — declare them here only to override.
+#
+# Each entry can list per-provider sources; the active provider picks
+# the matching one. v0.2 supports two source kinds:
+#
+#   env: <NAME>          host env-var name (read from .env on docker)
+#   aws-secret: <NAME>   AWS Secrets Manager secret name (ECS) — caller
+#                        is responsible for creating the secret before
+#                        running `horde bootstrap deploy`
+#
+# Uncomment to add additional secrets:
+#
+# secrets:
+#   REVIEW_GIT_TOKEN:
+#     env: REVIEW_GIT_TOKEN
+#     aws-secret: horde/review-git-token
+#   STRIPE_API_KEY:
+#     env: STRIPE_API_KEY
+#     aws-secret: prepdesk/stripe-api-key

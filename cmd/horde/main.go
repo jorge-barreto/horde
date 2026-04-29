@@ -113,10 +113,11 @@ func launchCmd() *cli.Command {
 		Name:      "launch",
 		Usage:     "Launch an orc workflow",
 		ArgsUsage: "<ticket> [-- <orc-args>...]",
-		Description: `Builds the worker Docker image if needed, validates the .env file,
-and launches a container that clones the repo and runs orc. Prints the
-run ID on success. Use --force to launch even if a run with the same
-ticket is already active.
+		Description: `Builds the worker Docker image if needed, validates the .env file
+(every secret declared in .horde/config.yaml's secrets: block plus the
+two canonical defaults), and launches a container that clones the repo
+and runs orc. Prints the run ID on success. Use --force to launch even
+if a run with the same ticket is already active.
 
 Concurrency: docker provider caps active runs at 100 (pending + running);
 aws-ecs uses the bootstrap stack's max_concurrent (default 20). Hitting
@@ -199,12 +200,9 @@ kill some runs before launching more.`,
 				return err
 			}
 
-			var envPath string
-			if provName == "docker" {
-				envPath, err = config.ValidateEnvFile(cwd)
-				if err != nil {
-					return err
-				}
+			envPath, _, secretRemap, err := resolveSecretsForLaunch(provName, cwd)
+			if err != nil {
+				return err
 			}
 
 			id, err := runid.Generate()
@@ -278,15 +276,16 @@ kill some runs before launching more.`,
 			}
 
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
-				Repo:     repo,
-				Ticket:   ticket,
-				Branch:   branch,
-				Workflow: workflow,
-				RunID:    id,
-				EnvFile:  envPath,
-				Mounts:   projCfg.ResolveMounts(cwd),
-				HomeDir:  homeDir,
-				OrcArgs:  orcArgs,
+				Repo:           repo,
+				Ticket:         ticket,
+				Branch:         branch,
+				Workflow:       workflow,
+				RunID:          id,
+				EnvFile:        envPath,
+				Mounts:         projCfg.ResolveMounts(cwd),
+				HomeDir:        homeDir,
+				OrcArgs:        orcArgs,
+				SecretEnvRemap: secretRemap,
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
@@ -390,12 +389,9 @@ resumes any interrupted agent session. Override with explicit orc args:
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
-			var envPath string
-			if run.Provider == "docker" {
-				envPath, err = config.ValidateEnvFile(cwd)
-				if err != nil {
-					return err
-				}
+			envPath, _, secretRemap, err := resolveSecretsForLaunch(run.Provider, cwd)
+			if err != nil {
+				return err
 			}
 			projCfg, err := config.LoadProjectConfig(cwd)
 			if err != nil {
@@ -416,15 +412,16 @@ resumes any interrupted agent session. Override with explicit orc args:
 			os.Remove(filepath.Join(workspaceDir, ".horde-exit-code"))
 
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
-				Repo:     run.Repo,
-				Ticket:   run.Ticket,
-				Branch:   run.Branch,
-				Workflow: run.Workflow,
-				RunID:    run.ID,
-				EnvFile:  envPath,
-				Mounts:   projCfg.ResolveMounts(cwd),
-				HomeDir:  homeDir,
-				OrcArgs:  orcArgs,
+				Repo:           run.Repo,
+				Ticket:         run.Ticket,
+				Branch:         run.Branch,
+				Workflow:       run.Workflow,
+				RunID:          run.ID,
+				EnvFile:        envPath,
+				Mounts:         projCfg.ResolveMounts(cwd),
+				HomeDir:        homeDir,
+				OrcArgs:        orcArgs,
+				SecretEnvRemap: secretRemap,
 			})
 			if err != nil {
 				return fmt.Errorf("relaunching container for retry: %w", err)
@@ -1046,6 +1043,51 @@ type liveCosts struct {
 }
 
 // fetchLiveCost reads the current cost from a running container's costs.json.
+// resolveSecretsForLaunch loads .horde/config.yaml, merges in the canonical
+// secret defaults, and validates the result against the active provider.
+// For docker it also verifies dir/.env covers every host env-var name the
+// spec references. Returns the (possibly empty) envPath, the merged spec,
+// and a non-canonical "container-name -> host-env-name" remap for the
+// docker provider; the ECS provider gets nil remap (its task definition
+// is baked at bootstrap time).
+func resolveSecretsForLaunch(provName, dir string) (envPath string, spec config.SecretSpec, remap map[string]string, err error) {
+	cfg, err := config.LoadProjectConfig(dir)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	spec = config.MergeSecrets(cfg.Secrets)
+	if err := spec.ValidateForProvider(provName); err != nil {
+		return "", nil, nil, err
+	}
+	if provName == config.ProviderDocker {
+		envPath, err = config.ValidateEnvFileFor(dir, spec)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		remap = map[string]string{}
+		for containerName, src := range spec {
+			if src.Env == "" {
+				continue
+			}
+			// Canonicals are covered by --env-file (their container-name
+			// matches the host-name verbatim by definition). Skip identity
+			// mappings to keep argv minimal.
+			if config.IsCanonical(containerName) && src.Env == containerName {
+				continue
+			}
+			if src.Env == containerName {
+				continue
+			}
+			remap[containerName] = src.Env
+		}
+		// For non-canonical entries whose container-name matches
+		// host-name, --env-file already publishes them under the right
+		// name (since .env contains them and docker forwards everything
+		// in the file). No extra -e needed in that case either.
+	}
+	return envPath, spec, remap, nil
+}
+
 func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *store.Run) *float64 {
 	if run.InstanceID == "" {
 		return nil

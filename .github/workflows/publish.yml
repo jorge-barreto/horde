@@ -30,6 +30,11 @@ jobs:
           cache: npm
           cache-dependency-path: cdk/package-lock.json
 
+      # Trusted-publisher OIDC publish requires npm >= 11.5.1; node 22 LTS
+      # ships npm 10.x, which sends the publish PUT unauthenticated and the
+      # registry 404s. Upgrade before any registry writes.
+      - run: npm install --global npm@latest
+
       - run: npm ci
 
       - run: npm run build

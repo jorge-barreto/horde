@@ -8,12 +8,22 @@ import type { ISecret } from "aws-cdk-lib/aws-secretsmanager";
  * Secrets injected into the worker container at runtime via ECS Secrets
  * Manager `valueFrom` (resolved by the task execution role at container start
  * — never via plain env vars).
+ *
+ * The two canonical entries (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) are
+ * required and match the keys baked into the bootstrap CloudFormation
+ * template. Extra entries are added via the index signature — each becomes
+ * an additional task-definition `secrets:` entry with an IAM grant on
+ * both the task role and the execution role. Caller must reference an
+ * existing Secrets Manager secret (typically via
+ * `secretsmanager.Secret.fromSecretNameV2(...)`).
  */
 export interface HordeWorkerSecrets {
   /** Claude Code OAuth token. Becomes env `CLAUDE_CODE_OAUTH_TOKEN`. */
   readonly CLAUDE_CODE_OAUTH_TOKEN: ISecret;
   /** Git provider token (e.g. GitHub PAT). Becomes env `GIT_TOKEN`. */
   readonly GIT_TOKEN: ISecret;
+  /** Additional caller-declared secrets — env-var name → ISecret. */
+  readonly [envVarName: string]: ISecret;
 }
 
 /**

@@ -434,8 +434,8 @@ func TestLaunch_MissingEnvKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "missing required key GIT_TOKEN") {
-		t.Errorf("error %q does not contain %q", err.Error(), "missing required key GIT_TOKEN")
+	if !strings.Contains(err.Error(), "GIT_TOKEN") {
+		t.Errorf("error %q does not name missing key GIT_TOKEN", err.Error())
 	}
 }
 

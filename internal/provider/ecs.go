@@ -141,6 +141,12 @@ func (f *ecsLogFollower) Close() error {
 }
 
 func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error) {
+	// Secret env vars (CLAUDE_CODE_OAUTH_TOKEN, GIT_TOKEN, and any extras
+	// declared in .horde/config.yaml's secrets: block) are not passed
+	// here. They live on the task definition's `secrets:` array, which
+	// is set at deploy time by the bootstrap CF template / @horde.io/cdk
+	// construct. RunTask cannot add secrets per launch — only environment
+	// overrides — so opts.SecretEnvRemap is intentionally ignored on ECS.
 	env := []ecstypes.KeyValuePair{
 		{Name: aws.String("REPO_URL"), Value: aws.String(opts.Repo)},
 		{Name: aws.String("TICKET"), Value: aws.String(opts.Ticket)},

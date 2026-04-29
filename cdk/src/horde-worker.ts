@@ -276,6 +276,22 @@ export class HordeWorker extends Construct {
       }),
     );
 
+    // Wire every entry in props.secrets through ecs.Secret.fromSecretsManager
+    // so the canonical pair plus any caller-declared extras flow into the
+    // task definition's secrets array. Each ISecret must already exist or
+    // be created by the caller; the construct does not create the
+    // Secrets Manager entries itself.
+    const taskDefSecrets: { [k: string]: ecs.Secret } = {};
+    for (const envName of Object.keys(props.secrets)) {
+      const isecret = props.secrets[envName];
+      if (!isecret) {
+        throw new Error(
+          `HordeWorker: secrets["${envName}"] is undefined. ` +
+            `Every entry must reference a SecretsManager ISecret.`,
+        );
+      }
+      taskDefSecrets[envName] = ecs.Secret.fromSecretsManager(isecret);
+    }
     this.container = this.taskDefinition.addContainer("worker", {
       containerName: "horde-worker",
       image: props.workerImage,
@@ -285,12 +301,7 @@ export class HordeWorker extends Construct {
         logGroup: this.logGroup,
         streamPrefix: "ecs",
       }),
-      secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(
-          props.secrets.CLAUDE_CODE_OAUTH_TOKEN,
-        ),
-        GIT_TOKEN: ecs.Secret.fromSecretsManager(props.secrets.GIT_TOKEN),
-      },
+      secrets: taskDefSecrets,
     });
 
     // SSM config parameter consumed by the horde CLI. JSON keys must match

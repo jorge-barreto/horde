@@ -46,6 +46,16 @@ type LaunchOpts struct {
 	Mounts   []string // volume mounts in docker format (host:container)
 	HomeDir  string   // home directory for workspace path resolution
 	OrcArgs  []string // extra orc flags passed through via -- (opaque)
+
+	// SecretEnvRemap declares container-env-var-name -> host-env-var-name
+	// pairs that the docker provider must inject beyond what --env-file
+	// covers. The provider passes "-e <containerName>" to docker run so
+	// docker reads the value from horde's process env (host env-vars are
+	// loaded from .env by config.ApplyDotEnvToProcess at startup) without
+	// putting values on argv. Identity mappings (container-name ==
+	// host-name) and the two canonical secrets are already covered by
+	// --env-file and need not appear here.
+	SecretEnvRemap map[string]string
 }
 
 // ValidateRunID rejects empty run IDs and IDs that would enable path

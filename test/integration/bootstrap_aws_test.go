@@ -39,7 +39,7 @@ func TestBootstrap_ValidateTemplate(t *testing.T) {
 		t.Fatalf("loading AWS config (profile=%q): %v", profile, err)
 	}
 
-	rendered, err := bootstrap.Render("hordetest")
+	rendered, err := bootstrap.Render("hordetest", nil)
 	if err != nil {
 		t.Fatalf("rendering template: %v", err)
 	}

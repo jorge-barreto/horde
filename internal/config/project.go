@@ -11,7 +11,8 @@ import (
 
 // ProjectConfig holds project-level horde settings from .horde/config.yaml.
 type ProjectConfig struct {
-	Mounts []string `yaml:"mounts"` // volume mounts in host:container format (host side relative to project root)
+	Mounts  []string   `yaml:"mounts"`            // volume mounts in host:container format (host side relative to project root)
+	Secrets SecretSpec `yaml:"secrets,omitempty"` // caller-declared env-var secrets, additive to canonical defaults
 }
 
 // LoadProjectConfig reads .horde/config.yaml from dir.

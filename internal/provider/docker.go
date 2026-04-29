@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -128,6 +129,32 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	}
 	if opts.EnvFile != "" {
 		args = append(args, "--env-file", opts.EnvFile)
+	}
+	// SecretEnvRemap: pass "-e CONTAINER_NAME" so docker forwards the
+	// value of horde's HOST_NAME process env var under CONTAINER_NAME
+	// inside the container. We must Setenv first when CONTAINER_NAME
+	// itself is not already present in the process env (the .env file
+	// keys are loaded at startup but indexed under HOST_NAME). Setting
+	// CONTAINER_NAME=<value of HOST_NAME> bridges the gap without
+	// putting the value on argv.
+	if len(opts.SecretEnvRemap) > 0 {
+		// Sort for deterministic argv order in tests and audit logs.
+		keys := make([]string, 0, len(opts.SecretEnvRemap))
+		for k := range opts.SecretEnvRemap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, containerName := range keys {
+			hostName := opts.SecretEnvRemap[containerName]
+			if containerName != hostName {
+				if v, ok := os.LookupEnv(hostName); ok {
+					if err := os.Setenv(containerName, v); err != nil {
+						return nil, fmt.Errorf("setting env for secret remap: %w", err)
+					}
+				}
+			}
+			args = append(args, "-e", containerName)
+		}
 	}
 	for _, mount := range allMounts {
 		args = append(args, "-v", mount)

@@ -24,13 +24,13 @@ What horde expects from orc at the interface boundary. This document does NOT sp
 
 ## Filesystem Contract
 
-orc writes artifacts and audit data relative to the project root (the cloned repo). Paths depend on whether a named workflow is used:
+orc writes artifacts and audit data relative to the project root (the cloned repo). horde always invokes orc with `-w <workflow>` (the `--workflow` flag is required at `horde launch`), so the only layout horde reads is the named-workflow form:
 
 | Layout | Artifacts | Audit |
 |--------|-----------|-------|
-| Default workflow | `.orc/artifacts/<ticket>/` | `.orc/audit/<ticket>/` |
 | Named workflow | `.orc/artifacts/<workflow>/<ticket>/` | `.orc/audit/<workflow>/<ticket>/` |
-| Default + named coexist | `.orc/artifacts/default/<ticket>/` | `.orc/audit/default/<ticket>/` |
+
+For reference, orc also supports an unnamed default-workflow layout (`.orc/audit/<ticket>/`), but horde does not exercise that path: launches without `--workflow` are rejected before orc is invoked.
 
 ### run-result.json
 
@@ -44,7 +44,7 @@ Expected contents:
   "exit_code": 0,
   "status": "completed",
   "ticket": "PROJ-123",
-  "workflow": "",
+  "workflow": "implement-ticket",
   "total_cost_usd": 4.52,
   "total_duration": "12m 34s",
   "phases": [
@@ -84,11 +84,7 @@ The worker environment must NOT have the `CLAUDECODE` environment variable set. 
 horde runs orc as:
 
 ```bash
-# Default workflow
-orc run <ticket> --auto --no-color [<extra-args>...]
-
-# Named workflow
 orc run -w <workflow> <ticket> --auto --no-color [<extra-args>...]
 ```
 
-`--auto` and `--no-color` are always present. Users can pass additional orc flags through horde using the `--` separator (e.g., `horde launch PROJ-123 -- --resume`). horde does not validate these flags — they are passed through opaquely.
+`-w`, `--auto`, and `--no-color` are always present. horde never relies on orc's default-workflow selection — `--workflow` is a required flag at `horde launch`, so the workflow segment in the audit/artifacts path is always known to horde. Users can pass additional orc flags through horde using the `--` separator (e.g., `horde launch --workflow implement-ticket PROJ-123 -- --resume`). horde does not validate these flags — they are passed through opaquely.

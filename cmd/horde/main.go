@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"text/tabwriter"
@@ -118,8 +119,9 @@ kill some runs before launching more.`,
 				Usage: "Git branch to use",
 			},
 			&cli.StringFlag{
-				Name:  "workflow",
-				Usage: "Workflow to run",
+				Name:     "workflow",
+				Usage:    "Orc workflow to run (required, e.g. implement-ticket)",
+				Required: true,
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -139,9 +141,16 @@ kill some runs before launching more.`,
 			orcArgs := cmd.Args().Tail()
 
 			branch := cmd.String("branch")
-			workflow := cmd.String("workflow")
+			workflow := strings.TrimSpace(cmd.String("workflow"))
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
+
+			if workflow == "" {
+				return fmt.Errorf("--workflow is required (e.g. --workflow implement-ticket)")
+			}
+			if strings.ContainsAny(workflow, "/\\") || strings.Contains(workflow, "..") {
+				return fmt.Errorf("--workflow %q is invalid: must not contain '/', '\\', or '..'", workflow)
+			}
 
 			prov, st, maxConcurrent, provName, awsCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
@@ -1141,6 +1150,8 @@ func printRunStatus(run *store.Run) {
 	fmt.Printf("Duration:    %s\n", duration)
 	if run.TotalCostUSD != nil {
 		fmt.Printf("Cost:        $%.2f\n", *run.TotalCostUSD)
+	} else {
+		fmt.Printf("Cost:        -\n")
 	}
 	fmt.Printf("Launched by: %s\n", run.LaunchedBy)
 	if homeDir, err := os.UserHomeDir(); err == nil {

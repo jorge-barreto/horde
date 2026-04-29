@@ -83,7 +83,9 @@ const topicQuickstart = `Quick Start
 
 3. Launch a run:
 
-    horde launch PROJ-123
+    horde launch --workflow implement-ticket PROJ-123
+
+   --workflow is required and selects an orc workflow from .orc/workflows/.
 
    On the first launch, horde builds the worker Docker image automatically.
    This takes a few minutes. Subsequent launches reuse the cached image
@@ -242,8 +244,8 @@ Docker Provider (v0.1)
 
 The Docker provider runs horde-worker:latest locally via 'docker run'.
 
-    horde launch PROJ-123                   # uses docker by default
-    horde launch PROJ-123 --provider docker # explicit
+    horde launch --workflow implement-ticket PROJ-123                    # uses docker by default
+    horde launch --workflow implement-ticket PROJ-123 --provider docker  # explicit
 
 How it works:
 
@@ -283,7 +285,7 @@ AWS ECS Provider (planned — v0.2)
 
 The ECS provider will run horde-worker as an ECS Fargate task.
 
-    horde launch PROJ-123 --provider aws-ecs
+    horde launch --workflow implement-ticket PROJ-123 --provider aws-ecs
 
 Planned features:
     - ECS RunTask for launching (no Lambda indirection)
@@ -525,7 +527,7 @@ Workflow
   horde bootstrap init       # generates .horde/cloudformation.yaml
   horde bootstrap deploy     # creates or updates the CloudFormation stack
   horde push                 # tags and pushes horde-worker:latest to ECR
-  horde launch --provider aws-ecs -t TICKET-123
+  horde launch --provider aws-ecs --workflow implement-ticket TICKET-123
   horde bootstrap destroy    # tears everything down
 
 Step 1 — horde bootstrap init

@@ -16,7 +16,7 @@ func TestLaunchMissingTicket(t *testing.T) {
 	}
 
 	h := newHarness(t)
-	_, stderr, err := h.runHordeFull("--provider", "docker", "launch")
+	_, stderr, err := h.runHordeFull("--provider", "docker", "launch", "--workflow", "test-flow")
 	if err == nil {
 		t.Fatal("expected error for missing ticket, got nil")
 	}
@@ -34,7 +34,7 @@ func TestLaunchMissingEnvFile(t *testing.T) {
 	h := newHarness(t)
 	os.Remove(filepath.Join(h.workDir, ".env"))
 
-	_, stderr, err := h.runHordeFull("--provider", "docker", "launch", "TEST-no-env")
+	_, stderr, err := h.runHordeFull("--provider", "docker", "launch", "--workflow", "test-flow", "TEST-no-env")
 	if err == nil {
 		t.Fatal("expected error for missing .env, got nil")
 	}
@@ -58,7 +58,7 @@ func TestLaunchNotGitRepo(t *testing.T) {
 		[]byte("CLAUDE_CODE_OAUTH_TOKEN=x\nGIT_TOKEN=x\n"), 0o644)
 	h.workDir = nonGitDir
 
-	_, stderr, err := h.runHordeFull("--provider", "docker", "launch", "TEST-no-git")
+	_, stderr, err := h.runHordeFull("--provider", "docker", "launch", "--workflow", "test-flow", "TEST-no-git")
 	if err == nil {
 		t.Fatal("expected error for non-git directory, got nil")
 	}

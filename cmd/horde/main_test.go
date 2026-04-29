@@ -90,7 +90,7 @@ func TestLaunch_Success(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -259,12 +259,86 @@ func TestLaunch_MissingTicket(t *testing.T) {
 	_ = setupLaunchEnv(t)
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), "missing required argument") {
 		t.Errorf("error %q does not contain %q", err.Error(), "missing required argument")
+	}
+}
+
+// TestLaunch_MissingWorkflow ensures launch refuses to proceed when --workflow
+// is omitted entirely (urfave's Required-flag check). Without this guard,
+// orc would silently apply its own default workflow and write audit files
+// under a path horde wouldn't read, leaving cost data orphaned.
+func TestLaunch_MissingWorkflow(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "workflow") {
+		t.Errorf("error %q should mention workflow", err.Error())
+	}
+	assertNoRunsRecorded(t, env)
+}
+
+// TestLaunch_EmptyWorkflow ensures whitespace-only --workflow values are
+// rejected before any side effects (DB row, container, image build).
+func TestLaunch_EmptyWorkflow(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "   ", "TICKET-1"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--workflow is required") {
+		t.Errorf("error %q does not contain %q", err.Error(), "--workflow is required")
+	}
+	assertNoRunsRecorded(t, env)
+}
+
+// TestLaunch_InvalidWorkflow ensures path-unsafe workflow values are rejected.
+// Mirrors the validation in provider.DockerProvider.Hydrate; prevents
+// audit-tree paths like audit/../escape/<ticket>/.
+func TestLaunch_InvalidWorkflow(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	for _, bad := range []string{"../escape", "a/b", `a\b`} {
+		err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", bad, "TICKET-1"})
+		if err == nil {
+			t.Fatalf("workflow %q: expected error, got nil", bad)
+		}
+		if !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("workflow %q: error %q should mention invalid", bad, err.Error())
+		}
+	}
+	assertNoRunsRecorded(t, env)
+}
+
+func assertNoRunsRecorded(t *testing.T, env launchEnv) {
+	t.Helper()
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	// DB may not even exist if validation fired before initProviderAndStore.
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return
+	}
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st.Close()
+	runs, err := st.ListByRepo(context.Background(), "github.com/test/repo.git", true)
+	if err != nil {
+		t.Fatalf("listing runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("expected no runs recorded, got %d", len(runs))
 	}
 }
 
@@ -283,7 +357,7 @@ func TestLaunch_NotGitRepo(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -319,7 +393,7 @@ func TestLaunch_MissingEnvFile(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -356,7 +430,7 @@ func TestLaunch_MissingEnvKey(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(oldDir) })
 
 	ctx := context.Background()
-	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -390,7 +464,7 @@ func TestLaunch_DuplicateTicket_NoForce(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -446,7 +520,7 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--force", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "--force", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -512,7 +586,7 @@ func TestLaunch_MaxConcurrent_Rejected(t *testing.T) {
 	}
 	st.Close()
 
-	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-NEW"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-NEW"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -527,7 +601,7 @@ func TestLaunch_DockerFailure(t *testing.T) {
 
 	os.WriteFile(filepath.Join(env.binDir, "docker"), []byte("#!/bin/sh\ncase \"$1\" in\n  image) echo \"2099-01-01T00:00:00Z\";;\n  tag) exit 0;;\n  *) echo \"Error: Cannot connect to the Docker daemon\" >&2; exit 1;;\nesac\n"), 0o755)
 
-	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -571,7 +645,7 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 	os.Stderr = stderrW
 	defer func() { os.Stderr = origStderr }()
 
-	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	runErr := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 
 	stderrW.Close()
 	os.Stderr = origStderr
@@ -613,7 +687,7 @@ func TestProvider_InvalidValue(t *testing.T) {
 	_ = setupLaunchEnv(t)
 	ctx := context.Background()
 
-	err := newApp().Run(ctx, []string{"horde", "--provider", "gcp", "launch", "TICKET-1"})
+	err := newApp().Run(ctx, []string{"horde", "--provider", "gcp", "launch", "--workflow", "test-flow", "TICKET-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -634,7 +708,7 @@ func TestProvider_ExplicitDocker(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "test-flow", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -682,7 +756,7 @@ func TestProfile_AcceptedAsGlobalFlag(t *testing.T) {
 	os.Stdout = pw
 	defer func() { os.Stdout = origStdout }()
 
-	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "--profile", "staging", "launch", "TICKET-1"})
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "--profile", "staging", "launch", "--workflow", "test-flow", "TICKET-1"})
 
 	pw.Close()
 	os.Stdout = origStdout
@@ -1526,6 +1600,80 @@ esac
 	if run.TotalCostUSD == nil || *run.TotalCostUSD != 7.50 {
 		t.Errorf("store TotalCostUSD = %v, want 7.50", run.TotalCostUSD)
 	}
+}
+
+// TestPrintRunStatus_NilCost verifies that `horde status` prints a
+// "Cost:        -" line when TotalCostUSD is nil — matches the list
+// table's behavior so users see a consistent placeholder rather than a
+// silently missing field.
+func TestPrintRunStatus_NilCost(t *testing.T) {
+	run := &store.Run{
+		ID:         "abcdef123456",
+		Repo:       "github.com/test/repo.git",
+		Ticket:     "TICKET-1",
+		Workflow:   "test-flow",
+		Provider:   "docker",
+		Status:     store.StatusFailed,
+		LaunchedBy: "testuser",
+		StartedAt:  time.Now().Add(-1 * time.Minute),
+		// TotalCostUSD intentionally nil
+	}
+	now := time.Now()
+	run.CompletedAt = &now
+
+	stdout := captureStdout(t, func() { printRunStatus(run) })
+
+	if !strings.Contains(stdout, "Cost:        -") {
+		t.Errorf("stdout should contain 'Cost:        -' line; got:\n%s", stdout)
+	}
+}
+
+// TestPrintRunStatus_WithCost is the positive control for
+// TestPrintRunStatus_NilCost.
+func TestPrintRunStatus_WithCost(t *testing.T) {
+	cost := 1.23
+	run := &store.Run{
+		ID:           "abcdef123456",
+		Repo:         "github.com/test/repo.git",
+		Ticket:       "TICKET-1",
+		Workflow:     "test-flow",
+		Provider:     "docker",
+		Status:       store.StatusSuccess,
+		LaunchedBy:   "testuser",
+		StartedAt:    time.Now().Add(-1 * time.Minute),
+		TotalCostUSD: &cost,
+	}
+	now := time.Now()
+	run.CompletedAt = &now
+
+	stdout := captureStdout(t, func() { printRunStatus(run) })
+
+	if !strings.Contains(stdout, "Cost:        $1.23") {
+		t.Errorf("stdout should contain 'Cost:        $1.23'; got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "Cost:        -") {
+		t.Errorf("stdout should NOT contain 'Cost:        -' when cost is set; got:\n%s", stdout)
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		io.Copy(&buf, pr)
+		done <- buf.String()
+	}()
+	fn()
+	pw.Close()
+	os.Stdout = origStdout
+	return <-done
 }
 
 // --- List tests ---

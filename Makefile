@@ -1,10 +1,19 @@
 .PHONY: build install unit-test integration-test bootstrap-validate-test vet worker docker-build check e2e-up e2e-test e2e-down
 
+# Version metadata embedded via -ldflags. `version` falls back to the short
+# git describe (tag + offset + SHA) so dev builds are self-identifying;
+# release builds get the clean tag from goreleaser. `commit` and `buildDate`
+# are always from git / UTC now.
+VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS    := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
+
 build:
-	go build ./cmd/horde
+	go build -ldflags '$(LDFLAGS)' ./cmd/horde
 
 install:
-	go install ./cmd/horde
+	go install -ldflags '$(LDFLAGS)' ./cmd/horde
 
 # Fast tier: no Docker, no AWS. Must stay green on every commit.
 # Excludes cdk/ because it's a Node package; its node_modules/ contains

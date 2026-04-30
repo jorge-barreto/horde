@@ -1141,11 +1141,16 @@ func removeWorkspace(ctx context.Context, dir string) error {
 
 func printRunTable(runs []*store.Run) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "RUN ID\tTICKET\tBRANCH\tSTATUS\tDURATION\tCOST")
+	fmt.Fprintln(w, "RUN ID\tTICKET\tWORKFLOW\tBRANCH\tSTATUS\tDURATION\tCOST")
 	for _, run := range runs {
 		branch := run.Branch
 		if branch == "" {
 			branch = "(default)"
+		}
+
+		workflow := run.Workflow
+		if workflow == "" {
+			workflow = "-"
 		}
 
 		var duration time.Duration
@@ -1161,8 +1166,8 @@ func printRunTable(runs []*store.Run) {
 			cost = fmt.Sprintf("$%.2f", *run.TotalCostUSD)
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			run.ID, run.Ticket, branch, run.Status, duration, cost)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			run.ID, run.Ticket, workflow, branch, run.Status, duration, cost)
 	}
 	w.Flush()
 }

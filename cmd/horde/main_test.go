@@ -2148,6 +2148,7 @@ func TestList_TableFormat(t *testing.T) {
 		ID:           "listrun00006",
 		Ticket:       "PROJ-42",
 		Branch:       "feature-x",
+		Workflow:     "implement-ticket",
 		Status:       store.StatusSuccess,
 		Repo:         "github.com/test/repo.git",
 		Provider:     "docker",
@@ -2188,6 +2189,12 @@ func TestList_TableFormat(t *testing.T) {
 	}
 	if !strings.Contains(outStr, "$4.52") {
 		t.Errorf("output missing '$4.52': %s", outStr)
+	}
+	if !strings.Contains(outStr, "WORKFLOW") {
+		t.Errorf("output missing WORKFLOW header: %s", outStr)
+	}
+	if !strings.Contains(outStr, "implement-ticket") {
+		t.Errorf("output missing workflow value 'implement-ticket': %s", outStr)
 	}
 }
 

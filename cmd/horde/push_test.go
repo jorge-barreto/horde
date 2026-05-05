@@ -104,6 +104,7 @@ func healthyHordeConfig() *config.HordeConfig {
 		ArtifactsBucket:       "bucket",
 		RunsTable:             "horde-runs",
 		EcrRepoURI:            "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-acme-widgets",
+		Repo:                  "github.com/acme/widgets",
 		MaxConcurrent:         1,
 		DefaultTimeoutMinutes: 1440,
 	}

@@ -495,7 +495,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
               {
                 "Ref": "AWS::URLSuffix",
               },
-              "/horde-test","max_concurrent":5,"default_timeout_minutes":1440}",
+              "/horde-test","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
             ],
           ],
         },
@@ -1819,7 +1819,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
               {
                 "Ref": "AWS::URLSuffix",
               },
-              "/horde-test","max_concurrent":5,"default_timeout_minutes":1440}",
+              "/horde-test","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
             ],
           ],
         },
@@ -3151,7 +3151,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
               {
                 "Ref": "AWS::URLSuffix",
               },
-              "/horde-test","max_concurrent":5,"default_timeout_minutes":1440}",
+              "/horde-test","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
             ],
           ],
         },
@@ -4687,7 +4687,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
               {
                 "Ref": "AWS::URLSuffix",
               },
-              "/horde-test","max_concurrent":5,"default_timeout_minutes":1440}",
+              "/horde-test","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
             ],
           ],
         },

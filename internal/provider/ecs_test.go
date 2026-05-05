@@ -162,6 +162,7 @@ func testHordeConfig() *config.HordeConfig {
 		LogStreamPrefix:       "ecs",
 		ArtifactsBucket:       "my-horde-artifacts",
 		RunsTable:             "horde-runs",
+		Repo:                  "github.com/example/myproj",
 		MaxConcurrent:         5,
 		DefaultTimeoutMinutes: 1440,
 	}

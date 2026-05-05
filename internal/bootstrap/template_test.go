@@ -24,7 +24,7 @@ func TestRender_EmptySlug(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			out, err := Render(tc.in, nil)
+			out, err := Render(tc.in, "github.com/example/myproj", nil)
 			if err == nil {
 				t.Fatalf("expected error for slug %q, got nil", tc.in)
 			}
@@ -38,9 +38,36 @@ func TestRender_EmptySlug(t *testing.T) {
 	}
 }
 
+func TestRender_EmptyRepo(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"empty", ""},
+		{"whitespace", "   "},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out, err := Render("myproj", tc.in, nil)
+			if err == nil {
+				t.Fatalf("expected error for repo %q, got nil", tc.in)
+			}
+			if !strings.Contains(err.Error(), "repo is empty") {
+				t.Errorf("error message %q does not contain %q", err.Error(), "repo is empty")
+			}
+			if out != nil {
+				t.Errorf("expected nil bytes, got %d bytes", len(out))
+			}
+		})
+	}
+}
+
 func TestRender_ValidYAML(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -64,7 +91,7 @@ func TestRender_ValidYAML(t *testing.T) {
 
 func TestRender_ContainsSlug(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -93,7 +120,7 @@ func TestRender_ContainsSlug(t *testing.T) {
 
 func TestRender_ResourcesPresent(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -156,7 +183,7 @@ func TestRender_ResourcesPresent(t *testing.T) {
 
 func TestRender_RunsTableGSIs(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -200,7 +227,7 @@ func TestRender_RunsTableGSIs(t *testing.T) {
 
 func TestRender_OutputsPresent(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -243,7 +270,7 @@ func TestRender_OutputsPresent(t *testing.T) {
 
 func TestRender_ParametersPresent(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -274,7 +301,7 @@ func TestRender_ParametersPresent(t *testing.T) {
 // common secret prefixes never appear in the output.
 func TestRender_NoSecretsLeaked(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -305,7 +332,7 @@ func TestRender_NoSecretsLeaked(t *testing.T) {
 
 func TestRender_TaskDefSecrets(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -361,7 +388,7 @@ func TestRender_TaskDefSecrets(t *testing.T) {
 
 func TestRender_TaskRoleHasPolicies(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -417,7 +444,7 @@ func TestRender_TaskRoleHasPolicies(t *testing.T) {
 
 func TestRender_CliPolicyStatements(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -469,7 +496,7 @@ func TestRender_CliPolicyStatements(t *testing.T) {
 
 func TestRender_SsmConfigParameter(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -480,17 +507,20 @@ func TestRender_SsmConfigParameter(t *testing.T) {
 	for _, key := range []string{
 		"cluster_arn", "task_definition_arn", "subnets", "security_group",
 		"assign_public_ip", "log_group", "log_stream_prefix", "artifacts_bucket",
-		"runs_table", "ecr_repo_uri", "max_concurrent", "default_timeout_minutes",
+		"runs_table", "ecr_repo_uri", "repo", "max_concurrent", "default_timeout_minutes",
 	} {
 		if !strings.Contains(s, `"`+key+`"`) {
 			t.Errorf("SSM parameter JSON missing key %q", key)
 		}
 	}
+	if !strings.Contains(s, `"repo":"github.com/example/myproj"`) {
+		t.Errorf("SSM parameter JSON missing repo value substitution")
+	}
 }
 
 func TestRender_StatusLambdaPython(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -539,7 +569,7 @@ func TestRender_ExtraSecrets_TaskDefAndIAM(t *testing.T) {
 		{EnvName: "STRIPE_API_KEY", SecretName: "prepdesk/stripe-api-key"},
 		{EnvName: "REVIEW_GIT_TOKEN", SecretName: "horde/review-git-token"},
 	}
-	out, err := Render("myproj", extras)
+	out, err := Render("myproj", "github.com/example/myproj", extras)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -583,7 +613,7 @@ func TestRender_ExtraSecrets_TaskDefAndIAM(t *testing.T) {
 
 func TestRender_NoExtras_NoExtraLines(t *testing.T) {
 	t.Parallel()
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -604,7 +634,7 @@ func TestRender_CfnLint(t *testing.T) {
 	if err != nil {
 		t.Skip("cfn-lint not installed")
 	}
-	out, err := Render("myproj", nil)
+	out, err := Render("myproj", "github.com/example/myproj", nil)
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}

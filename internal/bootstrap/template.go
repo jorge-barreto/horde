@@ -16,6 +16,11 @@ var stackTemplateSource string
 // Render generates a CloudFormation stack template for the given project
 // slug. The slug is expected to come from Slug(remoteURL).
 //
+// repo is the canonical repository identifier in NormalizeRepoURL form
+// ("host/path", no scheme, trailing slash trimmed). It gets baked into
+// the rendered SSM config so every CLI invocation that hits this stack
+// reads the same value, regardless of how the local git remote is set up.
+//
 // extraSecrets are caller-declared aws-secret references beyond the two
 // canonicals (CLAUDE_CODE_OAUTH_TOKEN, GIT_TOKEN). Each one becomes:
 //
@@ -28,9 +33,12 @@ var stackTemplateSource string
 // The caller is responsible for ensuring the named Secrets Manager
 // entries actually exist before deploy. Pass nil/empty for the v0.2
 // canonical-only case (zero migration).
-func Render(slug string, extraSecrets []config.ExtraAWSSecret) ([]byte, error) {
+func Render(slug, repo string, extraSecrets []config.ExtraAWSSecret) ([]byte, error) {
 	if strings.TrimSpace(slug) == "" {
 		return nil, fmt.Errorf("rendering stack template: slug is empty")
+	}
+	if strings.TrimSpace(repo) == "" {
+		return nil, fmt.Errorf("rendering stack template: repo is empty")
 	}
 	tmpl, err := template.New("stack").Option("missingkey=error").Parse(stackTemplateSource)
 	if err != nil {
@@ -39,9 +47,11 @@ func Render(slug string, extraSecrets []config.ExtraAWSSecret) ([]byte, error) {
 	var buf bytes.Buffer
 	data := struct {
 		Slug         string
+		Repo         string
 		ExtraSecrets []config.ExtraAWSSecret
 	}{
 		Slug:         slug,
+		Repo:         repo,
 		ExtraSecrets: extraSecrets,
 	}
 	if err := tmpl.Execute(&buf, data); err != nil {

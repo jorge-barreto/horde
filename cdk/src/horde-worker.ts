@@ -348,7 +348,7 @@ export class HordeWorker extends Construct {
       this.runsTable.tableName,
       '","ecr_repo_uri":"',
       props.ecrRepository.repositoryUri,
-      `","max_concurrent":${maxConcurrent},"default_timeout_minutes":${defaultTimeoutMinutes}}`,
+      `","repo":"${props.repo}","max_concurrent":${maxConcurrent},"default_timeout_minutes":${defaultTimeoutMinutes}}`,
     ]);
 
     this.configParameter = new ssm.StringParameter(this, "ConfigParameter", {

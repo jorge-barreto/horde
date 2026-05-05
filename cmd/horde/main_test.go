@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/store"
 )
@@ -3812,6 +3813,48 @@ func TestResults_LazyCompletion(t *testing.T) {
 	}
 	if !strings.Contains(outStr, "success") {
 		t.Errorf("output missing 'success': %s", outStr)
+	}
+}
+
+func TestResolveCanonicalRepo_FromSSMConfig(t *testing.T) {
+	t.Parallel()
+	cfg := &config.HordeConfig{Repo: "github.com/example/myproj"}
+	got, err := resolveCanonicalRepo(cfg, "/nonexistent/dir")
+	if err != nil {
+		t.Fatalf("resolveCanonicalRepo unexpected error: %v", err)
+	}
+	if got != "github.com/example/myproj" {
+		t.Errorf("resolveCanonicalRepo = %q, want %q", got, "github.com/example/myproj")
+	}
+}
+
+func TestResolveCanonicalRepo_FallsBackToGitRemote(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "remote", "add", "origin", "https://github.com/example/fallback.git")
+
+	got, err := resolveCanonicalRepo(nil, dir)
+	if err != nil {
+		t.Fatalf("resolveCanonicalRepo(nil) unexpected error: %v", err)
+	}
+	if got != "github.com/example/fallback.git" {
+		t.Errorf("resolveCanonicalRepo(nil) = %q, want %q", got, "github.com/example/fallback.git")
+	}
+
+	got, err = resolveCanonicalRepo(&config.HordeConfig{Repo: ""}, dir)
+	if err != nil {
+		t.Fatalf("resolveCanonicalRepo(empty Repo) unexpected error: %v", err)
+	}
+	if got != "github.com/example/fallback.git" {
+		t.Errorf("resolveCanonicalRepo(empty Repo) = %q, want %q", got, "github.com/example/fallback.git")
 	}
 }
 

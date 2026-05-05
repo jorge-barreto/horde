@@ -13,6 +13,7 @@ function synth() {
   const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
   new HordeWorker(stack, "Horde", {
     projectSlug: "test",
+    repo: "github.com/example/test",
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {
@@ -300,6 +301,7 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
     new HordeWorker(stack, "Horde", {
       projectSlug: "test",
+      repo: "github.com/example/test",
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
@@ -334,6 +336,7 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
       "artifacts_bucket",
       "runs_table",
       "ecr_repo_uri",
+      "repo",
       "max_concurrent",
       "default_timeout_minutes",
     ]) {
@@ -343,6 +346,7 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     expect(valueStr).toContain('\\"ecs\\"');
     expect(valueStr).toContain('\\"max_concurrent\\":5');
     expect(valueStr).toContain('\\"default_timeout_minutes\\":1440');
+    expect(valueStr).toContain('\\"repo\\":\\"github.com/example/test\\"');
   });
 
   it("creates a CLI user managed policy with all six required Sids", () => {
@@ -402,6 +406,7 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
       () =>
         new HordeWorker(stack, "Horde", {
           projectSlug: "test",
+          repo: "github.com/example/test",
           workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
           ecrRepository: repo,
           secrets: {
@@ -518,6 +523,7 @@ describe("HordeWorker status-sync (5fh.12/13/14)", () => {
     const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
     new HordeWorker(stack, "Horde", {
       projectSlug: "test",
+      repo: "github.com/example/test",
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {

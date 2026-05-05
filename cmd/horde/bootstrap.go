@@ -84,7 +84,7 @@ func bootstrapInitCmd() *cli.Command {
 				return err
 			}
 			merged := config.MergeSecrets(projCfg.Secrets)
-			rendered, err := bootstrap.Render(slug, merged.ExtraAWSSecretNames())
+			rendered, err := bootstrap.Render(slug, repo, merged.ExtraAWSSecretNames())
 			if err != nil {
 				return err
 			}

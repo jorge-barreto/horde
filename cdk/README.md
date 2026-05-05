@@ -28,6 +28,7 @@ const repo = new ecr.Repository(stack, "WorkerImage", {
 
 new HordeWorker(stack, "Horde", {
   projectSlug: "my-org-my-repo",
+  repo: "github.com/my-org/my-repo",
   workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
   ecrRepository: repo,
   secrets: {
@@ -38,6 +39,12 @@ new HordeWorker(stack, "Horde", {
   },
 });
 ```
+
+`repo` is the canonical repository identifier in `host/path` form (no scheme,
+no trailing slash). The horde CLI reads it from SSM and uses it verbatim when
+writing or querying run records, so every CI runner and dev box launching
+against this stack writes to the same `by-repo` bucket — no drift from local
+git remote variations (with vs. without `.git`, https vs. ssh).
 
 ## Development
 

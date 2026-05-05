@@ -40,6 +40,18 @@ export interface HordeWorkerProps {
   readonly projectSlug: string;
 
   /**
+   * Canonical repository identifier for runs in this deployment, in
+   * `host/path` form (no scheme, no userinfo, no trailing slash). Examples:
+   * `github.com/example/myproj`, `gitlab.com/team/svc`. Whatever you set
+   * here becomes the canonical value: every horde CLI invocation against
+   * this stack reads it from SSM and uses it verbatim when writing or
+   * querying run records on the by-repo GSI, so all run history shares one
+   * bucket regardless of how individual launchers' git remotes are configured
+   * (e.g. with or without `.git` suffix, https vs ssh).
+   */
+  readonly repo: string;
+
+  /**
    * Container image to run as the worker task. Typically
    * `ecs.ContainerImage.fromEcrRepository(repo, "latest")`.
    */

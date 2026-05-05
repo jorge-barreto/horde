@@ -162,7 +162,7 @@ kill some runs before launching more.`,
 				return fmt.Errorf("--workflow %q is invalid: must not contain '/', '\\', or '..'", workflow)
 			}
 
-			prov, st, maxConcurrent, provName, awsCfg, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, maxConcurrent, provName, awsCfg, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -195,7 +195,7 @@ kill some runs before launching more.`,
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			repo, err := config.RepoURL(cwd)
+			repo, err := resolveCanonicalRepo(hordeCfg, cwd)
 			if err != nil {
 				return err
 			}
@@ -736,7 +736,7 @@ include completed, failed, and killed runs.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			all := cmd.Bool("all")
 
-			prov, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -752,7 +752,7 @@ include completed, failed, and killed runs.`,
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			repo, err := config.RepoURL(cwd)
+			repo, err := resolveCanonicalRepo(hordeCfg, cwd)
 			if err != nil {
 				return err
 			}
@@ -820,7 +820,7 @@ directories (all code changes will be lost).`,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			prov, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
 				return err
 			}
@@ -875,7 +875,7 @@ directories (all code changes will be lost).`,
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
-			repo, err := config.RepoURL(cwd)
+			repo, err := resolveCanonicalRepo(hordeCfg, cwd)
 			if err != nil {
 				return err
 			}
@@ -1289,13 +1289,27 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 	}
 }
 
+// resolveCanonicalRepo returns the canonical repository identifier used to
+// scope run records. On aws-ecs the value comes from SSM (cfg.Repo), so every
+// CLI invocation against the same deployment writes and queries the same
+// string regardless of the local git remote. Docker has no SSM analog, so
+// it falls back to deriving from the local git remote — fine in practice
+// because the docker provider is single-user.
+func resolveCanonicalRepo(cfg *config.HordeConfig, cwd string) (string, error) {
+	if cfg != nil && cfg.Repo != "" {
+		return cfg.Repo, nil
+	}
+	return config.RepoURL(cwd)
+}
+
 // initProviderAndStore creates the Provider and Store based on the --provider flag.
 // Selection rule: "docker" → DockerProvider + SQLite; "aws-ecs" → ECS + DynamoDB;
 // "" → auto-detect via SSM. The returned *aws.Config is non-nil for aws-ecs so
 // callers can reuse the loaded config for STS / SDK calls without a duplicate
-// awscfg.Load round-trip.  Returns a cleanup function that must be deferred to
-// release store resources.
-func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, string, *aws.Config, func(), error) {
+// awscfg.Load round-trip. The returned *config.HordeConfig is also non-nil for
+// aws-ecs so callers can read deployment-scoped values (e.g. cfg.Repo). Returns
+// a cleanup function that must be deferred to release store resources.
+func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, string, *aws.Config, *config.HordeConfig, func(), error) {
 	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 }
 

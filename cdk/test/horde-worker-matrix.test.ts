@@ -25,6 +25,7 @@ function buildStack(opts: MatrixOpts): { stack: Stack; template: Template } {
   const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
   const props: HordeWorkerProps = {
     projectSlug: "test",
+    repo: "github.com/example/test",
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {

@@ -125,9 +125,15 @@ type HordeConfig struct {
 	// e.g. "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj".
 	// Populated by the bootstrap CloudFormation stack and consumed by
 	// `horde push` to discover where to push the worker image.
-	EcrRepoURI            string   `json:"ecr_repo_uri"`
-	MaxConcurrent         int      `json:"max_concurrent"`
-	DefaultTimeoutMinutes int      `json:"default_timeout_minutes"`
+	EcrRepoURI string `json:"ecr_repo_uri"`
+	// Repo is the canonical repository identifier for runs in this deployment,
+	// in NormalizeRepoURL form ("host/path", no scheme, no userinfo, no
+	// trailing slash). Every CLI invocation that writes or queries the runs
+	// table uses this exact string, so all run records share one bucket on
+	// the by-repo GSI regardless of how the local git remote is configured.
+	Repo                  string `json:"repo"`
+	MaxConcurrent         int    `json:"max_concurrent"`
+	DefaultTimeoutMinutes int    `json:"default_timeout_minutes"`
 }
 
 // Validate checks that all required fields are present and valid.
@@ -159,6 +165,9 @@ func (c *HordeConfig) Validate() error {
 	}
 	if c.EcrRepoURI == "" {
 		missing = append(missing, "ecr_repo_uri")
+	}
+	if c.Repo == "" {
+		missing = append(missing, "repo")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("validating horde config: missing required fields: %s", strings.Join(missing, ", "))

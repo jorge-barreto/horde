@@ -15,6 +15,12 @@ import { HordeWorker } from "@horde.io/cdk";
 //   git@github.com:acme/widgets.git  -> "acme-widgets"
 const SLUG = process.env.HORDE_PROJECT_SLUG ?? "acme-widgets";
 
+// REPO is the canonical repository identifier ("host/path" form, no scheme,
+// no trailing slash). Becomes the SSM `repo` value every horde CLI invocation
+// reads so all run records share one bucket on the by-repo GSI regardless of
+// how individual launchers' git remotes are configured.
+const REPO = process.env.HORDE_REPO ?? "github.com/acme/widgets";
+
 const app = new cdk.App();
 const stack = new cdk.Stack(app, "HordeWorkerStack", {
   stackName: `horde-${SLUG}`,
@@ -56,6 +62,7 @@ const gitSecret = new secretsmanager.Secret(stack, "GitToken", {
 
 const worker = new HordeWorker(stack, "Worker", {
   projectSlug: SLUG,
+  repo: REPO,
   ecrRepository: repo,
   workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
   secrets: {

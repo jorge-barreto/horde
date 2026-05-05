@@ -495,7 +495,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
               {
                 "Ref": "AWS::URLSuffix",
               },
-              "/horde-test","max_concurrent":5,"default_timeout_minutes":1440}",
+              "/horde-test","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
             ],
           ],
         },

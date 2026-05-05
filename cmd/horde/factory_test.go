@@ -45,7 +45,7 @@ func (f *fakeSSMClient) GetParameter(_ context.Context, _ *ssm.GetParameterInput
 }
 
 func validSSMJSON() string {
-	return `{"cluster_arn":"arn:aws:ecs:us-east-1:123456789012:cluster/horde","task_definition_arn":"arn:aws:ecs:us-east-1:123456789012:task-definition/horde-worker:1","subnets":["subnet-abc","subnet-def"],"security_group":"sg-123","log_group":"/ecs/horde-worker","log_stream_prefix":"ecs","artifacts_bucket":"my-horde-artifacts","runs_table":"horde-runs","ecr_repo_uri":"123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj","max_concurrent":5,"default_timeout_minutes":1440}`
+	return `{"cluster_arn":"arn:aws:ecs:us-east-1:123456789012:cluster/horde","task_definition_arn":"arn:aws:ecs:us-east-1:123456789012:task-definition/horde-worker:1","subnets":["subnet-abc","subnet-def"],"security_group":"sg-123","log_group":"/ecs/horde-worker","log_stream_prefix":"ecs","artifacts_bucket":"my-horde-artifacts","runs_table":"horde-runs","ecr_repo_uri":"123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj","repo":"github.com/example/myproj","max_concurrent":5,"default_timeout_minutes":1440}`
 }
 
 func TestInitProviderAndStore(t *testing.T) {
@@ -170,7 +170,7 @@ func TestInitProviderAndStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			prov, st, maxConcurrent, gotProvName, _, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
+			prov, st, maxConcurrent, gotProvName, _, _, cleanup, err := initProviderAndStoreWith(context.Background(), tc.provName, "", tc.deps)
 
 			if tc.wantErr {
 				if err == nil {
@@ -306,7 +306,7 @@ func TestAutoDetect_HintBlocksSeparatedByBlankLine(t *testing.T) {
 				}
 			},
 		}
-		_, _, _, _, _, _, err := initProviderAndStoreWith(context.Background(), "", "", deps)
+		_, _, _, _, _, _, _, err := initProviderAndStoreWith(context.Background(), "", "", deps)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -326,7 +326,7 @@ func TestAutoDetect_HintBlocksSeparatedByBlankLine(t *testing.T) {
 				return aws.Config{}, fmt.Errorf("no AWS credentials")
 			},
 		}
-		_, _, _, _, _, _, err := initProviderAndStoreWith(context.Background(), "", "", deps)
+		_, _, _, _, _, _, _, err := initProviderAndStoreWith(context.Background(), "", "", deps)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

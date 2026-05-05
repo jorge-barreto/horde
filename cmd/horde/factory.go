@@ -130,7 +130,7 @@ func initFromRunIDWith(ctx context.Context, provFlag, profile, runID string, dep
 	}
 
 	// Explicit provider flag, or run not found in SQLite.
-	prov, st, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
+	prov, st, _, _, _, _, cleanup, err := initProviderAndStoreWith(ctx, provFlag, profile, deps)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -157,16 +157,19 @@ const defaultMaxConcurrentDocker = 100
 // *aws.Config is non-nil for aws-ecs (and auto-detect that lands on aws-ecs)
 // so callers can reuse the loaded config for downstream STS / SDK calls
 // (e.g. resolveLaunchedBy) instead of triggering a fresh awscfg.Load round
-// trip. nil for docker.
-func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, int, string, *aws.Config, func(), error) {
+// trip. nil for docker. The returned *config.HordeConfig follows the same
+// convention: populated for aws-ecs so callers can read deployment-scoped
+// values like the canonical repo string from SSM, nil for docker (which has
+// no SSM analog).
+func initProviderAndStoreWith(ctx context.Context, name, profile string, deps factoryDeps) (provider.Provider, store.Store, int, string, *aws.Config, *config.HordeConfig, func(), error) {
 	switch name {
 	case "docker":
 		prov := provider.NewDockerProvider()
 		st, cleanup, err := deps.openStore("docker")
 		if err != nil {
-			return nil, nil, 0, "", nil, nil, err
+			return nil, nil, 0, "", nil, nil, nil, err
 		}
-		return prov, st, defaultMaxConcurrentDocker, "docker", nil, cleanup, nil
+		return prov, st, defaultMaxConcurrentDocker, "docker", nil, nil, cleanup, nil
 	case "aws-ecs":
 		// Explicit aws-ecs: no docker fallback hint — the user asked
 		// for ECS, so a docker hint would be misleading.
@@ -176,7 +179,7 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 		// local mode" hint so docker-only users have an obvious recovery.
 		return initECSProviderAndStore(ctx, profile, deps, "auto-detecting provider", true)
 	default:
-		return nil, nil, 0, "", nil, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
+		return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("unsupported provider %q: valid values are \"docker\" and \"aws-ecs\"", name)
 	}
 }
 
@@ -187,7 +190,7 @@ func initProviderAndStoreWith(ctx context.Context, name, profile string, deps fa
 // fallback hint to every error (used for the auto-detect path so docker-only
 // users see the recovery; suppressed for explicit aws-ecs which would be
 // misleading).
-func initECSProviderAndStore(ctx context.Context, profile string, deps factoryDeps, errPrefix string, withDockerHint bool) (provider.Provider, store.Store, int, string, *aws.Config, func(), error) {
+func initECSProviderAndStore(ctx context.Context, profile string, deps factoryDeps, errPrefix string, withDockerHint bool) (provider.Provider, store.Store, int, string, *aws.Config, *config.HordeConfig, func(), error) {
 	hint := ""
 	if withDockerHint {
 		hint = "\n\nhint: use --provider docker for local mode"
@@ -195,13 +198,13 @@ func initECSProviderAndStore(ctx context.Context, profile string, deps factoryDe
 
 	awsCfg, err := deps.loadAWSConfig(ctx, profile)
 	if err != nil {
-		return nil, nil, 0, "", nil, nil, fmt.Errorf("%s: %w%s", errPrefix, err, hint)
+		return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("%s: %w%s", errPrefix, err, hint)
 	}
 	ssmClient := deps.newSSMClient(awsCfg)
 	hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
 	if err != nil {
 		// Diagnostic returns a formatted string (not an error), so use %s.
-		return nil, nil, 0, "", nil, nil, fmt.Errorf("%s: %s%s", errPrefix, config.Diagnostic(err), hint)
+		return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("%s: %s%s", errPrefix, config.Diagnostic(err), hint)
 	}
 	st, err := store.NewDynamoStore(ctx, awsCfg, hordeCfg.RunsTable)
 	if err != nil {
@@ -209,10 +212,10 @@ func initECSProviderAndStore(ctx context.Context, profile string, deps factoryDe
 		// the explicit-aws-ecs path; the auto-detect path keeps its own
 		// errPrefix and tacks on the hint.
 		if !withDockerHint {
-			return nil, nil, 0, "", nil, nil, fmt.Errorf("initializing aws-ecs store: %w", err)
+			return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("initializing aws-ecs store: %w", err)
 		}
-		return nil, nil, 0, "", nil, nil, fmt.Errorf("%s: %w%s", errPrefix, err, hint)
+		return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("%s: %w%s", errPrefix, err, hint)
 	}
 	prov := provider.NewECSProvider(ecs.NewFromConfig(awsCfg), cloudwatchlogs.NewFromConfig(awsCfg), s3.NewFromConfig(awsCfg), hordeCfg)
-	return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", &awsCfg, func() {}, nil
+	return prov, st, hordeCfg.MaxConcurrent, "aws-ecs", &awsCfg, hordeCfg, func() {}, nil
 }

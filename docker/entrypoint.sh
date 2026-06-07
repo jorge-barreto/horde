@@ -27,11 +27,21 @@ git config --global --add safe.directory /workspace
 # .git — so `horde retry` resumes exactly where the run left off, the same way
 # the on-host workspace persists for the Docker provider. If S3 has a prior
 # workspace, this populates /workspace/.git and the clone below is skipped.
-# Non-fatal: a missing prior workspace (first run) is a no-op sync.
 if [ -n "${ARTIFACTS_BUCKET:-}" ] && [ ! -d /workspace/.git ]; then
     mkdir -p /workspace
-    aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/workspace/" /workspace/ \
-        || echo "WARNING: workspace restore failed (continuing)" >&2
+    WS_PREFIX="s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/workspace/"
+    # Does a prior workspace exist in S3? (resume vs. first run)
+    if aws s3 ls "$WS_PREFIX" >/dev/null 2>&1 && [ -n "$(aws s3 ls "$WS_PREFIX")" ]; then
+        # Resume: restore is REQUIRED. A transient restore failure must NOT
+        # fall through to a fresh clone — the terminate-path `s3 sync --delete`
+        # would then mirror the clone over the prefix and destroy the prior
+        # run's committed+uncommitted work irreversibly. Fail loudly instead.
+        if ! aws s3 sync "$WS_PREFIX" /workspace/; then
+            echo "ERROR: workspace restore failed for resume; refusing to continue and overwrite S3 state" >&2
+            exit 3
+        fi
+    fi
+    # First run (empty prefix): no-op; fall through to the clone below.
 fi
 
 if [ -d /workspace/.git ]; then
@@ -113,11 +123,20 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     # `wait` returns the moment the signal arrives (exit 143) and we would
     # race orc's save — uploading a half-written session/snapshot. The ECS
     # container stopTimeout (120s) gives orc room to finish before SIGKILL.
-    term_handler() { kill -TERM "$ORC_PID" 2>/dev/null; wait "$ORC_PID"; }
+    #
+    # Capture orc's TRUE exit code, not the interrupted-wait's 143: when a
+    # signal interrupts the foreground `wait`, $? is 143, but the trap's
+    # re-wait sees orc's real exit (e.g. 5 on signal). Record which path ran
+    # via TERMED and grab each wait's $? immediately. Getting this wrong maps
+    # a spot interruption to `failed` instead of `killed`/recoverable on ECS.
+    TERMED=0
+    ORC_RC=0
+    term_handler() { TERMED=1; kill -TERM "$ORC_PID" 2>/dev/null; wait "$ORC_PID"; ORC_RC=$?; }
     trap term_handler TERM INT
     wait "$ORC_PID"
-    EXIT_CODE=$?
+    BARE_RC=$?
     trap - TERM INT
+    if [ "$TERMED" = 1 ]; then EXIT_CODE=$ORC_RC; else EXIT_CODE=$BARE_RC; fi
     wait "$TEE_PID" 2>/dev/null  # let tee drain orc's output to stdout+log
     rm -f "$ORC_FIFO"
 

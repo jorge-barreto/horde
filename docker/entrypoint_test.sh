@@ -199,6 +199,41 @@ t10_exit_code_propagated() {
     fi
 }
 
+# -- Test 11: SIGTERM mid-run -> orc's REAL exit code, not the
+# interrupted-wait's 143 (ECS path). Regression guard for the spot seam: a
+# spot interruption must map to orc's exit (e.g. 5/killed), not failed.
+t11_sigterm_exit_code() {
+    local tmp
+    tmp=$(mktemp -d)
+    setup_stubs "$tmp"
+    # Replace the orc stub with one that traps TERM and exits 5 after a sleep.
+    cat > "$tmp/bin/orc" <<'EOF'
+#!/bin/bash
+trap 'echo "orc $* (term)" >> "$STUB_LOG"; exit 5' TERM
+echo "orc $*" >> "$STUB_LOG"
+sleep 30
+EOF
+    chmod +x "$tmp/bin/orc"
+    export STUB_LOG="$tmp/log"; : > "$STUB_LOG"
+    mkdir -p "$tmp/workspace/.git"
+    local patched="$tmp/entrypoint-patched.sh"
+    sed "s|cd /workspace|cd $tmp/workspace|g; s|/workspace/\\.git|$tmp/workspace/.git|g; s|git config --global --add safe.directory /workspace|git config --global --add safe.directory $tmp/workspace|g" "$ENTRYPOINT" > "$patched"
+    PATH="$tmp/bin:$PATH" REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok \
+        ARTIFACTS_BUCKET=b RUN_ID=rid \
+        bash "$patched" >"$tmp/out" 2>"$tmp/err" &
+    local pid=$!
+    # Give orc a moment to start, then signal the entrypoint.
+    sleep 1
+    kill -TERM "$pid" 2>/dev/null
+    wait "$pid"
+    local rc=$?
+    if [ "$rc" -eq 5 ]; then
+        pass "SIGTERM yields orc's real exit code (5), not 143"
+    else
+        fail "SIGTERM exit code: rc=$rc, want 5; err=$(cat "$tmp/err")"
+    fi
+}
+
 t1_missing_repo_url
 t2_missing_ticket
 t3_missing_git_token
@@ -209,5 +244,6 @@ t7_workflow_set_passes_flag
 t8_no_bucket_no_aws
 t9_bucket_triggers_uploads
 t10_exit_code_propagated
+t11_sigterm_exit_code
 
 exit "$FAIL"

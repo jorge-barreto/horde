@@ -323,8 +323,8 @@ stopped first.
 
 On Docker the preserved on-host workspace is reused in place. On ECS a
 fresh Fargate task is launched with the same run ID: the worker restores
-the agent session (~/.claude) from S3, recovers committed-but-unpushed
-git work from the run's snapshot ref, and re-enters orc.
+the agent session (~/.claude) and the full working tree (/workspace,
+including committed and uncommitted changes) from S3, then re-enters orc.
 
 By default, --resume is passed to orc so it preserves artifacts and
 resumes any interrupted agent session. Override with explicit orc args:
@@ -388,9 +388,9 @@ resumes any interrupted agent session. Override with explicit orc args:
 			// Relaunch with the preserved workspace. On Docker the workspace
 			// is an on-host bind-mount dir that orc re-enters in place, so it
 			// must exist with a .git. On ECS there is no local workspace: the
-			// worker re-clones the repo (or fetches the snapshot ref) and
-			// restores ~/.claude from S3, keyed by RUN_ID — so the local
-			// workspace guard and the on-host exit-code marker are Docker-only.
+			// worker restores the working tree (/workspace) and ~/.claude from
+			// S3, keyed by RUN_ID — so the local workspace guard and the
+			// on-host exit-code marker are Docker-only.
 			if run.Provider == config.ProviderDocker {
 				workspaceDir := provider.WorkspacePath(homeDir, run.ID)
 				if _, err := os.Stat(filepath.Join(workspaceDir, ".git")); err != nil {
@@ -738,11 +738,11 @@ func listCmd() *cli.Command {
 		Usage: "List runs for the current repo",
 		Description: `Lists runs scoped to the current repo (inferred from git remote).
 By default shows only active runs (pending/running). Use --all to
-include completed, failed, and killed runs.`,
+include terminal runs (success, failed, killed, timed_out, rate_limited).`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "all",
-				Usage: "Include completed, failed, and killed runs",
+				Usage: "Include terminal runs (success/failed/killed/timed_out/rate_limited)",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {

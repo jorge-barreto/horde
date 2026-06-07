@@ -36,7 +36,23 @@ else
         echo "ERROR: git fetch failed" >&2
         exit 3
     fi
-    if [ -n "${BRANCH:-}" ]; then
+
+    # Resume: if a prior run of THIS run-id snapshotted its committed working
+    # tree to refs/horde/snapshot/<run-id> (see the terminate path below),
+    # recover it so committed-but-unpushed work survives a task stop (e.g. a
+    # phase timeout or a spot interruption). The snapshot wins over the
+    # branch checkout. Workflow-agnostic and non-fatal — if the ref is absent
+    # (first run) or the fetch fails, fall through to the normal checkout.
+    SNAPSHOT_REF="refs/horde/snapshot/${RUN_ID}"
+    if [ -n "${RUN_ID:-}" ] && \
+       git fetch origin "${SNAPSHOT_REF}:${SNAPSHOT_REF}" 2>/dev/null && \
+       git rev-parse --verify --quiet "${SNAPSHOT_REF}" >/dev/null; then
+        echo "Recovering snapshot ${SNAPSHOT_REF}" >&2
+        if ! git checkout -f "${SNAPSHOT_REF}"; then
+            echo "ERROR: git checkout of snapshot ref failed" >&2
+            exit 3
+        fi
+    elif [ -n "${BRANCH:-}" ]; then
         if ! git checkout "$BRANCH"; then
             echo "ERROR: git checkout failed for branch ${BRANCH}" >&2
             exit 3
@@ -69,15 +85,50 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/" /home/horde/.claude/ \
         || echo "WARNING: session restore failed (continuing)" >&2
 
-    # Run orc in the background so a SIGTERM/SIGINT (ECS StopTask) can be
-    # forwarded to it; the upload block below must still run so artifacts
-    # and session state aren't lost when the task is stopped mid-run.
-    eval "$ORC_CMD" &
+    # Run orc in the background so a SIGTERM/SIGINT (ECS StopTask, incl. a
+    # spot interruption) can be forwarded to it; the upload block below must
+    # still run so artifacts, session state, and the snapshot aren't lost
+    # when the task is stopped mid-run. Tee orc's output to a log so we can
+    # parse a rate-limit reset time after it exits (orc emits a line like
+    # "usage limit reached, resets at HH:MM" on exit code 4).
+    ORC_LOG=/tmp/orc-output.log
+    # `eval "exec $ORC_CMD"` makes the backgrounded subshell BECOME orc, so
+    # ORC_PID is orc's real PID and a forwarded SIGTERM reaches orc directly.
+    # (A plain `eval "$ORC_CMD" &` leaves $! pointing at the eval wrapper, so
+    # the signal never reaches orc and its interrupt-save never runs.)
+    { eval "exec $ORC_CMD"; } > >(tee "$ORC_LOG") 2>&1 &
     ORC_PID=$!
-    trap 'kill -TERM "$ORC_PID" 2>/dev/null' TERM INT
+    # On SIGTERM (ECS StopTask, incl. a spot interruption) forward it to orc
+    # AND re-wait so orc finishes saving its interrupted session before the
+    # upload/snapshot block below runs. Without the second wait, the initial
+    # `wait` returns the moment the signal arrives (exit 143) and we would
+    # race orc's save — uploading a half-written session/snapshot. The ECS
+    # container stopTimeout (120s) gives orc room to finish before SIGKILL.
+    term_handler() { kill -TERM "$ORC_PID" 2>/dev/null; wait "$ORC_PID"; }
+    trap term_handler TERM INT
     wait "$ORC_PID"
     EXIT_CODE=$?
     trap - TERM INT
+
+    # Snapshot committed-but-unpushed work to a per-run ref so a future
+    # `horde retry` recovers the working tree (#32). Workflow-agnostic: it
+    # pushes whatever HEAD points at; it does NOT assume the workflow created
+    # a branch or ran a push phase. Force-push so a re-snapshot of the same
+    # run overwrites the prior one. Non-fatal.
+    if [ -n "${RUN_ID:-}" ] && git -C /workspace rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+        git -C /workspace push --force origin "HEAD:refs/horde/snapshot/${RUN_ID}" \
+            || echo "WARNING: snapshot push failed (continuing)" >&2
+    fi
+
+    # Record a machine-readable stop reason so the store reflects WHY the run
+    # ended without re-deriving it from logs (#31). The status Lambda records
+    # the ECS-level stopCode/stoppedReason; this captures the orc-level
+    # rate-limit reset time, which only the run's own output carries.
+    STOP_REASON_FILE=/tmp/stop-reason.json
+    RESETS_AT=$(grep -oiE 'resets? at[: ]+[0-9]{1,2}:[0-9]{2}([ap]m)?' "$ORC_LOG" 2>/dev/null | tail -1 | grep -oiE '[0-9]{1,2}:[0-9]{2}([ap]m)?' || true)
+    printf '{"exit_code":%d,"resets_at":"%s"}\n' "$EXIT_CODE" "${RESETS_AT:-}" > "$STOP_REASON_FILE"
+    aws s3 cp "$STOP_REASON_FILE" "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/stop-reason.json" \
+        || echo "WARNING: stop-reason upload failed" >&2
 
     # Always persist session state, even on failure, so retry can resume.
     if [ -d /home/horde/.claude ]; then

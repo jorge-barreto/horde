@@ -1,0 +1,25 @@
+name: horde-test
+ticket-pattern: 'TEST-[\w-]+'
+# E2E fixture for ECS resume (issue #35). The worker clones the horde repo
+# and runs this workflow, so it exercises the real ~/.claude S3 round-trip.
+#
+# Self-verifying: on the FIRST run the marker does not exist, so the phase
+# writes it under ~/.claude and sleeps long enough to be killed mid-run
+# (-> status "killed"). On RESUME the worker restores ~/.claude from S3, so
+# the marker is already present and the phase exits 0 immediately
+# (-> status "success"). Success is therefore reachable ONLY if the agent
+# session survived the kill + resume.
+phases:
+  - name: session-survives
+    type: script
+    run: |
+      MARKER="$HOME/.claude/projects/horde-resume/marker"
+      if [ -f "$MARKER" ]; then
+        echo "RESUME-MARKER-SURVIVED: $(cat "$MARKER")"
+        exit 0
+      fi
+      mkdir -p "$(dirname "$MARKER")"
+      echo "hello-from-first-run" > "$MARKER"
+      echo "RESUME-MARKER-WRITTEN waiting to be killed"
+      sleep 600
+    timeout: 15

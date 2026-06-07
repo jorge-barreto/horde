@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	dyntypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/jorge-barreto/horde/internal/awscfg"
@@ -32,16 +33,32 @@ const ecsHarnessRepoURL = "https://github.com/jorge-barreto/horde.git"
 // ecsDriver implements instanceDriver against the deployed ECS stack.
 // Instance state lives in ECS (Fargate tasks) and DynamoDB (run rows).
 type ecsDriver struct {
-	t           *testing.T
-	ctx         context.Context
-	dynamo      *dynamodb.Client
-	ecs         *ecs.Client
-	cwLogs      *cloudwatchlogs.Client
-	cluster     string // cluster ARN or name
-	runsTable   string
-	logGroup    string
-	logPrefix   string // LogStreamPrefix (typically "ecs")
-	runsToClean []string
+	t            *testing.T
+	ctx          context.Context
+	dynamo       *dynamodb.Client
+	ecs          *ecs.Client
+	cwLogs       *cloudwatchlogs.Client
+	s3           *s3.Client
+	cluster      string // cluster ARN or name
+	runsTable    string
+	logGroup     string
+	logPrefix    string // LogStreamPrefix (typically "ecs")
+	artifactsBkt string
+	runsToClean  []string
+}
+
+// SessionObjectCount returns how many objects exist under the run's S3
+// sessions prefix — used to assert the agent session was uploaded.
+func (d *ecsDriver) SessionObjectCount(runID string) int {
+	d.t.Helper()
+	out, err := d.s3.ListObjectsV2(d.ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(d.artifactsBkt),
+		Prefix: aws.String("horde-runs/" + runID + "/sessions/"),
+	})
+	if err != nil {
+		d.t.Fatalf("ecsDriver.SessionObjectCount: ListObjectsV2: %v", err)
+	}
+	return len(out.Contents)
 }
 
 // InstanceID queries DynamoDB for the ECS task ARN recorded for a run.
@@ -192,6 +209,34 @@ func (d *ecsDriver) StoreExitCode(runID string) *int {
 	return &n
 }
 
+// StoreMetadata reads a single key from the run row's "metadata" map
+// attribute in DynamoDB. Returns "" if the row, the map, or the key is
+// absent. Used to assert the status Lambda recorded stop_code/stop_reason.
+func (d *ecsDriver) StoreMetadata(runID, key string) string {
+	d.t.Helper()
+	out, err := d.dynamo.GetItem(d.ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(d.runsTable),
+		Key: map[string]dyntypes.AttributeValue{
+			"id": &dyntypes.AttributeValueMemberS{Value: runID},
+		},
+	})
+	if err != nil {
+		d.t.Fatalf("ecsDriver.StoreMetadata: dynamo GetItem(%s, id=%s): %v", d.runsTable, runID, err)
+	}
+	if out.Item == nil {
+		return ""
+	}
+	m, ok := out.Item["metadata"].(*dyntypes.AttributeValueMemberM)
+	if !ok {
+		return ""
+	}
+	v, ok := m.Value[key].(*dyntypes.AttributeValueMemberS)
+	if !ok {
+		return ""
+	}
+	return v.Value
+}
+
 // TearDown removes any DynamoDB run rows the harness tracked during the test.
 // Best-effort: logs on failure rather than failing the cleanup.
 func (d *ecsDriver) TearDown() {
@@ -332,15 +377,17 @@ func newECSHarnessForRepoWithSSM(t *testing.T, repoURL, ssmPathOverride string) 
 	}
 
 	driver := &ecsDriver{
-		t:         t,
-		ctx:       ctx,
-		dynamo:    dynamodb.NewFromConfig(awsCfg),
-		ecs:       ecs.NewFromConfig(awsCfg),
-		cwLogs:    cloudwatchlogs.NewFromConfig(awsCfg),
-		cluster:   hc.ClusterARN,
-		runsTable: hc.RunsTable,
-		logGroup:  hc.LogGroup,
-		logPrefix: hc.LogStreamPrefix,
+		t:            t,
+		ctx:          ctx,
+		dynamo:       dynamodb.NewFromConfig(awsCfg),
+		ecs:          ecs.NewFromConfig(awsCfg),
+		cwLogs:       cloudwatchlogs.NewFromConfig(awsCfg),
+		s3:           s3.NewFromConfig(awsCfg),
+		cluster:      hc.ClusterARN,
+		runsTable:    hc.RunsTable,
+		logGroup:     hc.LogGroup,
+		logPrefix:    hc.LogStreamPrefix,
+		artifactsBkt: hc.ArtifactsBucket,
 	}
 
 	h := &harness{

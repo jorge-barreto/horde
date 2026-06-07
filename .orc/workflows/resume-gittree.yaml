@@ -1,0 +1,30 @@
+name: horde-test
+ticket-pattern: 'TEST-[\w-]+'
+# E2E fixture for ECS git-tree recovery (issue #35 / #32). Proves that
+# committed-but-unpushed work survives a task stop via the snapshot ref
+# refs/horde/snapshot/<run-id> that the entrypoint pushes on terminate and
+# checks out on resume.
+#
+# Self-verifying: on the FIRST run the sentinel commit does not exist, so the
+# phase commits a file to the working tree and sleeps to be killed
+# (-> "killed"; entrypoint pushes HEAD to the snapshot ref). On RESUME the
+# entrypoint recovers the snapshot ref, so the committed file is present and
+# the phase exits 0 (-> "success"). Success is reachable ONLY if the
+# committed git work survived the kill + resume.
+phases:
+  - name: gittree-survives
+    type: script
+    run: |
+      SENTINEL=horde-resume-gittree.txt
+      if git -C /workspace log --oneline -1 --format=%s 2>/dev/null | grep -q "horde-resume-gittree-commit"; then
+        echo "RESUME-GITTREE-SURVIVED: $(git -C /workspace show --quiet --format=%s HEAD)"
+        exit 0
+      fi
+      git -C /workspace config user.email e2e@horde.test
+      git -C /workspace config user.name horde-e2e
+      echo "committed before interruption" > "/workspace/$SENTINEL"
+      git -C /workspace add "$SENTINEL"
+      git -C /workspace commit -m "horde-resume-gittree-commit"
+      echo "RESUME-GITTREE-COMMITTED waiting to be killed"
+      sleep 600
+    timeout: 15

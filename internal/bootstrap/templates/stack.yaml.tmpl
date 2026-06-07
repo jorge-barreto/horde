@@ -322,6 +322,10 @@ Resources:
           Image:
             Fn::Sub: "${EcrRepository.RepositoryUri}:latest"
           Essential: true
+          # Give the entrypoint time to forward SIGTERM to orc, let orc save
+          # its interrupted session, and push the snapshot ref + sync S3
+          # before ECS sends SIGKILL. Matches the CDK construct (120s).
+          StopTimeout: 120
           Environment: []
           Secrets:
             - Name: CLAUDE_CODE_OAUTH_TOKEN
@@ -624,7 +628,7 @@ Resources:
           ddb = boto3.client("dynamodb")
           s3 = boto3.client("s3")
 
-          TERMINAL = {"success", "failed", "killed"}
+          TERMINAL = {"success", "failed", "killed", "timed_out", "rate_limited"}
 
 
           def find_run_id(task_arn):
@@ -707,9 +711,17 @@ Resources:
               exit_code = None
               if containers:
                   exit_code = containers[0].get("exitCode")
-              status = "success" if exit_code == 0 else "failed"
+              # Mirrors internal/provider/docker.go::mapExitCode and the CDK
+              # status lambda (cdk/src/status-lambda/index.ts): orc exit 2 ->
+              # timed_out, 4 -> rate_limited, 5 -> killed (recoverable), 0 ->
+              # success, else failed. KEEP IN LOCKSTEP with the TS port.
+              status = {0: "success", 2: "timed_out", 4: "rate_limited", 5: "killed"}.get(
+                  exit_code, "failed"
+              )
 
               stopped_at = detail.get("stoppedAt")  # ISO-8601 string
+              stop_code = detail.get("stopCode")
+              stopped_reason = detail.get("stoppedReason")
               cost = fetch_total_cost(run_id)
 
               names = {"#s": "status", "#ec": "exit_code", "#ca": "completed_at"}
@@ -725,6 +737,23 @@ Resources:
                   names["#tc"] = "total_cost_usd"
                   values[":tc"] = {"N": str(cost)}
                   set_exprs.append("#tc = :tc")
+
+              # Record the ECS stop reason into the run's metadata map. Seed the
+              # map with if_not_exists BEFORE the nested writes — CreateRun omits
+              # an empty map, so a nested metadata.x write on a missing parent
+              # would raise ValidationException. Seed clause must come first.
+              if stop_code or stopped_reason:
+                  names["#m"] = "metadata"
+                  values[":emptymap"] = {"M": {}}
+                  set_exprs.append("#m = if_not_exists(#m, :emptymap)")
+                  if stop_code:
+                      names["#sc"] = "stop_code"
+                      values[":sc"] = {"S": str(stop_code)}
+                      set_exprs.append("#m.#sc = :sc")
+                  if stopped_reason:
+                      names["#sr"] = "stop_reason"
+                      values[":sr"] = {"S": str(stopped_reason)}
+                      set_exprs.append("#m.#sr = :sr")
 
               ddb.update_item(
                   TableName=RUNS_TABLE,

@@ -37,6 +37,8 @@ interface EcsDetail {
   taskArn?: string;
   lastStatus?: string;
   stoppedAt?: string;
+  stopCode?: string;
+  stoppedReason?: string;
   containers?: EcsContainer[];
   clusterArn?: string;
 }
@@ -126,7 +128,9 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(input.ExpressionAttributeValues?.[":s"]).toEqual({ S: "success" });
     expect(input.ExpressionAttributeValues?.[":ec"]).toEqual({ N: "0" });
     expect(input.ConditionExpression).toMatch(/attribute_not_exists\(#s\)/);
-    expect(input.ConditionExpression).toMatch(/NOT \(#s IN \(:success, :failed, :killed\)\)/);
+    expect(input.ConditionExpression).toMatch(
+      /NOT \(#s IN \(:success, :failed, :killed, :timed_out, :rate_limited\)\)/,
+    );
   });
 
   it("maps exitCode 5 to killed", async () => {
@@ -146,17 +150,86 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(r).toMatchObject({ updated: true, status: "killed", exitCode: 5 });
   });
 
-  it("maps any other non-zero exit to failed", async () => {
+  it("maps a generic non-zero exit (1) to failed", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-f" } }] });
     ddbMock.on(UpdateItemCommand).resolves({});
     s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
 
     const r = await handler(
-      event({ lastStatus: "STOPPED", taskArn: "arn:task/f", containers: [{ exitCode: 2 }] }),
+      event({ lastStatus: "STOPPED", taskArn: "arn:task/f", containers: [{ exitCode: 1 }] }),
       ctx,
       () => {},
     );
-    expect(r).toMatchObject({ updated: true, status: "failed", exitCode: 2 });
+    expect(r).toMatchObject({ updated: true, status: "failed", exitCode: 1 });
+  });
+
+  it("maps exitCode 2 to timed_out and 4 to rate_limited (recoverable)", async () => {
+    for (const [code, want] of [
+      [2, "timed_out"],
+      [4, "rate_limited"],
+    ] as const) {
+      ddbMock.reset();
+      ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: `run-${code}` } }] });
+      ddbMock.on(UpdateItemCommand).resolves({});
+      s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+      const r = await handler(
+        event({ lastStatus: "STOPPED", taskArn: `arn:task/${code}`, containers: [{ exitCode: code }] }),
+        ctx,
+        () => {},
+      );
+      expect(r).toMatchObject({ updated: true, status: want, exitCode: code });
+    }
+  });
+
+  it("records stopCode/stoppedReason into metadata, seeding the map first", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-spot" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/spot",
+        stopCode: "TerminationNotice",
+        stoppedReason: "Your Spot Task was interrupted",
+        containers: [{ exitCode: 5 }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    // Seed clause must precede the nested-path sets in the same expression.
+    const expr = input.UpdateExpression ?? "";
+    const seedIdx = expr.indexOf("#m = if_not_exists(#m, :emptymap)");
+    const scIdx = expr.indexOf("#m.#sc = :sc");
+    const srIdx = expr.indexOf("#m.#sr = :sr");
+    expect(seedIdx).toBeGreaterThanOrEqual(0);
+    expect(scIdx).toBeGreaterThan(seedIdx);
+    expect(srIdx).toBeGreaterThan(seedIdx);
+    expect(input.ExpressionAttributeNames?.["#m"]).toBe("metadata");
+    expect(input.ExpressionAttributeNames?.["#sc"]).toBe("stop_code");
+    expect(input.ExpressionAttributeNames?.["#sr"]).toBe("stop_reason");
+    expect(input.ExpressionAttributeValues?.[":sc"]).toEqual({ S: "TerminationNotice" });
+    expect(input.ExpressionAttributeValues?.[":sr"]).toEqual({
+      S: "Your Spot Task was interrupted",
+    });
+    expect(input.ExpressionAttributeValues?.[":emptymap"]).toEqual({ M: {} });
+  });
+
+  it("omits metadata writes when no stop reason is present", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-nostop" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    await handler(
+      event({ lastStatus: "STOPPED", taskArn: "arn:task/ns", containers: [{ exitCode: 0 }] }),
+      ctx,
+      () => {},
+    );
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.UpdateExpression).not.toContain("#m");
   });
 
   it("includes total_cost_usd from run-result.json when present", async () => {

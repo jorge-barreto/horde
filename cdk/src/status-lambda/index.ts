@@ -5,11 +5,16 @@
  * run-result.json in S3 (best-effort), and idempotently updates the
  * runs table row keyed by the task ARN in the `by-instance` GSI.
  *
- * Port of the Python lambda in .horde/cloudformation.yaml with one
- * intentional deviation: exit_code 5 maps to "killed" (matching
- * internal/provider/docker.go::resolveStoppedExitCode and the bead 5fh.13
- * specification), while the Python source only distinguishes 0 vs non-zero.
- * The TypeScript port is authoritative going forward.
+ * It also records the ECS stop reason (detail.stopCode / detail.stoppedReason)
+ * into the run's `metadata` map, so callers — and the planned spot
+ * auto-resume — can tell WHY a task stopped (e.g. stopCode "TerminationNotice"
+ * for a Fargate spot interruption) without re-deriving it from logs.
+ *
+ * The Python lambda in internal/bootstrap/templates/stack.yaml.tmpl is a
+ * transliteration of this handler and MUST be kept in lockstep — exit-code
+ * mapping (0=success, 2=timed_out, 4=rate_limited, 5=killed, else failed),
+ * the metadata stop-reason capture, and the terminal-state idempotency
+ * guard. The TypeScript port is authoritative going forward.
  */
 import type { EventBridgeEvent, Handler } from "aws-lambda";
 import {
@@ -40,6 +45,11 @@ interface EcsTaskStateChange {
   readonly taskArn?: string;
   readonly lastStatus?: string;
   readonly stoppedAt?: string;
+  // stopCode is the ECS-level reason the task stopped, e.g.
+  // "TerminationNotice" (spot interruption), "EssentialContainerExited",
+  // "TaskFailedToStart", "UserInitiated". stoppedReason is free text.
+  readonly stopCode?: string;
+  readonly stoppedReason?: string;
   readonly containers?: readonly EcsContainer[];
   readonly clusterArn?: string;
 }
@@ -97,10 +107,24 @@ async function fetchTotalCost(runId: string): Promise<number | null> {
   }
 }
 
-function mapStatus(exitCode: number | null): "success" | "failed" | "killed" {
-  if (exitCode === 0) return "success";
-  if (exitCode === 5) return "killed";
-  return "failed";
+type TerminalStatus = "success" | "failed" | "killed" | "timed_out" | "rate_limited";
+
+// Mirrors internal/provider/docker.go::mapExitCode. orc exit codes:
+// 0 success / 2 phase-timeout / 4 cost-or-rate-limit / 5 signal(killed) / else failed.
+// timed_out and rate_limited are terminal-but-recoverable.
+function mapStatus(exitCode: number | null): TerminalStatus {
+  switch (exitCode) {
+    case 0:
+      return "success";
+    case 2:
+      return "timed_out";
+    case 4:
+      return "rate_limited";
+    case 5:
+      return "killed";
+    default:
+      return "failed";
+  }
 }
 
 export const handler: Handler<
@@ -144,6 +168,8 @@ export const handler: Handler<
     ":success": { S: "success" },
     ":failed": { S: "failed" },
     ":killed": { S: "killed" },
+    ":timed_out": { S: "timed_out" },
+    ":rate_limited": { S: "rate_limited" },
   };
   const setExprs: string[] = ["#s = :s", "#ca = :ca"];
   if (exitCode !== null) {
@@ -157,6 +183,28 @@ export const handler: Handler<
     setExprs.push("#tc = :tc");
   }
 
+  // Record the ECS stop reason into the run's metadata map. The metadata
+  // attribute may not exist (CreateRun omits an empty map), so seed it with
+  // if_not_exists BEFORE the nested-path sets — a nested `metadata.x` write
+  // on a missing parent map throws ValidationException. The seed clause must
+  // come first in the same UpdateExpression. Only the document-path writes
+  // touch metadata, so existing keys (cluster_arn, log_group, …) are kept.
+  if (detail.stopCode || detail.stoppedReason) {
+    names["#m"] = "metadata";
+    values[":emptymap"] = { M: {} };
+    setExprs.push("#m = if_not_exists(#m, :emptymap)");
+    if (detail.stopCode) {
+      names["#sc"] = "stop_code";
+      values[":sc"] = { S: detail.stopCode };
+      setExprs.push("#m.#sc = :sc");
+    }
+    if (detail.stoppedReason) {
+      names["#sr"] = "stop_reason";
+      values[":sr"] = { S: detail.stoppedReason };
+      setExprs.push("#m.#sr = :sr");
+    }
+  }
+
   try {
     await ddb.send(
       new UpdateItemCommand({
@@ -164,7 +212,7 @@ export const handler: Handler<
         Key: { id: { S: runId } },
         UpdateExpression: "SET " + setExprs.join(", "),
         ConditionExpression:
-          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed))",
+          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited))",
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
       }),

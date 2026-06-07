@@ -555,11 +555,25 @@ func TestRender_StatusLambdaPython(t *testing.T) {
 		"by-instance",
 		"run-result.json",
 		"total_cost_usd",
-		`TERMINAL = {"success", "failed", "killed"}`,
+		`TERMINAL = {"success", "failed", "killed", "timed_out", "rate_limited"}`,
+		// Recoverable-status mapping must match the CDK/Go side.
+		`2: "timed_out"`,
+		`4: "rate_limited"`,
+		// Stop-reason capture into metadata, seeded before the nested writes.
+		`#m = if_not_exists(#m, :emptymap)`,
+		`#m.#sc = :sc`,
+		`#m.#sr = :sr`,
 	} {
 		if !strings.Contains(zipfile, sub) {
 			t.Errorf("ZipFile missing expected substring %q", sub)
 		}
+	}
+	// The seed clause must appear before the nested-path writes (a nested
+	// write on a missing parent map raises ValidationException).
+	seedIdx := strings.Index(zipfile, "#m = if_not_exists(#m, :emptymap)")
+	scIdx := strings.Index(zipfile, "#m.#sc = :sc")
+	if seedIdx < 0 || scIdx < 0 || scIdx < seedIdx {
+		t.Errorf("metadata seed clause must precede nested writes (seed=%d, sc=%d)", seedIdx, scIdx)
 	}
 }
 

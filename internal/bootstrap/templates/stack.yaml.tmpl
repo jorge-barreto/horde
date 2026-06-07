@@ -703,10 +703,6 @@ Resources:
               if not run_id:
                   return {"skipped": "task not managed by horde"}
 
-              existing = current_status(run_id)
-              if existing in TERMINAL:
-                  return {"skipped": "already terminal", "run_id": run_id, "status": existing}
-
               containers = detail.get("containers", [])
               exit_code = None
               if containers:
@@ -724,43 +720,21 @@ Resources:
               stopped_reason = detail.get("stoppedReason")
               cost = fetch_total_cost(run_id)
 
-              names = {"#s": "status", "#ec": "exit_code", "#ca": "completed_at"}
-              values = {
-                  ":s": {"S": status},
-                  ":ca": {"S": stopped_at} if stopped_at else {"NULL": True},
-              }
-              set_exprs = ["#s = :s", "#ca = :ca"]
-              if exit_code is not None:
-                  values[":ec"] = {"N": str(int(exit_code))}
-                  set_exprs.append("#ec = :ec")
-              if cost is not None:
-                  names["#tc"] = "total_cost_usd"
-                  values[":tc"] = {"N": str(cost)}
-                  set_exprs.append("#tc = :tc")
-
-              # The metadata attribute may not exist (CreateRun omits an empty
-              # map). Seed it with if_not_exists in THIS update so the nested
-              # stop_code/stop_reason writes below have a parent map. The seed
-              # and the nested writes cannot share one UpdateExpression —
-              # DynamoDB rejects referencing both `metadata` and `metadata.x`
-              # ("document paths overlap") — so the nested writes go in a
-              # second update_item after this one commits.
-              has_stop_reason = bool(stop_code or stopped_reason)
-              if has_stop_reason:
-                  names["#m"] = "metadata"
-                  values[":emptymap"] = {"M": {}}
-                  set_exprs.append("#m = if_not_exists(#m, :emptymap)")
-
-              ddb.update_item(
-                  TableName=RUNS_TABLE,
-                  Key={"id": {"S": run_id}},
-                  UpdateExpression="SET " + ", ".join(set_exprs),
-                  ExpressionAttributeNames=names,
-                  ExpressionAttributeValues=values,
-              )
-
-              # Second update: write the stop reason into the now-present map.
-              if has_stop_reason:
+              # Record the ECS stop reason FIRST and unconditionally. It is
+              # diagnostic, idempotent metadata that must land even when the
+              # status is already terminal — e.g. `horde kill` sets `killed`
+              # synchronously, so the guarded status update below is skipped,
+              # but we still want stop_code/stop_reason recorded. Two writes:
+              # seed `metadata` with if_not_exists, then the nested keys — they
+              # can't share one expression (DynamoDB "document paths overlap").
+              if stop_code or stopped_reason:
+                  ddb.update_item(
+                      TableName=RUNS_TABLE,
+                      Key={"id": {"S": run_id}},
+                      UpdateExpression="SET #m = if_not_exists(#m, :emptymap)",
+                      ExpressionAttributeNames={"#m": "metadata"},
+                      ExpressionAttributeValues={":emptymap": {"M": {}}},
+                  )
                   meta_names = {"#m": "metadata"}
                   meta_values = {}
                   meta_sets = []
@@ -779,6 +753,34 @@ Resources:
                       ExpressionAttributeNames=meta_names,
                       ExpressionAttributeValues=meta_values,
                   )
+
+              # Status update — skip if the run is already terminal (e.g. a
+              # synchronous `horde kill` or a duplicate event got here first).
+              existing = current_status(run_id)
+              if existing in TERMINAL:
+                  return {"skipped": "already terminal", "run_id": run_id, "status": existing}
+
+              names = {"#s": "status", "#ec": "exit_code", "#ca": "completed_at"}
+              values = {
+                  ":s": {"S": status},
+                  ":ca": {"S": stopped_at} if stopped_at else {"NULL": True},
+              }
+              set_exprs = ["#s = :s", "#ca = :ca"]
+              if exit_code is not None:
+                  values[":ec"] = {"N": str(int(exit_code))}
+                  set_exprs.append("#ec = :ec")
+              if cost is not None:
+                  names["#tc"] = "total_cost_usd"
+                  values[":tc"] = {"N": str(cost)}
+                  set_exprs.append("#tc = :tc")
+
+              ddb.update_item(
+                  TableName=RUNS_TABLE,
+                  Key={"id": {"S": run_id}},
+                  UpdateExpression="SET " + ", ".join(set_exprs),
+                  ExpressionAttributeNames=names,
+                  ExpressionAttributeValues=values,
+              )
               return {"updated": True, "run_id": run_id, "status": status, "exit_code": exit_code}
       Tags:
         - Key: Name

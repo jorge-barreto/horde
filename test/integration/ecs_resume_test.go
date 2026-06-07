@@ -1,10 +1,24 @@
 package integration
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+// resumeWorkflowBranch is the git branch the ECS worker checks out for the
+// resume e2e tests. The resume-marker / resume-gittree workflows live on the
+// feature branch, not yet on origin's default branch, so the worker must be
+// told to check it out. Override with HORDE_E2E_RESUME_BRANCH (defaults to the
+// feature branch); once these workflows land on the default branch this can
+// drop to "".
+func resumeWorkflowBranch() string {
+	if b := os.Getenv("HORDE_E2E_RESUME_BRANCH"); b != "" {
+		return b
+	}
+	return "recoverable-runs-ecs"
+}
 
 // TestECSResumeRestoresSession is the headline e2e for issue #35: an ECS run
 // that is interrupted mid-phase can be resumed, with the agent session
@@ -20,7 +34,7 @@ func TestECSResumeRestoresSession(t *testing.T) {
 	h := newECSHarness(t)
 
 	ticket := uniqueTicket("resume-session")
-	runID := h.Launch(ticket, "resume-marker", 15*time.Minute)
+	runID := h.LaunchBranch(ticket, "resume-marker", resumeWorkflowBranch(), 15*time.Minute)
 	h.TrackRunForCleanup(runID)
 	t.Cleanup(func() {
 		if got := h.driver.StoreStatus(runID); got == "running" || got == "pending" || got == "" {
@@ -71,7 +85,7 @@ func TestECSResumeRecoversGitTree(t *testing.T) {
 	h := newECSHarness(t)
 
 	ticket := uniqueTicket("resume-gittree")
-	runID := h.Launch(ticket, "resume-gittree", 15*time.Minute)
+	runID := h.LaunchBranch(ticket, "resume-gittree", resumeWorkflowBranch(), 15*time.Minute)
 	h.TrackRunForCleanup(runID)
 	t.Cleanup(func() {
 		if got := h.driver.StoreStatus(runID); got == "running" || got == "pending" || got == "" {

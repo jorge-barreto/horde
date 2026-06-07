@@ -153,10 +153,20 @@ func (h *harness) runHordeFull(args ...string) (string, string, error) {
 
 // Launch runs horde launch and returns the run ID.
 func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string {
+	return h.LaunchBranch(ticket, workflow, "", timeout)
+}
+
+// LaunchBranch is Launch with an explicit git branch for the worker to check
+// out (empty = provider default). ECS resume tests use this to run workflows
+// that only exist on the feature branch, not yet on origin's default branch.
+func (h *harness) LaunchBranch(ticket, workflow, branch string, timeout time.Duration) string {
 	h.t.Helper()
 	args := append(h.providerArgs(), "launch", "--timeout", timeout.String())
 	if workflow != "" {
 		args = append(args, "--workflow", workflow)
+	}
+	if branch != "" {
+		args = append(args, "--branch", branch)
 	}
 	args = append(args, ticket)
 	out, err := h.runHorde(args...)

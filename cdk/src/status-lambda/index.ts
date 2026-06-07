@@ -183,42 +183,23 @@ export const handler: Handler<
     setExprs.push("#tc = :tc");
   }
 
-  // The metadata attribute may not exist (CreateRun omits an empty map). Seed
-  // it with if_not_exists in THIS update so the nested stop_code/stop_reason
-  // writes below have a parent map to target. The seed and the nested writes
-  // cannot share one UpdateExpression — DynamoDB rejects an expression that
-  // references both `metadata` and `metadata.x` ("document paths overlap") —
-  // so the nested writes go in a second UpdateItem after this one commits.
-  const hasStopReason = Boolean(detail.stopCode || detail.stoppedReason);
-  if (hasStopReason) {
-    names["#m"] = "metadata";
-    values[":emptymap"] = { M: {} };
-    setExprs.push("#m = if_not_exists(#m, :emptymap)");
-  }
-
-  try {
+  // Record the ECS stop reason FIRST and unconditionally. It is diagnostic,
+  // idempotent metadata that must land even when the status is already
+  // terminal — e.g. `horde kill` sets `killed` synchronously, so the status
+  // update below is skipped by the terminal guard, but we still want the
+  // stop_code/stop_reason recorded (and the spot follow-up keys off it).
+  // Done as two writes: seed `metadata` with if_not_exists, then the nested
+  // keys — they can't share one expression (DynamoDB "document paths overlap").
+  if (detail.stopCode || detail.stoppedReason) {
     await ddb.send(
       new UpdateItemCommand({
         TableName: RUNS_TABLE,
         Key: { id: { S: runId } },
-        UpdateExpression: "SET " + setExprs.join(", "),
-        ConditionExpression:
-          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited))",
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
+        UpdateExpression: "SET #m = if_not_exists(#m, :emptymap)",
+        ExpressionAttributeNames: { "#m": "metadata" },
+        ExpressionAttributeValues: { ":emptymap": { M: {} } },
       }),
     );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) {
-      console.log("status-lambda: skip, already terminal", { runId });
-      return { skipped: "already terminal", runId };
-    }
-    throw err;
-  }
-
-  // Second update: write the stop reason into the (now-guaranteed-present)
-  // metadata map. Separate call so the seed and the nested paths don't overlap.
-  if (hasStopReason) {
     const metaNames: Record<string, string> = { "#m": "metadata" };
     const metaValues: Record<string, AttributeValue> = {};
     const metaSets: string[] = [];
@@ -241,6 +222,28 @@ export const handler: Handler<
         ExpressionAttributeValues: metaValues,
       }),
     );
+  }
+
+  // Status update, guarded so a duplicate/late event can't overwrite a
+  // run that already reached a terminal state.
+  try {
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: RUNS_TABLE,
+        Key: { id: { S: runId } },
+        UpdateExpression: "SET " + setExprs.join(", "),
+        ConditionExpression:
+          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited))",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) {
+      console.log("status-lambda: status already terminal (stop reason still recorded)", { runId });
+      return { skipped: "already terminal", runId };
+    }
+    throw err;
   }
 
   console.log("status-lambda: updated", { runId, status, exitCode, hasCost: cost !== null });

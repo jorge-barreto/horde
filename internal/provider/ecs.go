@@ -147,6 +147,14 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 	// is set at deploy time by the bootstrap CF template / @horde.io/cdk
 	// construct. RunTask cannot add secrets per launch — only environment
 	// overrides — so opts.SecretEnvRemap is intentionally ignored on ECS.
+	// RUN_ID flows into the ECS tag and the S3 session/snapshot key prefixes
+	// the worker builds, so validate it before it leaves the CLI — even
+	// though retry reuses an already-validated stored ID, this guards any
+	// caller (including the future auto-resume trigger).
+	if err := ValidateRunID(opts.RunID); err != nil {
+		return nil, err
+	}
+
 	env := []ecstypes.KeyValuePair{
 		{Name: aws.String("REPO_URL"), Value: aws.String(opts.Repo)},
 		{Name: aws.String("TICKET"), Value: aws.String(opts.Ticket)},
@@ -154,6 +162,15 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 		{Name: aws.String("WORKFLOW"), Value: aws.String(opts.Workflow)},
 		{Name: aws.String("RUN_ID"), Value: aws.String(opts.RunID)},
 		{Name: aws.String("ARTIFACTS_BUCKET"), Value: aws.String(p.config.ArtifactsBucket)},
+	}
+	// Forward opaque orc flags (e.g. --resume on retry) via ORC_EXTRA_ARGS,
+	// which the entrypoint reads. Mirrors the Docker provider (docker.go).
+	// Guarded so an empty slice doesn't inject a blank var.
+	if len(opts.OrcArgs) > 0 {
+		env = append(env, ecstypes.KeyValuePair{
+			Name:  aws.String("ORC_EXTRA_ARGS"),
+			Value: aws.String(strings.Join(opts.OrcArgs, " ")),
+		})
 	}
 
 	input := &ecs.RunTaskInput{
@@ -669,9 +686,12 @@ func (p *ECSProvider) Finalize(ctx context.Context, run *store.Run, homeDir stri
 	switch inst.State {
 	case StateStopped:
 		// Task finished; infer status from exit code. Lambda will likely
-		// update total_cost_usd later if it runs.
-		if inst.ExitCode != nil && *inst.ExitCode == 0 {
-			run.Status = store.StatusSuccess
+		// update total_cost_usd later if it runs. mapExitCode keeps timeout
+		// (2) and rate-limit (4) legible as recoverable rather than failed,
+		// matching the status Lambda's mapping so reconciliation and the
+		// event path agree.
+		if inst.ExitCode != nil {
+			run.Status = mapExitCode(*inst.ExitCode)
 		} else {
 			run.Status = store.StatusFailed
 		}

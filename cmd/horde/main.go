@@ -314,11 +314,17 @@ kill some runs before launching more.`,
 func retryCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "retry",
-		Usage:     "Retry a failed or killed run",
+		Usage:     "Retry a failed, killed, timed-out, or rate-limited run",
 		ArgsUsage: "<run-id> [-- <orc-args>...]",
-		Description: `Retries a failed or killed run by launching a new container against the
-preserved workspace — orc picks up from where it left off. If the old
-container is still alive, it is stopped first.
+		Description: `Retries a run that ended in any recoverable state (failed, killed,
+timed_out, rate_limited) by relaunching against the same run. orc picks
+up from where it left off. If the old worker is still alive, it is
+stopped first.
+
+On Docker the preserved on-host workspace is reused in place. On ECS a
+fresh Fargate task is launched with the same run ID: the worker restores
+the agent session (~/.claude) from S3, recovers committed-but-unpushed
+git work from the run's snapshot ref, and re-enters orc.
 
 By default, --resume is passed to orc so it preserves artifacts and
 resumes any interrupted agent session. Override with explicit orc args:
@@ -379,10 +385,19 @@ resumes any interrupted agent session. Override with explicit orc args:
 				}
 			}
 
-			// Relaunch with preserved workspace
-			workspaceDir := provider.WorkspacePath(homeDir, run.ID)
-			if _, err := os.Stat(filepath.Join(workspaceDir, ".git")); err != nil {
-				return fmt.Errorf("workspace for run %s not found at %s — use 'horde launch' to start fresh", runID, workspaceDir)
+			// Relaunch with the preserved workspace. On Docker the workspace
+			// is an on-host bind-mount dir that orc re-enters in place, so it
+			// must exist with a .git. On ECS there is no local workspace: the
+			// worker re-clones the repo (or fetches the snapshot ref) and
+			// restores ~/.claude from S3, keyed by RUN_ID — so the local
+			// workspace guard and the on-host exit-code marker are Docker-only.
+			if run.Provider == config.ProviderDocker {
+				workspaceDir := provider.WorkspacePath(homeDir, run.ID)
+				if _, err := os.Stat(filepath.Join(workspaceDir, ".git")); err != nil {
+					return fmt.Errorf("workspace for run %s not found at %s — use 'horde launch' to start fresh", runID, workspaceDir)
+				}
+				// Remove stale exit code marker if present (legacy containers)
+				os.Remove(filepath.Join(workspaceDir, ".horde-exit-code"))
 			}
 
 			cwd, err := os.Getwd()
@@ -407,9 +422,6 @@ resumes any interrupted agent session. Override with explicit orc args:
 					return fmt.Errorf("preparing worker image: %w", err)
 				}
 			}
-
-			// Remove stale exit code marker if present (legacy containers)
-			os.Remove(filepath.Join(workspaceDir, ".horde-exit-code"))
 
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
 				Repo:           run.Repo,

@@ -17,6 +17,16 @@ const (
 	StatusSuccess Status = "success"
 	StatusFailed  Status = "failed"
 	StatusKilled  Status = "killed"
+	// StatusTimedOut and StatusRateLimited are terminal but recoverable:
+	// the run stopped for a transient reason (orc phase timeout / Anthropic
+	// rate-limit exhaustion) rather than a genuine failure, so its sunk work
+	// is worth resuming. They are distinct from StatusFailed so that
+	// `horde list` makes them legible as "waiting, not broken" and so a
+	// future scheduler can auto-resume them. `horde retry` accepts them
+	// like failed/killed. Source: orc exit code 2 (timeout) → StatusTimedOut,
+	// exit code 4 (cost/rate limit) → StatusRateLimited (see mapExitCode).
+	StatusTimedOut    Status = "timed_out"
+	StatusRateLimited Status = "rate_limited"
 )
 
 // IsTerminal reports whether a run has reached a final state and will not
@@ -24,7 +34,7 @@ const (
 // to decide "active vs done" without enumerating statuses inline.
 func (s Status) IsTerminal() bool {
 	switch s {
-	case StatusSuccess, StatusFailed, StatusKilled:
+	case StatusSuccess, StatusFailed, StatusKilled, StatusTimedOut, StatusRateLimited:
 		return true
 	}
 	return false

@@ -182,7 +182,7 @@ describe("status-lambda handler (5fh.16)", () => {
     }
   });
 
-  it("records stopCode/stoppedReason into metadata, seeding the map first", async () => {
+  it("records stopCode/stoppedReason via a seed update then a nested update", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-spot" } }] });
     ddbMock.on(UpdateItemCommand).resolves({});
     s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
@@ -199,23 +199,32 @@ describe("status-lambda handler (5fh.16)", () => {
       () => {},
     );
 
-    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
-    // Seed clause must precede the nested-path sets in the same expression.
-    const expr = input.UpdateExpression ?? "";
-    const seedIdx = expr.indexOf("#m = if_not_exists(#m, :emptymap)");
-    const scIdx = expr.indexOf("#m.#sc = :sc");
-    const srIdx = expr.indexOf("#m.#sr = :sr");
-    expect(seedIdx).toBeGreaterThanOrEqual(0);
-    expect(scIdx).toBeGreaterThan(seedIdx);
-    expect(srIdx).toBeGreaterThan(seedIdx);
-    expect(input.ExpressionAttributeNames?.["#m"]).toBe("metadata");
-    expect(input.ExpressionAttributeNames?.["#sc"]).toBe("stop_code");
-    expect(input.ExpressionAttributeNames?.["#sr"]).toBe("stop_reason");
-    expect(input.ExpressionAttributeValues?.[":sc"]).toEqual({ S: "TerminationNotice" });
-    expect(input.ExpressionAttributeValues?.[":sr"]).toEqual({
+    // Two updates: (1) status/exit/etc + metadata seed (no nested paths, so
+    // it can't overlap), (2) the nested stop_code/stop_reason writes. They
+    // MUST be separate calls — DynamoDB rejects referencing `metadata` and
+    // `metadata.x` in one expression ("document paths overlap").
+    const calls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(calls).toHaveLength(2);
+
+    const seed = calls[0].args[0].input;
+    const seedExpr = seed.UpdateExpression ?? "";
+    expect(seedExpr).toContain("#m = if_not_exists(#m, :emptymap)");
+    expect(seedExpr).not.toContain("#m.#sc"); // no nested path in the seed update
+    expect(seedExpr).not.toContain("#m.#sr");
+    expect(seed.ExpressionAttributeValues?.[":emptymap"]).toEqual({ M: {} });
+
+    const meta = calls[1].args[0].input;
+    const metaExpr = meta.UpdateExpression ?? "";
+    expect(metaExpr).toContain("#m.#sc = :sc");
+    expect(metaExpr).toContain("#m.#sr = :sr");
+    expect(metaExpr).not.toContain("if_not_exists"); // no overlap with the seed
+    expect(meta.ExpressionAttributeNames?.["#m"]).toBe("metadata");
+    expect(meta.ExpressionAttributeNames?.["#sc"]).toBe("stop_code");
+    expect(meta.ExpressionAttributeNames?.["#sr"]).toBe("stop_reason");
+    expect(meta.ExpressionAttributeValues?.[":sc"]).toEqual({ S: "TerminationNotice" });
+    expect(meta.ExpressionAttributeValues?.[":sr"]).toEqual({
       S: "Your Spot Task was interrupted",
     });
-    expect(input.ExpressionAttributeValues?.[":emptymap"]).toEqual({ M: {} });
   });
 
   it("omits metadata writes when no stop reason is present", async () => {

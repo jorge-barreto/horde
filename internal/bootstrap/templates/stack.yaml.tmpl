@@ -738,22 +738,18 @@ Resources:
                   values[":tc"] = {"N": str(cost)}
                   set_exprs.append("#tc = :tc")
 
-              # Record the ECS stop reason into the run's metadata map. Seed the
-              # map with if_not_exists BEFORE the nested writes — CreateRun omits
-              # an empty map, so a nested metadata.x write on a missing parent
-              # would raise ValidationException. Seed clause must come first.
-              if stop_code or stopped_reason:
+              # The metadata attribute may not exist (CreateRun omits an empty
+              # map). Seed it with if_not_exists in THIS update so the nested
+              # stop_code/stop_reason writes below have a parent map. The seed
+              # and the nested writes cannot share one UpdateExpression —
+              # DynamoDB rejects referencing both `metadata` and `metadata.x`
+              # ("document paths overlap") — so the nested writes go in a
+              # second update_item after this one commits.
+              has_stop_reason = bool(stop_code or stopped_reason)
+              if has_stop_reason:
                   names["#m"] = "metadata"
                   values[":emptymap"] = {"M": {}}
                   set_exprs.append("#m = if_not_exists(#m, :emptymap)")
-                  if stop_code:
-                      names["#sc"] = "stop_code"
-                      values[":sc"] = {"S": str(stop_code)}
-                      set_exprs.append("#m.#sc = :sc")
-                  if stopped_reason:
-                      names["#sr"] = "stop_reason"
-                      values[":sr"] = {"S": str(stopped_reason)}
-                      set_exprs.append("#m.#sr = :sr")
 
               ddb.update_item(
                   TableName=RUNS_TABLE,
@@ -762,6 +758,27 @@ Resources:
                   ExpressionAttributeNames=names,
                   ExpressionAttributeValues=values,
               )
+
+              # Second update: write the stop reason into the now-present map.
+              if has_stop_reason:
+                  meta_names = {"#m": "metadata"}
+                  meta_values = {}
+                  meta_sets = []
+                  if stop_code:
+                      meta_names["#sc"] = "stop_code"
+                      meta_values[":sc"] = {"S": str(stop_code)}
+                      meta_sets.append("#m.#sc = :sc")
+                  if stopped_reason:
+                      meta_names["#sr"] = "stop_reason"
+                      meta_values[":sr"] = {"S": str(stopped_reason)}
+                      meta_sets.append("#m.#sr = :sr")
+                  ddb.update_item(
+                      TableName=RUNS_TABLE,
+                      Key={"id": {"S": run_id}},
+                      UpdateExpression="SET " + ", ".join(meta_sets),
+                      ExpressionAttributeNames=meta_names,
+                      ExpressionAttributeValues=meta_values,
+                  )
               return {"updated": True, "run_id": run_id, "status": status, "exit_code": exit_code}
       Tags:
         - Key: Name

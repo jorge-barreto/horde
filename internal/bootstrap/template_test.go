@@ -559,21 +559,28 @@ func TestRender_StatusLambdaPython(t *testing.T) {
 		// Recoverable-status mapping must match the CDK/Go side.
 		`2: "timed_out"`,
 		`4: "rate_limited"`,
-		// Stop-reason capture into metadata, seeded before the nested writes.
+		// Stop-reason capture: seed metadata in the first update, then the
+		// nested writes in a SECOND update (DynamoDB rejects referencing
+		// `metadata` and `metadata.x` in one expression).
 		`#m = if_not_exists(#m, :emptymap)`,
 		`#m.#sc = :sc`,
 		`#m.#sr = :sr`,
+		`has_stop_reason`,
 	} {
 		if !strings.Contains(zipfile, sub) {
 			t.Errorf("ZipFile missing expected substring %q", sub)
 		}
 	}
-	// The seed clause must appear before the nested-path writes (a nested
-	// write on a missing parent map raises ValidationException).
+	// The seed (if_not_exists) and the nested writes must be in SEPARATE
+	// update_item calls — they cannot share one expression. Verify two
+	// update_item calls are emitted and the nested writes come after the seed.
+	if n := strings.Count(zipfile, "ddb.update_item("); n < 2 {
+		t.Errorf("expected at least 2 ddb.update_item calls (seed + nested), got %d", n)
+	}
 	seedIdx := strings.Index(zipfile, "#m = if_not_exists(#m, :emptymap)")
 	scIdx := strings.Index(zipfile, "#m.#sc = :sc")
 	if seedIdx < 0 || scIdx < 0 || scIdx < seedIdx {
-		t.Errorf("metadata seed clause must precede nested writes (seed=%d, sc=%d)", seedIdx, scIdx)
+		t.Errorf("metadata seed must precede the nested writes (seed=%d, sc=%d)", seedIdx, scIdx)
 	}
 }
 

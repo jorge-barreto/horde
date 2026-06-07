@@ -183,26 +183,17 @@ export const handler: Handler<
     setExprs.push("#tc = :tc");
   }
 
-  // Record the ECS stop reason into the run's metadata map. The metadata
-  // attribute may not exist (CreateRun omits an empty map), so seed it with
-  // if_not_exists BEFORE the nested-path sets — a nested `metadata.x` write
-  // on a missing parent map throws ValidationException. The seed clause must
-  // come first in the same UpdateExpression. Only the document-path writes
-  // touch metadata, so existing keys (cluster_arn, log_group, …) are kept.
-  if (detail.stopCode || detail.stoppedReason) {
+  // The metadata attribute may not exist (CreateRun omits an empty map). Seed
+  // it with if_not_exists in THIS update so the nested stop_code/stop_reason
+  // writes below have a parent map to target. The seed and the nested writes
+  // cannot share one UpdateExpression — DynamoDB rejects an expression that
+  // references both `metadata` and `metadata.x` ("document paths overlap") —
+  // so the nested writes go in a second UpdateItem after this one commits.
+  const hasStopReason = Boolean(detail.stopCode || detail.stoppedReason);
+  if (hasStopReason) {
     names["#m"] = "metadata";
     values[":emptymap"] = { M: {} };
     setExprs.push("#m = if_not_exists(#m, :emptymap)");
-    if (detail.stopCode) {
-      names["#sc"] = "stop_code";
-      values[":sc"] = { S: detail.stopCode };
-      setExprs.push("#m.#sc = :sc");
-    }
-    if (detail.stoppedReason) {
-      names["#sr"] = "stop_reason";
-      values[":sr"] = { S: detail.stoppedReason };
-      setExprs.push("#m.#sr = :sr");
-    }
   }
 
   try {
@@ -223,6 +214,33 @@ export const handler: Handler<
       return { skipped: "already terminal", runId };
     }
     throw err;
+  }
+
+  // Second update: write the stop reason into the (now-guaranteed-present)
+  // metadata map. Separate call so the seed and the nested paths don't overlap.
+  if (hasStopReason) {
+    const metaNames: Record<string, string> = { "#m": "metadata" };
+    const metaValues: Record<string, AttributeValue> = {};
+    const metaSets: string[] = [];
+    if (detail.stopCode) {
+      metaNames["#sc"] = "stop_code";
+      metaValues[":sc"] = { S: detail.stopCode };
+      metaSets.push("#m.#sc = :sc");
+    }
+    if (detail.stoppedReason) {
+      metaNames["#sr"] = "stop_reason";
+      metaValues[":sr"] = { S: detail.stoppedReason };
+      metaSets.push("#m.#sr = :sr");
+    }
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: RUNS_TABLE,
+        Key: { id: { S: runId } },
+        UpdateExpression: "SET " + metaSets.join(", "),
+        ExpressionAttributeNames: metaNames,
+        ExpressionAttributeValues: metaValues,
+      }),
+    );
   }
 
   console.log("status-lambda: updated", { runId, status, exitCode, hasCost: cost !== null });

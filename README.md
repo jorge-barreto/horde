@@ -158,7 +158,7 @@ horde docs <topic>                # read a topic
 
 The first `horde launch` builds the worker Docker image automatically. Subsequent launches reuse the cached image unless the Dockerfile changes.
 
-`horde retry` resumes a run that ended in a recoverable state — `failed`, `killed`, `timed_out` (orc phase timeout), or `rate_limited` (Anthropic limit). On Docker the preserved local workspace is reused in place. On ECS a fresh Fargate task launches with the same run ID and recovers what the worker persisted before the task was reaped: the agent session (`~/.claude`, via S3), committed-but-unpushed git work (via a per-run `refs/horde/snapshot/<run-id>` ref), and the artifacts/audit. Uncommitted working-tree changes are not preserved.
+`horde retry` resumes a run that ended in a recoverable state — `failed`, `killed`, `timed_out` (orc phase timeout), or `rate_limited` (Anthropic limit). On Docker the preserved local workspace is reused in place. On ECS a fresh Fargate task launches with the same run ID and restores what the worker synced to S3 before the task was reaped: the agent session (`~/.claude`), the full working tree (`/workspace`, including committed and uncommitted changes), and the artifacts/audit — so orc resumes where it left off.
 
 ## Worker Image
 

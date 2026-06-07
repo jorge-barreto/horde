@@ -1,25 +1,23 @@
 name: horde-test
 ticket-pattern: 'TEST-[\w-]+'
-# E2E fixture for ECS resume (issue #35). The worker clones the horde repo
-# and runs this workflow, so it exercises the real ~/.claude S3 round-trip.
+# E2E fixture for ECS resume (issue #35). The worker clones the horde repo and
+# runs this workflow, so it exercises the real ~/.claude S3 round-trip.
 #
-# Self-verifying: on the FIRST run the marker does not exist, so the phase
-# writes it under ~/.claude and sleeps long enough to be killed mid-run
-# (-> status "killed"). On RESUME the worker restores ~/.claude from S3, so
-# the marker is already present and the phase exits 0 immediately
-# (-> status "success"). Success is therefore reachable ONLY if the agent
-# session survived the kill + resume.
+# The work phase is an AGENT phase (orc can --resume an interrupted agent
+# session; it cannot resume a killed script phase — that returns exit 6). The
+# test launches it, waits for the agent to start, kills the task mid-run
+# (orc saves the interrupted session, the entrypoint syncs ~/.claude to S3),
+# then `horde retry`s. On resume the worker restores ~/.claude from S3 and orc
+# reattaches the saved agent session and runs to completion (exit 0). A
+# terminal "success" after retry is therefore reachable ONLY if the agent
+# session survived the kill + resume round-trip through S3.
 phases:
-  - name: session-survives
+  - name: ready
     type: script
-    run: |
-      MARKER="$HOME/.claude/projects/horde-resume/marker"
-      if [ -f "$MARKER" ]; then
-        echo "RESUME-MARKER-SURVIVED: $(cat "$MARKER")"
-        exit 0
-      fi
-      mkdir -p "$(dirname "$MARKER")"
-      echo "hello-from-first-run" > "$MARKER"
-      echo "RESUME-MARKER-WRITTEN waiting to be killed"
-      sleep 600
-    timeout: 15
+    run: echo "RESUME-MARKER-READY agent phase next"
+    timeout: 1
+  - name: work
+    type: agent
+    prompt: .orc/prompts/resume-work.md
+    model: haiku
+    timeout: 10

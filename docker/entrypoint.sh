@@ -21,9 +21,22 @@ export GIT_TERMINAL_PROMPT=0
 # they are explicitly marked safe.
 git config --global --add safe.directory /workspace
 
+# ECS resume: Fargate has no persistent filesystem, so a prior run's working
+# tree only survives if it was synced to S3 (the terminate path below does
+# that). Restore the whole /workspace — committed AND uncommitted work, plus
+# .git — so `horde retry` resumes exactly where the run left off, the same way
+# the on-host workspace persists for the Docker provider. If S3 has a prior
+# workspace, this populates /workspace/.git and the clone below is skipped.
+# Non-fatal: a missing prior workspace (first run) is a no-op sync.
+if [ -n "${ARTIFACTS_BUCKET:-}" ] && [ ! -d /workspace/.git ]; then
+    mkdir -p /workspace
+    aws s3 sync "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/workspace/" /workspace/ \
+        || echo "WARNING: workspace restore failed (continuing)" >&2
+fi
+
 if [ -d /workspace/.git ]; then
-    # Restart — workspace already exists from a previous run.
-    # Skip clone, go straight to running orc.
+    # Restart/resume — workspace already exists (on-host bind mount for Docker,
+    # or restored from S3 for ECS). Skip clone, go straight to running orc.
     cd /workspace
 else
     # First run — clone the repo.
@@ -36,23 +49,7 @@ else
         echo "ERROR: git fetch failed" >&2
         exit 3
     fi
-
-    # Resume: if a prior run of THIS run-id snapshotted its committed working
-    # tree to refs/horde/snapshot/<run-id> (see the terminate path below),
-    # recover it so committed-but-unpushed work survives a task stop (e.g. a
-    # phase timeout or a spot interruption). The snapshot wins over the
-    # branch checkout. Workflow-agnostic and non-fatal — if the ref is absent
-    # (first run) or the fetch fails, fall through to the normal checkout.
-    SNAPSHOT_REF="refs/horde/snapshot/${RUN_ID}"
-    if [ -n "${RUN_ID:-}" ] && \
-       git fetch origin "${SNAPSHOT_REF}:${SNAPSHOT_REF}" 2>/dev/null && \
-       git rev-parse --verify --quiet "${SNAPSHOT_REF}" >/dev/null; then
-        echo "Recovering snapshot ${SNAPSHOT_REF}" >&2
-        if ! git checkout -f "${SNAPSHOT_REF}"; then
-            echo "ERROR: git checkout of snapshot ref failed" >&2
-            exit 3
-        fi
-    elif [ -n "${BRANCH:-}" ]; then
+    if [ -n "${BRANCH:-}" ]; then
         if ! git checkout "$BRANCH"; then
             echo "ERROR: git checkout failed for branch ${BRANCH}" >&2
             exit 3
@@ -124,14 +121,15 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     wait "$TEE_PID" 2>/dev/null  # let tee drain orc's output to stdout+log
     rm -f "$ORC_FIFO"
 
-    # Snapshot committed-but-unpushed work to a per-run ref so a future
-    # `horde retry` recovers the working tree (#32). Workflow-agnostic: it
-    # pushes whatever HEAD points at; it does NOT assume the workflow created
-    # a branch or ran a push phase. Force-push so a re-snapshot of the same
-    # run overwrites the prior one. Non-fatal.
-    if [ -n "${RUN_ID:-}" ] && git -C /workspace rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-        git -C /workspace push --force origin "HEAD:refs/horde/snapshot/${RUN_ID}" \
-            || echo "WARNING: snapshot push failed (continuing)" >&2
+    # Snapshot the whole working tree to S3 so a future `horde retry` resumes
+    # exactly where the run left off (#32). This captures committed AND
+    # uncommitted changes plus .git — the ECS analog of the Docker provider's
+    # persistent on-host workspace. Uses the task role's S3 access (no git
+    # push / repo write needed). `--delete` keeps the mirror exact so files
+    # removed during the run don't linger on resume. Non-fatal.
+    if [ -d /workspace ]; then
+        aws s3 sync /workspace/ "s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/workspace/" --delete \
+            || echo "WARNING: workspace upload failed (continuing)" >&2
     fi
 
     # Record a machine-readable stop reason so the store reflects WHY the run

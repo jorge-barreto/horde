@@ -50,15 +50,36 @@ type ecsDriver struct {
 // SessionObjectCount returns how many objects exist under the run's S3
 // sessions prefix — used to assert the agent session was uploaded.
 func (d *ecsDriver) SessionObjectCount(runID string) int {
+	return d.objectCount(runID, "sessions/")
+}
+
+// WorkspaceObjectCount returns how many objects exist under the run's S3
+// workspace prefix — used to assert the working tree (committed + uncommitted
+// + .git) was uploaded for resume (#32).
+func (d *ecsDriver) WorkspaceObjectCount(runID string) int {
+	return d.objectCount(runID, "workspace/")
+}
+
+func (d *ecsDriver) objectCount(runID, sub string) int {
 	d.t.Helper()
-	out, err := d.s3.ListObjectsV2(d.ctx, &s3.ListObjectsV2Input{
-		Bucket: aws.String(d.artifactsBkt),
-		Prefix: aws.String("horde-runs/" + runID + "/sessions/"),
-	})
-	if err != nil {
-		d.t.Fatalf("ecsDriver.SessionObjectCount: ListObjectsV2: %v", err)
+	n := 0
+	var token *string
+	for {
+		out, err := d.s3.ListObjectsV2(d.ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(d.artifactsBkt),
+			Prefix:            aws.String("horde-runs/" + runID + "/" + sub),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			d.t.Fatalf("ecsDriver.objectCount(%s): ListObjectsV2: %v", sub, err)
+		}
+		n += len(out.Contents)
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			break
+		}
+		token = out.NextContinuationToken
 	}
-	return len(out.Contents)
+	return n
 }
 
 // InstanceID queries DynamoDB for the ECS task ARN recorded for a run.

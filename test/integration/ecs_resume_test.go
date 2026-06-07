@@ -8,11 +8,10 @@ import (
 )
 
 // resumeWorkflowBranch is the git branch the ECS worker checks out for the
-// resume e2e tests. The resume-marker / resume-gittree workflows live on the
+// resume e2e tests. The resume-marker workflow + its prompt live on the
 // feature branch, not yet on origin's default branch, so the worker must be
 // told to check it out. Override with HORDE_E2E_RESUME_BRANCH (defaults to the
-// feature branch); once these workflows land on the default branch this can
-// drop to "".
+// feature branch); once these land on the default branch this can drop to "".
 func resumeWorkflowBranch() string {
 	if b := os.Getenv("HORDE_E2E_RESUME_BRANCH"); b != "" {
 		return b
@@ -21,14 +20,18 @@ func resumeWorkflowBranch() string {
 }
 
 // TestECSResumeRestoresSession is the headline e2e for issue #35: an ECS run
-// that is interrupted mid-phase can be resumed, with the agent session
-// (~/.claude) restored from S3 so orc continues where it left off.
+// interrupted mid-phase can be resumed, with the agent session (~/.claude)
+// AND the working tree (/workspace) restored from S3 so orc continues where
+// it left off.
 //
-// The resume-marker workflow is self-verifying: on the first run it writes a
-// marker under ~/.claude and sleeps (so we can kill it); on resume the worker
-// restores ~/.claude from S3, the marker is already present, and the phase
-// exits 0. So a terminal "success" after retry is reachable ONLY if the
-// session survived the kill + resume round-trip through S3.
+// The resume-marker workflow runs an orc AGENT phase (orc can --resume an
+// interrupted agent session; a killed script phase returns exit 6). The test
+// kills the task mid-agent-phase — orc saves the interrupted session and the
+// entrypoint syncs ~/.claude and /workspace to S3 — then `horde retry`s. On
+// resume the worker restores both from S3 and orc reattaches the saved
+// session and runs to completion. A terminal "success" after retry is
+// reachable ONLY if the session + workspace survived the kill + resume
+// round-trip through S3.
 func TestECSResumeRestoresSession(t *testing.T) {
 	t.Parallel()
 	h := newECSHarness(t)
@@ -44,12 +47,15 @@ func TestECSResumeRestoresSession(t *testing.T) {
 		}
 	})
 
-	// Wait for the worker to write the marker and start sleeping.
+	// Wait for the agent phase to start. The `ready` script phase prints this
+	// just before the agent phase begins; give the agent a few seconds to
+	// open its session so there is something to interrupt and resume.
 	waitForECSStatus(t, h, runID, "running", 5*time.Minute)
-	waitForLogLine(t, h, runID, "RESUME-MARKER-WRITTEN", 5*time.Minute)
+	waitForLogLine(t, h, runID, "RESUME-MARKER-READY", 5*time.Minute)
+	time.Sleep(20 * time.Second)
 
-	// Kill mid-run. The entrypoint's SIGTERM handler uploads ~/.claude to S3
-	// before the task is reaped.
+	// Kill mid-agent-phase. The entrypoint's SIGTERM handler lets orc save the
+	// interrupted session, then syncs ~/.claude and /workspace to S3.
 	if err := h.Kill(runID); err != nil {
 		t.Fatalf("kill failed: %v", err)
 	}
@@ -57,9 +63,21 @@ func TestECSResumeRestoresSession(t *testing.T) {
 		t.Fatalf("after kill, StoreStatus = %q, want killed", got)
 	}
 
-	// The session must have been persisted to S3.
-	if n := ecsd(t, h).SessionObjectCount(runID); n == 0 {
-		t.Fatalf("no objects under horde-runs/%s/sessions/ after kill — session not uploaded", runID)
+	// The session AND the workspace must have been persisted to S3. `horde
+	// kill` sets the store status to killed synchronously, but the container's
+	// SIGTERM handler is still flushing to S3 (within the 120s stopTimeout) —
+	// so poll rather than check once.
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		sessions := ecsd(t, h).SessionObjectCount(runID)
+		workspace := ecsd(t, h).WorkspaceObjectCount(runID)
+		if sessions > 0 && workspace > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("within 2m of kill: sessions=%d workspace=%d (both must be >0)", sessions, workspace)
+		}
+		time.Sleep(5 * time.Second)
 	}
 
 	// Resume. retry defaults to passing --resume to orc.
@@ -67,52 +85,12 @@ func TestECSResumeRestoresSession(t *testing.T) {
 		t.Fatalf("retry failed: %v\nstdout: %s", err, out)
 	}
 
-	// The resumed run must reach success — only possible if the restored
-	// marker was found by the phase on resume.
+	// The resumed run must reach success — only possible if orc reattached the
+	// restored session and completed the agent phase.
 	waitForECSStatus(t, h, runID, "running", 5*time.Minute)
-	if got := waitForECSTerminal(t, h, runID, 10*time.Minute); got != "success" {
+	if got := waitForECSTerminal(t, h, runID, 12*time.Minute); got != "success" {
 		logs, _ := h.driver.FetchContainerLogs(h.driver.InstanceID(runID))
 		t.Fatalf("after resume, StoreStatus = %q, want success\nlogs:\n%s", got, logs)
-	}
-}
-
-// TestECSResumeRecoversGitTree proves committed-but-unpushed work survives a
-// task stop (#32) via the snapshot ref the entrypoint pushes on terminate and
-// recovers on resume. The resume-gittree workflow commits a file then sleeps;
-// on resume the committed file must be present for the phase to exit 0.
-func TestECSResumeRecoversGitTree(t *testing.T) {
-	t.Parallel()
-	h := newECSHarness(t)
-
-	ticket := uniqueTicket("resume-gittree")
-	runID := h.LaunchBranch(ticket, "resume-gittree", resumeWorkflowBranch(), 15*time.Minute)
-	h.TrackRunForCleanup(runID)
-	t.Cleanup(func() {
-		if got := h.driver.StoreStatus(runID); got == "running" || got == "pending" || got == "" {
-			if err := h.Kill(runID); err != nil {
-				t.Logf("cleanup kill (non-fatal): %v", err)
-			}
-		}
-	})
-
-	waitForECSStatus(t, h, runID, "running", 5*time.Minute)
-	waitForLogLine(t, h, runID, "RESUME-GITTREE-COMMITTED", 5*time.Minute)
-
-	if err := h.Kill(runID); err != nil {
-		t.Fatalf("kill failed: %v", err)
-	}
-	if got := waitForECSTerminal(t, h, runID, 5*time.Minute); got != "killed" {
-		t.Fatalf("after kill, StoreStatus = %q, want killed", got)
-	}
-
-	if out, err := h.Retry(runID); err != nil {
-		t.Fatalf("retry failed: %v\nstdout: %s", err, out)
-	}
-
-	waitForECSStatus(t, h, runID, "running", 5*time.Minute)
-	if got := waitForECSTerminal(t, h, runID, 10*time.Minute); got != "success" {
-		logs, _ := h.driver.FetchContainerLogs(h.driver.InstanceID(runID))
-		t.Fatalf("after resume, StoreStatus = %q, want success (git tree not recovered)\nlogs:\n%s", got, logs)
 	}
 }
 

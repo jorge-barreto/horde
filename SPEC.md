@@ -200,9 +200,9 @@ A run that ends in a recoverable state — `failed`, `killed`, `timed_out`, or `
 What is preserved across a stop depends on the provider:
 
 - **Docker:** the per-run on-host workspace (`~/.horde/workspaces/<run-id>`) and sessions dir (`<run-id>-sessions`, bind-mounted to `/home/horde/.claude`) persist across retries. orc re-enters the workspace in place.
-- **ECS:** the worker is a fresh Fargate task each time, so state is persisted to S3 and a git ref before the task is reaped, and recovered on resume:
-  - **Agent session** (`~/.claude`) is synced to `s3://<bucket>/horde-runs/<run-id>/sessions/` on terminate (including on SIGTERM) and restored before orc runs. This is what lets orc reattach to the interrupted conversation.
-  - **Committed-but-unpushed git work** is force-pushed to `refs/horde/snapshot/<run-id>` on `origin` on terminate, and fetched + checked out on resume (in preference to a fresh clone). This keeps committed work from being stranded by a stop (e.g. a phase timeout). Uncommitted working-tree changes are not captured.
+- **ECS:** Fargate has no persistent filesystem, so the worker syncs everything needed to resume to S3 before the task is reaped, and restores it on resume:
+  - **Agent session** (`~/.claude`) is synced to `s3://<bucket>/horde-runs/<run-id>/sessions/` on terminate (including on SIGTERM) and restored before orc runs. This is what lets orc reattach to the interrupted conversation via `--resume`.
+  - **Working tree** (`/workspace`, including committed AND uncommitted changes and `.git`) is synced to `s3://<bucket>/horde-runs/<run-id>/workspace/` on terminate and restored on resume in preference to a fresh clone — the ECS analog of the Docker provider's persistent on-host workspace. This keeps work from being stranded by a stop (e.g. a phase timeout). It uses the task role's S3 access (no git push / repo write).
   - **Artifacts/audit** (`.orc/artifacts`, `.orc/audit`) are synced to S3.
 
   The entrypoint runs orc backgrounded and, on SIGTERM, forwards the signal to orc and waits for orc to finish saving its interrupted session before uploading — so the persisted session/snapshot is never half-written. The container `stopTimeout` (120s) bounds this window before SIGKILL.

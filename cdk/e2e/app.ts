@@ -53,6 +53,10 @@ const gitSecret = new secretsmanager.Secret(stack, "GitToken", {
 
 const worker = new HordeWorker(stack, "Worker", {
   projectSlug: SLUG,
+  // Canonical repo for run records. The e2e harness sets each worker's git
+  // remote to the real horde repo (so the worker can clone + run horde's own
+  // .orc/workflows), so the canonical host/path form is this.
+  repo: "github.com/jorge-barreto/horde",
   ecrRepository: repo,
   workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
   secrets: {

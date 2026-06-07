@@ -79,7 +79,8 @@ The status Lambda:
 - Receives ECS task state change events filtered to the horde cluster
 - Extracts the task ARN and maps it to a run ID via DynamoDB query
 - Updates `status`, `exit_code`, `completed_at`, and `total_cost_usd` (reads `run-result.json` from S3 if present) on terminal states (STOPPED)
-- Is idempotent — CLI-driven updates and Lambda-driven updates converge to the same state
+- Records the ECS stop reason (`stopCode`/`stoppedReason` from the event) into the run's `metadata` map as `stop_code`/`stop_reason`. This is diagnostic today and is the signal a future spot auto-resume keys off — a Fargate spot interruption surfaces as `stop_code == "TerminationNotice"`.
+- Is idempotent — CLI-driven updates and Lambda-driven updates converge to the same state. The CDK (`cdk/src/status-lambda/index.ts`) and bootstrap-CloudFormation (Python) implementations are kept in lockstep.
 
 ## CLI Commands
 
@@ -171,9 +172,11 @@ Exit code from orc tells horde what happened:
 - 5: signal interrupt (SIGINT/SIGTERM/SIGHUP)
 - 6: resume failure (cannot recover interrupted session)
 
-horde maps these to run statuses: 0 → `success`, 1/2/3/4/6 → `failed`, 5 → `killed`.
+horde maps these to run statuses: 0 → `success`, 2 → `timed_out`, 4 → `rate_limited`, 5 → `killed`, 1/3/6 → `failed`.
 
-`horde status` shows the failure. `horde logs` shows what happened. Human decides next step.
+`timed_out` and `rate_limited` are terminal but **recoverable**: the run stopped for a transient reason (a phase timeout, or Anthropic rate-limit exhaustion) rather than a genuine failure, so its sunk work is worth resuming. They are surfaced distinctly in `horde list`/`status` so these runs read as "waiting, not broken", and `horde retry` accepts them like `failed`/`killed`.
+
+`horde status` shows the failure. `horde logs` shows what happened. Human decides next step (or, on ECS, resumes with `horde retry` — see Recoverable Runs).
 
 ### 6. Kill
 
@@ -189,6 +192,22 @@ Runs have a maximum duration. Default: 24 hours. Override with `--timeout` on `h
 - **ECS provider:** The CDK construct sets `stopTimeout` on the Fargate task definition. Additionally, horde records the timeout in DynamoDB. The EventBridge Lambda checks the timeout and stops overdue tasks.
 
 The timeout covers the entire run including git clone, orc execution, and artifact upload.
+
+### 7a. Recoverable Runs (resume)
+
+A run that ends in a recoverable state — `failed`, `killed`, `timed_out`, or `rate_limited` — can be resumed with `horde retry <run-id>`. Retry relaunches against the same run ID and defaults to passing `--resume` to orc, so orc continues from where it left off rather than restarting.
+
+What is preserved across a stop depends on the provider:
+
+- **Docker:** the per-run on-host workspace (`~/.horde/workspaces/<run-id>`) and sessions dir (`<run-id>-sessions`, bind-mounted to `/home/horde/.claude`) persist across retries. orc re-enters the workspace in place.
+- **ECS:** the worker is a fresh Fargate task each time, so state is persisted to S3 and a git ref before the task is reaped, and recovered on resume:
+  - **Agent session** (`~/.claude`) is synced to `s3://<bucket>/horde-runs/<run-id>/sessions/` on terminate (including on SIGTERM) and restored before orc runs. This is what lets orc reattach to the interrupted conversation.
+  - **Committed-but-unpushed git work** is force-pushed to `refs/horde/snapshot/<run-id>` on `origin` on terminate, and fetched + checked out on resume (in preference to a fresh clone). This keeps committed work from being stranded by a stop (e.g. a phase timeout). Uncommitted working-tree changes are not captured.
+  - **Artifacts/audit** (`.orc/artifacts`, `.orc/audit`) are synced to S3.
+
+  The entrypoint runs orc backgrounded and, on SIGTERM, forwards the signal to orc and waits for orc to finish saving its interrupted session before uploading — so the persisted session/snapshot is never half-written. The container `stopTimeout` (120s) bounds this window before SIGKILL.
+
+This is the mechanism the planned **spot auto-resume** builds on: running workers on Fargate spot and automatically resuming when ECS reclaims a task. The seam is already in place — a spot interruption is recorded as `stop_code == "TerminationNotice"` on the run (see the status Lambda), and resume is simply relaunch-same-run-ID, which an automated trigger can invoke the same way `horde retry` does. The auto-resume policy itself is out of scope for v0.3.
 
 ### 8. Hydrate
 
@@ -440,7 +459,7 @@ Lean schema for local testing. Not shared, not the production path.
 | provider | TEXT | docker |
 | instance_id | TEXT | Container ID |
 | metadata | TEXT | JSON-encoded map[string]string — provider-specific data (NULL if none) |
-| status | TEXT | pending, running, success, failed, killed |
+| status | TEXT | pending, running, success, failed, killed, timed_out, rate_limited |
 | exit_code | INTEGER | orc exit code (NULL while running) |
 | launched_by | TEXT | Local git user name (from `git config user.name`) |
 | started_at | TEXT | RFC3339 |
@@ -469,7 +488,7 @@ This is the production store — shared across the team. Every developer with AW
 | workflow | S | orc workflow name (required at launch; empty only on legacy rows) |
 | provider | S | aws-ecs |
 | instance_id | S | ECS task ARN |
-| status | S | pending, running, success, failed, killed |
+| status | S | pending, running, success, failed, killed, timed_out, rate_limited |
 | exit_code | N | orc exit code (null while running) |
 | launched_by | S | IAM identity (from `sts:GetCallerIdentity`) |
 | started_at | S | RFC3339 |
@@ -682,7 +701,7 @@ See `ORC_CONTRACT_EXPECTATIONS.md` for the full interface contract.
 - Run orc phases (that's orc's job)
 - Manage beads/work items (that's bd's job)
 - Handle git merges or conflict resolution (PRs are orc's workflow, merges are human)
-- Retry failed runs automatically (human decides; `horde retry` is a convenience, not automation)
+- Retry recoverable runs automatically (human decides; `horde retry` is a convenience, not automation — the one planned exception is spot auto-resume, see Recoverable Runs)
 - Create infrastructure (teams deploy the CDK construct)
 - Understand tickets, waves, epics, or beads (it just runs `orc run <thing>`)
 - Manage permissions per-user (any team member with AWS credentials can launch/kill/view any run)

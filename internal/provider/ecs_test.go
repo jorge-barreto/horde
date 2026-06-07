@@ -2861,10 +2861,19 @@ func TestECSProvider_Integration_LaunchStopStatus(t *testing.T) {
 func TestECS_Finalize_TerminalStatusIsNoOp(t *testing.T) {
 	fake := &fakeECSClient{}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	for _, status := range []store.Status{store.StatusSuccess, store.StatusFailed, store.StatusKilled} {
+	// All terminal statuses — including the recoverable timed_out/rate_limited
+	// — must be no-ops so informational commands stay time-invariant after a
+	// task is reaped (#28: the store is the source of truth, never live ECS).
+	for _, status := range []store.Status{
+		store.StatusSuccess, store.StatusFailed, store.StatusKilled,
+		store.StatusTimedOut, store.StatusRateLimited,
+	} {
 		run := &store.Run{ID: "abc123", Status: status, TimeoutAt: time.Now().Add(-1 * time.Hour)}
 		if err := p.Finalize(context.Background(), run, ""); err != nil {
 			t.Fatalf("Finalize(%s) error = %v", status, err)
+		}
+		if run.Status != status {
+			t.Errorf("Finalize mutated terminal status %s -> %s", status, run.Status)
 		}
 	}
 	if len(fake.describeTasksInputs) != 0 {

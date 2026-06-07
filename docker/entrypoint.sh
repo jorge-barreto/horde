@@ -91,12 +91,20 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     # when the task is stopped mid-run. Tee orc's output to a log so we can
     # parse a rate-limit reset time after it exits (orc emits a line like
     # "usage limit reached, resets at HH:MM" on exit code 4).
+    # Capture orc's output to a log file (so we can parse a rate-limit reset
+    # time after it exits) and stream it live to the container log via a
+    # background `tail`. We deliberately do NOT use `... > >(tee log)`: the
+    # process-substitution tee keeps the stdout pipe open and deadlocks the
+    # script's final `exit` on Fargate — the container then never stops.
     ORC_LOG=/tmp/orc-output.log
+    : > "$ORC_LOG"
+    tail -f "$ORC_LOG" 2>/dev/null &
+    TAIL_PID=$!
     # `eval "exec $ORC_CMD"` makes the backgrounded subshell BECOME orc, so
     # ORC_PID is orc's real PID and a forwarded SIGTERM reaches orc directly.
     # (A plain `eval "$ORC_CMD" &` leaves $! pointing at the eval wrapper, so
     # the signal never reaches orc and its interrupt-save never runs.)
-    { eval "exec $ORC_CMD"; } > >(tee "$ORC_LOG") 2>&1 &
+    { eval "exec $ORC_CMD"; } > "$ORC_LOG" 2>&1 &
     ORC_PID=$!
     # On SIGTERM (ECS StopTask, incl. a spot interruption) forward it to orc
     # AND re-wait so orc finishes saving its interrupted session before the
@@ -109,6 +117,7 @@ if [ -n "${ARTIFACTS_BUCKET:-}" ]; then
     wait "$ORC_PID"
     EXIT_CODE=$?
     trap - TERM INT
+    kill "$TAIL_PID" 2>/dev/null  # stop streaming; tee-free so the container can exit
 
     # Snapshot committed-but-unpushed work to a per-run ref so a future
     # `horde retry` recovers the working tree (#32). Workflow-agnostic: it

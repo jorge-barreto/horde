@@ -1,20 +1,15 @@
-# GoReleaser builds the horde CLI on a cli-v* tag: multi-OS/arch binaries, a
+# GoReleaser builds the horde CLI on a v* tag: multi-OS/arch binaries, a
 # GitHub Release with checksums, and a Homebrew formula. Version metadata is
 # injected into the same main.* vars that `make build` sets.
 version: 2
 
 project_name: horde
 
-# The CLI is tagged cli-v<semver> (cdk-v* tags belong to the npm package).
-# GoReleaser (OSS) only auto-strips a leading "v", so for a cli-v0.1.0 tag
-# {{ .Version }} would resolve to "cli-v0.1.0" — mis-stamping main.version and
-# producing horde_cli-v0.1.0_* asset names. The Pro-only monorepo.tag_prefix
-# would handle this, but it is NOT in the OSS schema (goreleaser check rejects
-# it). Instead we strip the prefix with a template, {{ trimprefix .Version
-# "cli-v" }}, everywhere the version is baked in (ldflags, archive name,
-# release name) — yielding a clean 0.1.0 in the binary and asset names.
-# OSS validate still rejects cli-v0.1.0 as non-semver, so the release workflow
-# runs goreleaser with --skip=validate (see .github/workflows/release-cli.yml).
+# The CLI is tagged v<semver> (cdk-v* tags belong to the npm package).
+# GoReleaser (OSS) natively strips a leading "v" from the tag, so a v0.1.0 tag
+# yields a clean {{ .Version }} of "0.1.0" with no template workarounds — and a
+# plain v0.1.0 tag does not match the cdk-v* glob, so it never triggers the CDK
+# publish workflow.
 
 before:
   hooks:
@@ -30,14 +25,14 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
-      - -X main.version={{ trimprefix .Version "cli-v" }}
+      - -X main.version={{ .Version }}
       - -X main.commit={{ .ShortCommit }}
       - -X main.buildDate={{ .Date }}
 
 archives:
   - id: horde
     formats: [tar.gz]
-    name_template: 'horde_{{ trimprefix .Version "cli-v" }}_{{ .Os }}_{{ .Arch }}'
+    name_template: "horde_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
@@ -46,7 +41,7 @@ release:
   github:
     owner: jorge-barreto
     name: horde
-  name_template: 'horde {{ trimprefix .Version "cli-v" }}'
+  name_template: "horde {{ .Tag }}"
 
 changelog:
   use: github

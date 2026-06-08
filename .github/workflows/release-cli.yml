@@ -1,12 +1,12 @@
 name: release-cli
 
-# Build and publish horde CLI binaries when a cli-v* tag is pushed. The tag is
-# the version source (GoReleaser reads {{ .Version }} from it). Cut a release
-# with: git tag -a cli-v0.1.0 -m "..." && git push origin cli-v0.1.0
+# Build and publish horde CLI binaries when a v* tag is pushed. The tag is the
+# version source (GoReleaser reads {{ .Version }} from it). Cut a release with:
+# git tag -a v0.1.0 -m "..." && git push origin v0.1.0
 on:
   push:
     tags:
-      - "cli-v*"
+      - "v*"
 
 permissions:
   contents: write # create the GitHub Release + upload assets
@@ -29,11 +29,7 @@ jobs:
         with:
           # pinned (not floating ~> v2) so a future v2 that removes brews: can't break releases silently
           version: "2.12.7"
-          # --skip=validate: OSS GoReleaser only parses a leading-"v" tag as semver, so it
-          # rejects our cli-v0.1.0 tag ("invalid semantic version") in the validate phase.
-          # The .goreleaser.yaml templates strip the cli-v prefix for version stamping and
-          # asset names; skipping validate lets the rest of the pipeline run on the cli-v tag.
-          args: release --clean --skip=validate
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}

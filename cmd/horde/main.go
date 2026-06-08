@@ -1412,6 +1412,12 @@ type fullRunResult struct {
 	TotalCostUSD  *float64      `json:"total_cost_usd"`
 	TotalDuration string        `json:"total_duration"`
 	Phases        []phaseResult `json:"phases"`
+
+	TotalInputTokens         *int `json:"total_input_tokens"`
+	TotalOutputTokens        *int `json:"total_output_tokens"`
+	TotalCacheCreationTokens *int `json:"total_cache_creation_input_tokens"`
+	TotalCacheReadTokens     *int `json:"total_cache_read_input_tokens"`
+	Turns                    *int `json:"turns"`
 }
 
 type phaseResult struct {

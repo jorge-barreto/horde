@@ -37,6 +37,32 @@ func errorEnvelopeV1(err error) ErrorV1 {
 	return ErrorV1{Status: "error", Reason: err.Error()}
 }
 
+// TokensV1 is the per-run token telemetry surfaced under --json. It is a
+// pointer on its parent structs and omitempty, so it is absent entirely when
+// horde has no token data for the run (pre-finalize on ECS, or an orc old
+// enough not to emit tokens). Field names are the stable contract.
+type TokensV1 struct {
+	Input         int `json:"input"`
+	Output        int `json:"output"`
+	CacheCreation int `json:"cache_creation"`
+	CacheRead     int `json:"cache_read"`
+	Turns         int `json:"turns"`
+}
+
+// tokensToV1 maps a store.TokenUsage to the JSON contract shape, or nil.
+func tokensToV1(t *store.TokenUsage) *TokensV1 {
+	if t == nil {
+		return nil
+	}
+	return &TokensV1{
+		Input:         t.InputTokens,
+		Output:        t.OutputTokens,
+		CacheCreation: t.CacheCreationTokens,
+		CacheRead:     t.CacheReadTokens,
+		Turns:         t.Turns,
+	}
+}
+
 type StatusV1 struct {
 	ID           string            `json:"id"`
 	Ticket       string            `json:"ticket"`
@@ -47,6 +73,7 @@ type StatusV1 struct {
 	ExitCode     *int              `json:"exit_code,omitempty"`
 	DurationSecs float64           `json:"duration_seconds"`
 	TotalCostUSD *float64          `json:"total_cost_usd,omitempty"`
+	Tokens       *TokensV1         `json:"tokens,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	LaunchedBy   string            `json:"launched_by"`
 	StartedAt    string            `json:"started_at"`
@@ -62,8 +89,9 @@ type ListV1 struct {
 // readable without client-side summing. Always present (even for an empty
 // result) so the shape is stable.
 type ListSummary struct {
-	Count        int     `json:"count"`
-	TotalCostUSD float64 `json:"total_cost_usd"`
+	Count        int       `json:"count"`
+	TotalCostUSD float64   `json:"total_cost_usd"`
+	Tokens       *TokensV1 `json:"tokens,omitempty"`
 }
 
 // ListRunV1 is the per-run subset of StatusV1: it carries every field
@@ -81,6 +109,7 @@ type ListRunV1 struct {
 	ExitCode     *int              `json:"exit_code,omitempty"`
 	DurationSecs float64           `json:"duration_seconds"`
 	TotalCostUSD *float64          `json:"total_cost_usd,omitempty"`
+	Tokens       *TokensV1         `json:"tokens,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	LaunchedBy   string            `json:"launched_by"`
 	StartedAt    string            `json:"started_at"`
@@ -95,6 +124,7 @@ type ResultsV1 struct {
 	OrcStatus         string    `json:"orc_status,omitempty"`
 	ExitCode          *int      `json:"exit_code,omitempty"`
 	TotalCostUSD      *float64  `json:"total_cost_usd,omitempty"`
+	Tokens            *TokensV1 `json:"tokens,omitempty"`
 	TotalDuration     string    `json:"total_duration,omitempty"`
 	TotalDurationSecs *float64  `json:"total_duration_seconds,omitempty"`
 	Phases            []PhaseV1 `json:"phases,omitempty"`
@@ -131,6 +161,7 @@ func statusToV1(run *store.Run) StatusV1 {
 		ExitCode:     run.ExitCode,
 		DurationSecs: d.Seconds(),
 		TotalCostUSD: run.TotalCostUSD,
+		Tokens:       tokensToV1(run.Tokens),
 		Labels:       run.Labels,
 		LaunchedBy:   run.LaunchedBy,
 		StartedAt:    run.StartedAt.Format(time.RFC3339),
@@ -144,6 +175,8 @@ func statusToV1(run *store.Run) StatusV1 {
 func listToV1(runs []*store.Run) ListV1 {
 	items := make([]ListRunV1, len(runs))
 	var totalCost float64
+	var tokenSum store.TokenUsage
+	var anyTokens bool
 	for i, run := range runs {
 		// Derive from statusToV1 so list and status never drift on field
 		// values or timestamp formatting.
@@ -158,6 +191,7 @@ func listToV1(runs []*store.Run) ListV1 {
 			ExitCode:     s.ExitCode,
 			DurationSecs: s.DurationSecs,
 			TotalCostUSD: s.TotalCostUSD,
+			Tokens:       s.Tokens,
 			Labels:       s.Labels,
 			LaunchedBy:   s.LaunchedBy,
 			StartedAt:    s.StartedAt,
@@ -166,13 +200,56 @@ func listToV1(runs []*store.Run) ListV1 {
 		if run.TotalCostUSD != nil {
 			totalCost += *run.TotalCostUSD
 		}
+		if run.Tokens != nil {
+			anyTokens = true
+			tokenSum.InputTokens += run.Tokens.InputTokens
+			tokenSum.OutputTokens += run.Tokens.OutputTokens
+			tokenSum.CacheCreationTokens += run.Tokens.CacheCreationTokens
+			tokenSum.CacheReadTokens += run.Tokens.CacheReadTokens
+			tokenSum.Turns += run.Tokens.Turns
+		}
 	}
 	return ListV1{
 		Runs: items,
 		Summary: ListSummary{
 			Count:        len(runs),
 			TotalCostUSD: totalCost,
+			Tokens:       summaryTokens(anyTokens, tokenSum),
 		},
+	}
+}
+
+// summaryTokens returns the cohort token total, or nil when no run in the set
+// carried token data (so the summary object is omitted entirely).
+func summaryTokens(any bool, sum store.TokenUsage) *TokensV1 {
+	if !any {
+		return nil
+	}
+	return tokensToV1(&sum)
+}
+
+// resultsTokens prefers the run's stored token usage (populated at finalize
+// from costs.json) and falls back to run-result.json's forward token fields.
+func resultsTokens(run *store.Run, result *fullRunResult) *TokensV1 {
+	if run.Tokens != nil {
+		return tokensToV1(run.Tokens)
+	}
+	if result.TotalInputTokens == nil && result.TotalOutputTokens == nil &&
+		result.TotalCacheCreationTokens == nil && result.TotalCacheReadTokens == nil && result.Turns == nil {
+		return nil
+	}
+	deref := func(p *int) int {
+		if p == nil {
+			return 0
+		}
+		return *p
+	}
+	return &TokensV1{
+		Input:         deref(result.TotalInputTokens),
+		Output:        deref(result.TotalOutputTokens),
+		CacheCreation: deref(result.TotalCacheCreationTokens),
+		CacheRead:     deref(result.TotalCacheReadTokens),
+		Turns:         deref(result.Turns),
 	}
 }
 
@@ -185,6 +262,7 @@ func fullResultsToV1(run *store.Run, result *fullRunResult) ResultsV1 {
 		OrcStatus:     result.Status,
 		ExitCode:      run.ExitCode,
 		TotalCostUSD:  result.TotalCostUSD,
+		Tokens:        resultsTokens(run, result),
 		TotalDuration: result.TotalDuration,
 		Partial:       false,
 	}
@@ -241,6 +319,7 @@ func partialResultsToV1(run *store.Run) ResultsV1 {
 		Status:       string(run.Status),
 		ExitCode:     run.ExitCode,
 		TotalCostUSD: run.TotalCostUSD,
+		Tokens:       tokensToV1(run.Tokens),
 		Partial:      true,
 	}
 }

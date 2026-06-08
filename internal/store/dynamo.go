@@ -56,6 +56,12 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 		AttrLaunchedBy: &types.AttributeValueMemberS{Value: run.LaunchedBy},
 		AttrStartedAt:  &types.AttributeValueMemberS{Value: run.StartedAt.UTC().Format(time.RFC3339)},
 		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: run.TimeoutAt.UTC().Format(time.RFC3339)},
+		AttrPriority:   &types.AttributeValueMemberS{Value: string(run.Priority)},
+	}
+	// enqueued_at is set only for queued runs; mirror the completed_at
+	// conditional-write pattern (zero time means "not enqueued").
+	if !run.EnqueuedAt.IsZero() {
+		item[AttrEnqueuedAt] = &types.AttributeValueMemberS{Value: run.EnqueuedAt.UTC().Format(time.RFC3339)}
 	}
 	// instance_id is the GSI "by-instance" partition key. DynamoDB rejects
 	// empty strings on GSI keys, so only set it when known (UpdateRun fills
@@ -225,6 +231,26 @@ func parseRun(item map[string]types.AttributeValue) (*Run, error) {
 		run.TotalCostUSD = &v
 	}
 
+	if av, ok := item[AttrPriority]; ok {
+		sv, ok := av.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrPriority)
+		}
+		run.Priority = Priority(sv.Value)
+	}
+
+	if av, ok := item[AttrEnqueuedAt]; ok {
+		sv, ok := av.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrEnqueuedAt)
+		}
+		t, err := time.Parse(time.RFC3339, sv.Value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing run %q: parsing enqueued_at: %w", id, err)
+		}
+		run.EnqueuedAt = t
+	}
+
 	// Token counts: all five attributes are written together (or not at all)
 	// by CreateRun/UpdateRun, but parse each defensively. Presence of ANY of
 	// them yields a non-nil Tokens; a missing individual attribute reads as 0.
@@ -374,6 +400,12 @@ func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 	if update.TimeoutAt != nil {
 		setClauses = append(setClauses, "timeout_at = :ta")
 		exprAttrValues[":ta"] = &types.AttributeValueMemberS{Value: update.TimeoutAt.UTC().Format(time.RFC3339)}
+	}
+	if update.Priority != nil {
+		// "priority" is a DynamoDB reserved word; alias it.
+		setClauses = append(setClauses, "#prio = :prio")
+		exprAttrNames["#prio"] = AttrPriority
+		exprAttrValues[":prio"] = &types.AttributeValueMemberS{Value: string(*update.Priority)}
 	}
 
 	if len(setClauses) == 0 {

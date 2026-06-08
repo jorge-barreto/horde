@@ -150,8 +150,13 @@ func TestDynamoStore_CreateRun_AllFields(t *testing.T) {
 		t.Fatal("PutItem was not called")
 	}
 	item := capturedInput.Item
-	if len(item) != 15 {
-		t.Errorf("expected 15 attributes, got %d", len(item))
+	// 16 = 15 prior attrs + priority (always written, even empty). enqueued_at
+	// is NOT written here because this run has a zero EnqueuedAt.
+	if len(item) != 16 {
+		t.Errorf("expected 16 attributes, got %d", len(item))
+	}
+	if _, ok := item[AttrEnqueuedAt]; ok {
+		t.Errorf("enqueued_at should be absent for a non-queued run, got %v", item[AttrEnqueuedAt])
 	}
 	assertS := func(attr, want string) {
 		t.Helper()

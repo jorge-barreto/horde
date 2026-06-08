@@ -79,6 +79,13 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 		}
 		item[AttrMetadata] = &types.AttributeValueMemberM{Value: metaMap}
 	}
+	if run.Labels != nil {
+		labelMap := make(map[string]types.AttributeValue, len(run.Labels))
+		for k, v := range run.Labels {
+			labelMap[k] = &types.AttributeValueMemberS{Value: v}
+		}
+		item[AttrLabels] = &types.AttributeValueMemberM{Value: labelMap}
+	}
 	_, err := s.client.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:           aws.String(s.tableName),
 		Item:                item,
@@ -227,6 +234,22 @@ func parseRun(item map[string]types.AttributeValue) (*Run, error) {
 		run.Metadata = meta
 	}
 
+	if av, ok := item[AttrLabels]; ok {
+		mv, ok := av.(*types.AttributeValueMemberM)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrLabels)
+		}
+		labels := make(map[string]string, len(mv.Value))
+		for k, v := range mv.Value {
+			sv, ok := v.(*types.AttributeValueMemberS)
+			if !ok {
+				return nil, fmt.Errorf("parsing run %q: labels[%q] is not a string", id, k)
+			}
+			labels[k] = sv.Value
+		}
+		run.Labels = labels
+	}
+
 	return run, nil
 }
 
@@ -327,6 +350,110 @@ func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 		return fmt.Errorf("updating run %q: %w", id, err)
 	}
 	return nil
+}
+
+// ListRuns queries the by-repo GSI and pushes filtering server-side via a
+// FilterExpression so that at scale (often many thousands of rows per repo)
+// the query stays fast and the wire payload small. The started_at range goes
+// in the KeyConditionExpression (sort-key range on the index); status set,
+// workflow, ticket, and each label pair go in the FilterExpression, all
+// AND-combined. The filter semantics mirror the shared matchesFilter helper;
+// the conformance suite runs identical cases against both stores.
+func (s *DynamoStore) ListRuns(ctx context.Context, filter RunFilter) ([]*Run, error) {
+	names := map[string]string{"#repo": AttrRepo}
+	values := map[string]types.AttributeValue{
+		":repo": &types.AttributeValueMemberS{Value: filter.Repo},
+	}
+
+	// KeyConditionExpression: repo partition + optional started_at range.
+	keyCond := "#repo = :repo"
+	names["#started"] = AttrStartedAt
+	switch {
+	case filter.Since != nil && filter.Until != nil:
+		keyCond += " AND #started BETWEEN :since AND :until"
+		values[":since"] = &types.AttributeValueMemberS{Value: filter.Since.UTC().Format(time.RFC3339)}
+		values[":until"] = &types.AttributeValueMemberS{Value: filter.Until.UTC().Format(time.RFC3339)}
+	case filter.Since != nil:
+		keyCond += " AND #started >= :since"
+		values[":since"] = &types.AttributeValueMemberS{Value: filter.Since.UTC().Format(time.RFC3339)}
+	case filter.Until != nil:
+		keyCond += " AND #started <= :until"
+		values[":until"] = &types.AttributeValueMemberS{Value: filter.Until.UTC().Format(time.RFC3339)}
+	default:
+		delete(names, "#started")
+	}
+
+	// FilterExpression: status set, workflow, ticket, labels (all AND).
+	var filters []string
+
+	if len(filter.Statuses) > 0 {
+		names["#st"] = AttrStatus
+		var placeholders []string
+		for i, st := range filter.Statuses {
+			ph := fmt.Sprintf(":st%d", i)
+			placeholders = append(placeholders, ph)
+			values[ph] = &types.AttributeValueMemberS{Value: string(st)}
+		}
+		filters = append(filters, fmt.Sprintf("#st IN (%s)", strings.Join(placeholders, ", ")))
+	}
+	if filter.Workflow != "" {
+		names["#wf"] = AttrWorkflow
+		values[":wf"] = &types.AttributeValueMemberS{Value: filter.Workflow}
+		filters = append(filters, "#wf = :wf")
+	}
+	if filter.Ticket != "" {
+		names["#tk"] = AttrTicket
+		values[":tk"] = &types.AttributeValueMemberS{Value: filter.Ticket}
+		filters = append(filters, "#tk = :tk")
+	}
+	if len(filter.Labels) > 0 {
+		names["#labels"] = AttrLabels
+		// Deterministic ordering so the expression is stable across calls.
+		keys := make([]string, 0, len(filter.Labels))
+		for k := range filter.Labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for i, k := range keys {
+			nameKey := fmt.Sprintf("#lk%d", i)
+			valKey := fmt.Sprintf(":lv%d", i)
+			names[nameKey] = k
+			values[valKey] = &types.AttributeValueMemberS{Value: filter.Labels[k]}
+			filters = append(filters, fmt.Sprintf("#labels.%s = %s", nameKey, valKey))
+		}
+	}
+
+	input := &dynamodb.QueryInput{
+		TableName:                 aws.String(s.tableName),
+		IndexName:                 aws.String(GSIByRepo),
+		KeyConditionExpression:    aws.String(keyCond),
+		ExpressionAttributeNames:  names,
+		ExpressionAttributeValues: values,
+		ScanIndexForward:          aws.Bool(false),
+	}
+	if len(filters) > 0 {
+		input.FilterExpression = aws.String(strings.Join(filters, " AND "))
+	}
+
+	runs := make([]*Run, 0)
+	for {
+		out, err := s.client.Query(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("listing runs: %w", err)
+		}
+		for _, item := range out.Items {
+			run, err := parseRun(item)
+			if err != nil {
+				return nil, fmt.Errorf("listing runs: %w", err)
+			}
+			runs = append(runs, run)
+		}
+		if out.LastEvaluatedKey == nil {
+			break
+		}
+		input.ExclusiveStartKey = out.LastEvaluatedKey
+	}
+	return runs, nil
 }
 
 func (s *DynamoStore) ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error) {

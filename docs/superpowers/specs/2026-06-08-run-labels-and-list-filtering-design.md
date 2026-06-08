@@ -151,15 +151,20 @@ ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 update all call sites (`list`, and any internal callers). The shared conformance suite covers
 both stores against the new method.
 
-- **SQLite**: builds a parameterized `WHERE repo = ?` plus, per filter, `AND status IN (...)`,
-  `AND workflow = ?`, `AND ticket = ?`, `AND started_at >= ?`, `AND started_at <= ?`, and
-  `AND json_extract(labels, '$.<key>') = ?` for each label pair. Ordered `started_at DESC`.
-- **DynamoDB**: queries the existing **`by-repo` GSI** (partition `repo`, sort key `started_at`,
-  `ScanIndexForward=false`). The `started_at` range (`Since`/`Until`) goes in the
-  `KeyConditionExpression`. Statuses, workflow, ticket, and each label pair (`labels.#k = :v`) go
-  in a `FilterExpression`. No new GSI: this reuses the index that already scopes to repo and
-  scales fine at the stated factory volume (~1000s of runs/repo over weeks). DynamoDB bills for
-  scanned items, not returned, which is acceptable here; documented as the chosen tradeoff.
+- **DynamoDB (the path that matters — often many thousands of rows/repo)**: queries the existing
+  **`by-repo` GSI** (partition `repo`, sort key `started_at`, `ScanIndexForward=false`) with a
+  real, server-side **`FilterExpression`** so the query is fast and the wire payload small. The
+  `started_at` range (`Since`/`Until`) goes in the `KeyConditionExpression` (sort-key range);
+  statuses, workflow, ticket, and each label pair (`labels.#k = :v`) go in the `FilterExpression`,
+  all AND-combined. No new GSI: this reuses the repo-scoping index and is the explicit goal — push
+  filtering to DynamoDB rather than ship rows to the CLI. The in-memory `functionalDynamo` test
+  fake is generalized to actually evaluate these filter expressions so the conformance suite
+  exercises the real query path.
+- **SQLite (local-testing-only — perf irrelevant)**: kept deliberately simple. Fetches the
+  repo-scoped rows (existing by-repo query, with the `started_at` range applied in SQL) and applies
+  the remaining status/workflow/ticket/label predicates via a shared `matchesFilter(run, filter)`
+  Go helper. Not optimized — docker/SQLite is the local pipeline-test path, not production, so the
+  added query machinery lives where it's worth it (DynamoDB).
 
 ### 4. Showing labels in output
 

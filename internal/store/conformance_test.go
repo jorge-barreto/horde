@@ -133,60 +133,141 @@ func (f *functionalDynamo) Query(_ context.Context, params *dynamodb.QueryInput,
 		}
 	}
 
-	// Extract partition key value from KeyConditionExpression.
-	var partitionVal string
+	// Parse the KeyConditionExpression: partition equality plus an optional
+	// started_at range (>=, <=, or BETWEEN) on the sort key. This mirrors the
+	// real GSI key-condition surface the store uses.
+	var partitionVal, sinceVal, untilVal string
 	if params.KeyConditionExpression != nil {
-		parts := strings.SplitN(*params.KeyConditionExpression, " = ", 2)
-		if len(parts) == 2 {
-			placeholder := strings.TrimSpace(parts[1])
-			if sv, ok := params.ExpressionAttributeValues[placeholder].(*types.AttributeValueMemberS); ok {
-				partitionVal = sv.Value
+		keyExpr := *params.KeyConditionExpression
+		resolve := func(ph string) string {
+			if sv, ok := params.ExpressionAttributeValues[strings.TrimSpace(ph)].(*types.AttributeValueMemberS); ok {
+				return sv.Value
+			}
+			return ""
+		}
+		// Pull out a BETWEEN range first so its internal " AND " is not split
+		// as a clause separator. "#started BETWEEN :since AND :until".
+		if idx := strings.Index(keyExpr, "BETWEEN"); idx != -1 {
+			rest := keyExpr[idx+len("BETWEEN"):]
+			bounds := strings.SplitN(rest, " AND ", 2)
+			if len(bounds) == 2 {
+				sinceVal = resolve(bounds[0])
+				untilVal = resolve(bounds[1])
+			}
+			keyExpr = keyExpr[:idx] // leave the partition (and a dangling "AND #started")
+		}
+		for _, clause := range strings.Split(keyExpr, " AND ") {
+			clause = strings.TrimSpace(clause)
+			switch {
+			case clause == "" || strings.HasSuffix(clause, "#started"):
+				// dangling "#started" left by trimming a BETWEEN; ignore.
+			case strings.Contains(clause, ">="):
+				sinceVal = resolve(clause[strings.Index(clause, ">=")+2:])
+			case strings.Contains(clause, "<="):
+				untilVal = resolve(clause[strings.Index(clause, "<=")+2:])
+			case strings.Contains(clause, " = "):
+				parts := strings.SplitN(clause, " = ", 2)
+				partitionVal = resolve(parts[1])
 			}
 		}
 	}
 
-	// Filter by partition key.
+	// Filter by partition key and any started_at range.
 	var matching []map[string]types.AttributeValue
 	for _, item := range f.items {
-		if getS(item, partitionKeyAttr) == partitionVal {
-			matching = append(matching, copyItem(item))
+		if getS(item, partitionKeyAttr) != partitionVal {
+			continue
 		}
+		started := getS(item, "started_at")
+		if sinceVal != "" && started < sinceVal {
+			continue
+		}
+		if untilVal != "" && started > untilVal {
+			continue
+		}
+		matching = append(matching, copyItem(item))
 	}
 
-	// Apply FilterExpression.
+	// Apply FilterExpression generically: support the AND-combined predicates
+	// the store emits — "#x = :y" equality (including dotted "#labels.#k = :v"
+	// map access) and "#st IN (:s0, :s1, …)" set membership. This keeps the
+	// fake honest against the real query path rather than recognizing one
+	// hardcoded pattern.
 	if params.FilterExpression != nil {
-		filterExpr := *params.FilterExpression
-		if strings.Contains(filterExpr, "IN (:pending, :running)") {
-			pendingVal := ""
-			runningVal := ""
-			if sv, ok := params.ExpressionAttributeValues[":pending"].(*types.AttributeValueMemberS); ok {
-				pendingVal = sv.Value
-			}
-			if sv, ok := params.ExpressionAttributeValues[":running"].(*types.AttributeValueMemberS); ok {
-				runningVal = sv.Value
-			}
-
-			repoVal := ""
-			hasRepoFilter := strings.Contains(filterExpr, "#repo = :repo")
-			if hasRepoFilter {
-				if sv, ok := params.ExpressionAttributeValues[":repo"].(*types.AttributeValueMemberS); ok {
-					repoVal = sv.Value
+		resolveName := func(tok string) string {
+			tok = strings.TrimSpace(tok)
+			// Dotted map access: "#labels.#k0" -> labels key.
+			if strings.Contains(tok, ".") {
+				dot := strings.SplitN(tok, ".", 2)
+				container := params.ExpressionAttributeNames[dot[0]]
+				key := dot[1]
+				if resolved, ok := params.ExpressionAttributeNames[key]; ok {
+					key = resolved
 				}
+				return container + "." + key
 			}
+			if resolved, ok := params.ExpressionAttributeNames[tok]; ok {
+				return resolved
+			}
+			return tok
+		}
+		resolveVal := func(ph string) string {
+			if sv, ok := params.ExpressionAttributeValues[strings.TrimSpace(ph)].(*types.AttributeValueMemberS); ok {
+				return sv.Value
+			}
+			return ""
+		}
+		// itemFieldValue resolves a (possibly dotted, map-access) attribute path
+		// to the item's stored string value.
+		itemFieldValue := func(item map[string]types.AttributeValue, path string) string {
+			if !strings.Contains(path, ".") {
+				return getS(item, path)
+			}
+			parts := strings.SplitN(path, ".", 2)
+			mv, ok := item[parts[0]].(*types.AttributeValueMemberM)
+			if !ok {
+				return ""
+			}
+			if sv, ok := mv.Value[parts[1]].(*types.AttributeValueMemberS); ok {
+				return sv.Value
+			}
+			return ""
+		}
 
-			var filtered []map[string]types.AttributeValue
-			for _, item := range matching {
-				st := getS(item, "status")
-				if st != pendingVal && st != runningVal {
+		var filtered []map[string]types.AttributeValue
+		for _, item := range matching {
+			ok := true
+			for _, clause := range strings.Split(*params.FilterExpression, " AND ") {
+				clause = strings.TrimSpace(clause)
+				if idx := strings.Index(clause, " IN ("); idx != -1 {
+					field := resolveName(clause[:idx])
+					inner := clause[idx+len(" IN (") : strings.LastIndex(clause, ")")]
+					matched := false
+					for _, ph := range strings.Split(inner, ",") {
+						if itemFieldValue(item, field) == resolveVal(ph) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						ok = false
+						break
+					}
 					continue
 				}
-				if hasRepoFilter && getS(item, "repo") != repoVal {
-					continue
+				if parts := strings.SplitN(clause, " = ", 2); len(parts) == 2 {
+					field := resolveName(parts[0])
+					if itemFieldValue(item, field) != resolveVal(parts[1]) {
+						ok = false
+						break
+					}
 				}
+			}
+			if ok {
 				filtered = append(filtered, item)
 			}
-			matching = filtered
 		}
+		matching = filtered
 	}
 
 	// Sort by started_at. Match real DynamoDB: ascending by default, descending
@@ -770,6 +851,242 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("ListRuns/RepoScopeAndOrder", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-scope"
+
+		early := conformanceRun("lr-early", repo, "PROJ-1", StatusPending)
+		early.StartedAt = time.Date(2026, 4, 15, 9, 0, 0, 0, time.UTC)
+		early.TimeoutAt = early.StartedAt.Add(time.Hour)
+		late := conformanceRun("lr-late", repo, "PROJ-2", StatusPending)
+		late.StartedAt = time.Date(2026, 4, 15, 11, 0, 0, 0, time.UTC)
+		late.TimeoutAt = late.StartedAt.Add(time.Hour)
+		other := conformanceRun("lr-other", "github.com/org/different", "PROJ-3", StatusPending)
+
+		for _, r := range []*Run{early, late, other} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun %s: %v", r.ID, err)
+			}
+		}
+
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		// Repo-scoped, newest first.
+		if want := []string{"lr-late", "lr-early"}; !reflect.DeepEqual(runIDs(got), want) {
+			t.Errorf("ids = %v, want %v", runIDs(got), want)
+		}
+	})
+
+	t.Run("ListRuns/StatusSet", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-status"
+		for _, st := range []Status{StatusPending, StatusRunning, StatusSuccess, StatusFailed} {
+			r := conformanceRun("lr-"+string(st), repo, "PROJ-1", st)
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Statuses: []Status{StatusPending, StatusRunning}})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
+		}
+		for _, r := range got {
+			if r.Status != StatusPending && r.Status != StatusRunning {
+				t.Errorf("unexpected status %q", r.Status)
+			}
+		}
+	})
+
+	t.Run("ListRuns/Workflow", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-wf"
+		impl := conformanceRun("lr-impl", repo, "PROJ-1", StatusSuccess)
+		impl.Workflow = "implement-ticket"
+		qa := conformanceRun("lr-qa", repo, "PROJ-2", StatusSuccess)
+		qa.Workflow = "qa-pr"
+		for _, r := range []*Run{impl, qa} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Workflow: "implement-ticket"})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "lr-impl" {
+			t.Fatalf("ids = %v, want [lr-impl]", runIDs(got))
+		}
+	})
+
+	t.Run("ListRuns/Ticket", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-ticket"
+		a := conformanceRun("lr-a", repo, "KS-1", StatusSuccess)
+		b := conformanceRun("lr-b", repo, "KS-2", StatusSuccess)
+		for _, r := range []*Run{a, b} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Ticket: "KS-2"})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "lr-b" {
+			t.Fatalf("ids = %v, want [lr-b]", runIDs(got))
+		}
+	})
+
+	t.Run("ListRuns/SingleLabel", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-label1"
+		match := conformanceRun("lr-match", repo, "PROJ-1", StatusSuccess)
+		match.Labels = map[string]string{"epic": "KS-100"}
+		nomatch := conformanceRun("lr-nomatch", repo, "PROJ-2", StatusSuccess)
+		nomatch.Labels = map[string]string{"epic": "KS-200"}
+		nolabel := conformanceRun("lr-nolabel", repo, "PROJ-3", StatusSuccess)
+		for _, r := range []*Run{match, nomatch, nolabel} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Labels: map[string]string{"epic": "KS-100"}})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "lr-match" {
+			t.Fatalf("ids = %v, want [lr-match]", runIDs(got))
+		}
+	})
+
+	t.Run("ListRuns/MultiLabelAND", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-label2"
+		both := conformanceRun("lr-both", repo, "PROJ-1", StatusSuccess)
+		both.Labels = map[string]string{"epic": "KS-100", "variant": "v3"}
+		onlyEpic := conformanceRun("lr-epic", repo, "PROJ-2", StatusSuccess)
+		onlyEpic.Labels = map[string]string{"epic": "KS-100", "variant": "v2"}
+		for _, r := range []*Run{both, onlyEpic} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		// AND: both keys must match.
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Labels: map[string]string{"epic": "KS-100", "variant": "v3"}})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "lr-both" {
+			t.Fatalf("ids = %v, want [lr-both]", runIDs(got))
+		}
+	})
+
+	t.Run("ListRuns/TimeRange", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-time"
+		mk := func(id string, h int) *Run {
+			r := conformanceRun(id, repo, "PROJ-1", StatusSuccess)
+			r.StartedAt = time.Date(2026, 4, 15, h, 0, 0, 0, time.UTC)
+			r.TimeoutAt = r.StartedAt.Add(time.Hour)
+			return r
+		}
+		for _, r := range []*Run{mk("lr-8", 8), mk("lr-10", 10), mk("lr-12", 12)} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		since := time.Date(2026, 4, 15, 9, 0, 0, 0, time.UTC)
+		until := time.Date(2026, 4, 15, 11, 0, 0, 0, time.UTC)
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Since: &since, Until: &until})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "lr-10" {
+			t.Fatalf("ids = %v, want [lr-10]", runIDs(got))
+		}
+	})
+
+	t.Run("ListRuns/CombinedFilters", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-combo"
+		want := conformanceRun("lr-want", repo, "KS-1", StatusRunning)
+		want.Workflow = "implement-ticket"
+		want.Labels = map[string]string{"epic": "KS-100"}
+		// Differs by status.
+		wrongStatus := conformanceRun("lr-status", repo, "KS-1", StatusSuccess)
+		wrongStatus.Workflow = "implement-ticket"
+		wrongStatus.Labels = map[string]string{"epic": "KS-100"}
+		// Differs by label.
+		wrongLabel := conformanceRun("lr-label", repo, "KS-1", StatusRunning)
+		wrongLabel.Workflow = "implement-ticket"
+		wrongLabel.Labels = map[string]string{"epic": "KS-999"}
+		for _, r := range []*Run{want, wrongStatus, wrongLabel} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		got, err := s.ListRuns(ctx, RunFilter{
+			Repo:     repo,
+			Statuses: []Status{StatusRunning},
+			Workflow: "implement-ticket",
+			Ticket:   "KS-1",
+			Labels:   map[string]string{"epic": "KS-100"},
+		})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "lr-want" {
+			t.Fatalf("ids = %v, want [lr-want]", runIDs(got))
+		}
+	})
+
+	t.Run("ListRuns/NoFiltersReturnsAllForRepo", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-all"
+		for _, st := range []Status{StatusPending, StatusSuccess, StatusFailed} {
+			r := conformanceRun("lr-"+string(st), repo, "PROJ-1", st)
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("len = %d, want 3 (no status filter = all statuses)", len(got))
+		}
+	})
+
+	t.Run("ListRuns/EmptyResultNonNil", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		got, err := s.ListRuns(ctx, RunFilter{Repo: "github.com/org/nope"})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if got == nil {
+			t.Error("expected non-nil empty slice, got nil")
+		}
+		if len(got) != 0 {
+			t.Errorf("len = %d, want 0", len(got))
+		}
+	})
+
 	t.Run("ListByRepo/EmptyResult", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)
@@ -1093,6 +1410,103 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if got.Metadata["log_group"] != "/ecs/horde-worker" {
 			t.Errorf("Metadata[log_group]: got %q", got.Metadata["log_group"])
+		}
+	})
+
+	t.Run("LabelsRoundTrip/Nil", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		run := conformanceRun("r1", "github.com/org/repo", "PROJ-1", StatusPending)
+		// Labels is nil by default from conformanceRun.
+
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		got, err := s.GetRun(ctx, "r1")
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		if got.Labels != nil {
+			t.Errorf("Labels: expected nil, got %v", got.Labels)
+		}
+	})
+
+	t.Run("LabelsRoundTrip/Empty", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		run := conformanceRun("r1", "github.com/org/repo", "PROJ-1", StatusPending)
+		run.Labels = map[string]string{}
+
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		got, err := s.GetRun(ctx, "r1")
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		if got.Labels == nil {
+			t.Error("Labels: expected non-nil empty map, got nil")
+		}
+		if len(got.Labels) != 0 {
+			t.Errorf("Labels len: got %d, want 0", len(got.Labels))
+		}
+	})
+
+	t.Run("LabelsRoundTrip/Populated", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		run := conformanceRun("r1", "github.com/org/repo", "PROJ-1", StatusPending)
+		run.Labels = map[string]string{
+			"epic":    "KS-100",
+			"variant": "v3",
+		}
+
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		got, err := s.GetRun(ctx, "r1")
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		if len(got.Labels) != 2 {
+			t.Fatalf("Labels len: got %d, want 2", len(got.Labels))
+		}
+		if got.Labels["epic"] != "KS-100" {
+			t.Errorf("Labels[epic]: got %q, want %q", got.Labels["epic"], "KS-100")
+		}
+		if got.Labels["variant"] != "v3" {
+			t.Errorf("Labels[variant]: got %q, want %q", got.Labels["variant"], "v3")
+		}
+	})
+
+	// Labels and Metadata are independent fields that must not bleed into each
+	// other — provider-internal Metadata (cluster_arn, …) and user Labels share
+	// nothing despite both being map[string]string.
+	t.Run("LabelsRoundTrip/IndependentFromMetadata", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		run := conformanceRun("r1", "github.com/org/repo", "PROJ-1", StatusPending)
+		run.Metadata = map[string]string{"cluster_arn": "arn:aws:ecs:x"}
+		run.Labels = map[string]string{"epic": "KS-100"}
+
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		got, err := s.GetRun(ctx, "r1")
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		if len(got.Metadata) != 1 || got.Metadata["cluster_arn"] != "arn:aws:ecs:x" {
+			t.Errorf("Metadata: got %v, want {cluster_arn: arn:aws:ecs:x}", got.Metadata)
+		}
+		if len(got.Labels) != 1 || got.Labels["epic"] != "KS-100" {
+			t.Errorf("Labels: got %v, want {epic: KS-100}", got.Labels)
+		}
+		if _, leaked := got.Labels["cluster_arn"]; leaked {
+			t.Error("Labels leaked a Metadata key")
+		}
+		if _, leaked := got.Metadata["epic"]; leaked {
+			t.Error("Metadata leaked a Labels key")
 		}
 	})
 }

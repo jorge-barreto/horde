@@ -15,6 +15,7 @@ const (
 	AttrProvider     = "provider"
 	AttrInstanceID   = "instance_id"
 	AttrMetadata     = "metadata"
+	AttrLabels       = "labels"
 	AttrStatus       = "status"
 	AttrExitCode     = "exit_code"
 	AttrLaunchedBy   = "launched_by"

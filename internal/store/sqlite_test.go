@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,109 @@ import (
 	"testing"
 	"time"
 )
+
+// TestNewSQLiteStore_MigratesLegacyDB pins the ALTER-if-missing migration:
+// a database created before the labels column existed must gain the column on
+// open, and labeled runs must round-trip afterward. Without the migration, an
+// existing ~/.horde/horde.db would break on every labeled write/read.
+func TestNewSQLiteStore_MigratesLegacyDB(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+
+	// Create a DB with the pre-labels (15-column) schema.
+	legacy, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("opening legacy db: %v", err)
+	}
+	const legacyDDL = `CREATE TABLE runs (
+		id             TEXT PRIMARY KEY,
+		repo           TEXT NOT NULL,
+		ticket         TEXT NOT NULL,
+		branch         TEXT NOT NULL DEFAULT '',
+		workflow       TEXT NOT NULL DEFAULT '',
+		provider       TEXT NOT NULL,
+		instance_id    TEXT NOT NULL DEFAULT '',
+		metadata       TEXT,
+		status         TEXT NOT NULL,
+		exit_code      INTEGER,
+		launched_by    TEXT NOT NULL,
+		started_at     TEXT NOT NULL,
+		completed_at   TEXT,
+		timeout_at     TEXT NOT NULL,
+		total_cost_usd REAL
+	);`
+	if _, err := legacy.Exec(legacyDDL); err != nil {
+		t.Fatalf("creating legacy schema: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("closing legacy db: %v", err)
+	}
+
+	// Opening through NewSQLiteStore must migrate it.
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore on legacy db: %v", err)
+	}
+	defer s.Close()
+
+	// The labels column must now exist.
+	rows, err := s.db.Query("PRAGMA table_info(runs)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info: %v", err)
+	}
+	defer rows.Close()
+	hasLabels := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dfltValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if name == "labels" {
+			hasLabels = true
+		}
+	}
+	if !hasLabels {
+		t.Fatal("labels column was not added to legacy db")
+	}
+
+	// A labeled run must round-trip through the migrated DB.
+	ctx := context.Background()
+	run := newTestRun()
+	run.ID = "migrated-1"
+	run.Labels = map[string]string{"epic": "KS-100"}
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun on migrated db: %v", err)
+	}
+	got, err := s.GetRun(ctx, "migrated-1")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Labels["epic"] != "KS-100" {
+		t.Errorf("Labels[epic]: got %q, want %q", got.Labels["epic"], "KS-100")
+	}
+}
+
+// TestNewSQLiteStore_MigrationIsIdempotent pins that opening an
+// already-migrated DB a second time is a no-op (the ALTER is guarded), so the
+// store opens cleanly on every invocation.
+func TestNewSQLiteStore_MigrationIsIdempotent(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "horde.db")
+	s1, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	s1.Close()
+	s2, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("second open (idempotent migration): %v", err)
+	}
+	s2.Close()
+}
 
 func TestNewSQLiteStore_CreatesDirectoryAndFile(t *testing.T) {
 	t.Parallel()
@@ -88,7 +192,7 @@ func TestNewSQLiteStore_CorrectColumns(t *testing.T) {
 
 	want := []string{
 		"id", "repo", "ticket", "branch", "workflow", "provider",
-		"instance_id", "metadata", "status", "exit_code", "launched_by",
+		"instance_id", "metadata", "labels", "status", "exit_code", "launched_by",
 		"started_at", "completed_at", "timeout_at", "total_cost_usd",
 	}
 

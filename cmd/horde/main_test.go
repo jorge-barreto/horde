@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -4384,6 +4386,143 @@ func TestList_JSON_Empty(t *testing.T) {
 	}
 	if v.Runs == nil || len(v.Runs) != 0 {
 		t.Errorf("Runs = %v, want empty non-nil slice", v.Runs)
+	}
+}
+
+// seedFilterRuns populates a store with a fixed set of runs across statuses,
+// workflows, tickets, and labels for the list-filter tests.
+func seedFilterRuns(t *testing.T, dbPath string) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st.Close()
+	now := time.Now()
+	done := now.Add(-10 * time.Minute)
+	repo := "github.com/test/repo.git"
+	mk := func(id, ticket, workflow string, status store.Status, labels map[string]string, cost *float64) *store.Run {
+		r := &store.Run{
+			ID: id, Ticket: ticket, Workflow: workflow, Status: status, Repo: repo,
+			Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-time.Minute),
+			TimeoutAt: now.Add(time.Hour), Labels: labels, TotalCostUSD: cost,
+		}
+		if status.IsTerminal() {
+			r.CompletedAt = &done
+		}
+		return r
+	}
+	runs := []*store.Run{
+		mk("filt00000001", "KS-1", "implement-ticket", store.StatusRunning, map[string]string{"epic": "KS-100"}, ptrf(1.00)),
+		mk("filt00000002", "KS-2", "implement-ticket", store.StatusSuccess, map[string]string{"epic": "KS-100"}, ptrf(2.00)),
+		mk("filt00000003", "KS-3", "qa-pr", store.StatusSuccess, map[string]string{"epic": "KS-200"}, ptrf(4.00)),
+		mk("filt00000004", "KS-4", "qa-pr", store.StatusFailed, nil, nil),
+	}
+	for _, r := range runs {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("creating run %s: %v", r.ID, err)
+		}
+	}
+}
+
+func listJSON(t *testing.T, args ...string) ListV1 {
+	t.Helper()
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	full := append([]string{"horde", "--provider", "docker", "--json", "list"}, args...)
+	if err := app.Run(context.Background(), full); err != nil {
+		t.Fatalf("list %v: unexpected error: %v\noutput: %s", args, err, buf.Bytes())
+	}
+	var v ListV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	return v
+}
+
+func listIDs(v ListV1) []string {
+	ids := make([]string, len(v.Runs))
+	for i, r := range v.Runs {
+		ids[i] = r.ID
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func TestList_JSON_FilterByLabel(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	// epic=KS-100 across all statuses (so --all to include terminal runs).
+	v := listJSON(t, "--all", "--label", "epic=KS-100")
+	if got := listIDs(v); !reflect.DeepEqual(got, []string{"filt00000001", "filt00000002"}) {
+		t.Errorf("ids = %v, want [filt00000001 filt00000002]", got)
+	}
+}
+
+func TestList_JSON_FilterByWorkflow(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	v := listJSON(t, "--all", "--workflow", "qa-pr")
+	if got := listIDs(v); !reflect.DeepEqual(got, []string{"filt00000003", "filt00000004"}) {
+		t.Errorf("ids = %v, want [filt00000003 filt00000004]", got)
+	}
+}
+
+func TestList_JSON_FilterByStatus(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	// --status implies looking across terminal runs (no need for --all).
+	v := listJSON(t, "--status", "success")
+	if got := listIDs(v); !reflect.DeepEqual(got, []string{"filt00000002", "filt00000003"}) {
+		t.Errorf("ids = %v, want [filt00000002 filt00000003]", got)
+	}
+}
+
+func TestList_JSON_CombinedFilters(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	v := listJSON(t, "--status", "success", "--workflow", "implement-ticket", "--label", "epic=KS-100")
+	if got := listIDs(v); !reflect.DeepEqual(got, []string{"filt00000002"}) {
+		t.Errorf("ids = %v, want [filt00000002]", got)
+	}
+}
+
+func TestList_JSON_SummaryOverCohort(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	// epic=KS-100 cohort: filt001 ($1) + filt002 ($2) = $3, count 2.
+	v := listJSON(t, "--all", "--label", "epic=KS-100")
+	if v.Summary.Count != 2 {
+		t.Errorf("Summary.Count = %d, want 2", v.Summary.Count)
+	}
+	if got := v.Summary.TotalCostUSD; got < 2.99 || got > 3.01 {
+		t.Errorf("Summary.TotalCostUSD = %v, want ~3.00", got)
+	}
+}
+
+func TestList_JSON_InvalidLabelFilter(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	err := app.Run(context.Background(), []string{"horde", "--provider", "docker", "list", "--label", "bogus"})
+	if err == nil {
+		t.Fatal("expected error for malformed --label filter, got nil")
 	}
 }
 

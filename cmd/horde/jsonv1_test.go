@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jorge-barreto/horde/internal/store"
+)
 
 func TestParseOrcDuration(t *testing.T) {
 	t.Parallel()
@@ -35,5 +42,87 @@ func TestParseOrcDuration(t *testing.T) {
 		if ok && got != tc.want {
 			t.Errorf("parseOrcDuration(%q) = %v, want %v", tc.in, got, tc.want)
 		}
+	}
+}
+
+func ptrf(f float64) *float64 { return &f }
+
+func TestStatusToV1_Labels(t *testing.T) {
+	t.Parallel()
+	run := &store.Run{
+		ID:        "r1",
+		Ticket:    "KS-1",
+		Status:    store.StatusRunning,
+		StartedAt: time.Now(),
+		Labels:    map[string]string{"epic": "KS-100"},
+	}
+	v := statusToV1(run)
+	if v.Labels["epic"] != "KS-100" {
+		t.Errorf("Labels[epic] = %q, want %q", v.Labels["epic"], "KS-100")
+	}
+}
+
+func TestStatusToV1_LabelsOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	run := &store.Run{ID: "r1", Ticket: "KS-1", Status: store.StatusRunning, StartedAt: time.Now()}
+	b, err := json.Marshal(statusToV1(run))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "labels") {
+		t.Errorf("expected labels omitted when empty, got %s", b)
+	}
+}
+
+func TestListToV1_Labels(t *testing.T) {
+	t.Parallel()
+	runs := []*store.Run{
+		{ID: "r1", Ticket: "KS-1", Status: store.StatusSuccess, StartedAt: time.Now(), Labels: map[string]string{"epic": "KS-100"}},
+	}
+	v := listToV1(runs)
+	if len(v.Runs) != 1 {
+		t.Fatalf("len = %d, want 1", len(v.Runs))
+	}
+	if v.Runs[0].Labels["epic"] != "KS-100" {
+		t.Errorf("Labels[epic] = %q, want %q", v.Runs[0].Labels["epic"], "KS-100")
+	}
+}
+
+func TestListToV1_Summary(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	runs := []*store.Run{
+		{ID: "r1", Status: store.StatusSuccess, StartedAt: now, TotalCostUSD: ptrf(1.50)},
+		{ID: "r2", Status: store.StatusSuccess, StartedAt: now, TotalCostUSD: ptrf(2.32)},
+		{ID: "r3", Status: store.StatusRunning, StartedAt: now}, // nil cost contributes 0
+	}
+	v := listToV1(runs)
+	if v.Summary.Count != 3 {
+		t.Errorf("Summary.Count = %d, want 3", v.Summary.Count)
+	}
+	if got := v.Summary.TotalCostUSD; got < 3.81 || got > 3.83 {
+		t.Errorf("Summary.TotalCostUSD = %v, want ~3.82", got)
+	}
+}
+
+func TestListToV1_SummaryEmpty(t *testing.T) {
+	t.Parallel()
+	v := listToV1(nil)
+	if v.Summary.Count != 0 {
+		t.Errorf("Summary.Count = %d, want 0", v.Summary.Count)
+	}
+	if v.Summary.TotalCostUSD != 0 {
+		t.Errorf("Summary.TotalCostUSD = %v, want 0", v.Summary.TotalCostUSD)
+	}
+	// runs must always be a (possibly empty) array, never null.
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"runs":[]`) {
+		t.Errorf("expected empty runs array, got %s", b)
+	}
+	if !strings.Contains(string(b), `"summary"`) {
+		t.Errorf("expected summary present, got %s", b)
 	}
 }

@@ -4888,3 +4888,58 @@ func TestAuditRelPath(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEnvFlags(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		raw     []string
+		want    map[string]string
+		wantErr bool
+	}{
+		{"nil", nil, map[string]string{}, false},
+		{"empty", []string{}, map[string]string{}, false},
+		{"single", []string{"FOO=bar"}, map[string]string{"FOO": "bar"}, false},
+		{"multiple", []string{"FOO=bar", "BAZ=qux"}, map[string]string{"FOO": "bar", "BAZ": "qux"}, false},
+		{"empty value allowed", []string{"FOO="}, map[string]string{"FOO": ""}, false},
+		{"value with equals", []string{"DSN=a=b=c"}, map[string]string{"DSN": "a=b=c"}, false},
+		{"leading underscore key", []string{"_X=1"}, map[string]string{"_X": "1"}, false},
+		{"duplicate last wins", []string{"FOO=a", "FOO=b"}, map[string]string{"FOO": "b"}, false},
+		{"missing equals", []string{"FOO"}, nil, true},
+		{"empty key", []string{"=bar"}, nil, true},
+		{"key starts with digit", []string{"1FOO=bar"}, nil, true},
+		{"key with dash", []string{"FOO-BAR=baz"}, nil, true},
+		{"key with space", []string{"FOO BAR=baz"}, nil, true},
+		{"reserved REPO_URL", []string{"REPO_URL=x"}, nil, true},
+		{"reserved TICKET", []string{"TICKET=x"}, nil, true},
+		{"reserved BRANCH", []string{"BRANCH=x"}, nil, true},
+		{"reserved WORKFLOW", []string{"WORKFLOW=x"}, nil, true},
+		{"reserved RUN_ID", []string{"RUN_ID=x"}, nil, true},
+		{"reserved ARTIFACTS_BUCKET", []string{"ARTIFACTS_BUCKET=x"}, nil, true},
+		{"reserved ORC_EXTRA_ARGS", []string{"ORC_EXTRA_ARGS=x"}, nil, true},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseEnvFlags(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseEnvFlags(%v) = %v, want error", tc.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseEnvFlags(%v) unexpected error: %v", tc.raw, err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("parseEnvFlags(%v) = %v, want %v", tc.raw, got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Errorf("parseEnvFlags(%v)[%q] = %q, want %q", tc.raw, k, got[k], v)
+				}
+			}
+		})
+	}
+}

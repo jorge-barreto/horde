@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -142,6 +143,11 @@ kill some runs before launching more.`,
 				Name:  "force",
 				Usage: "Force launch even if already running",
 			},
+			&cli.StringSliceFlag{
+				Name:    "env",
+				Aliases: []string{"e"},
+				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see `horde docs config` for the ECS caveat).",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -154,6 +160,11 @@ kill some runs before launching more.`,
 			workflow := strings.TrimSpace(cmd.String("workflow"))
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
+
+			extraEnv, err := parseEnvFlags(cmd.StringSlice("env"))
+			if err != nil {
+				return err
+			}
 
 			if workflow == "" {
 				return fmt.Errorf("--workflow is required (e.g. --workflow implement-ticket)")
@@ -200,9 +211,22 @@ kill some runs before launching more.`,
 				return err
 			}
 
-			envPath, _, secretRemap, err := resolveSecretsForLaunch(provName, cwd)
+			envPath, spec, secretRemap, err := resolveSecretsForLaunch(provName, cwd)
 			if err != nil {
 				return err
+			}
+
+			// On ECS a per-launch --env override of a declared secret has no
+			// effect: the secret lives on the task definition and AWS gives it
+			// precedence over the RunTask environment override. Warn rather
+			// than fail — the var is still injected, and non-secret keys (plus
+			// every key on docker) override as expected.
+			if provName == config.ProviderECS {
+				for k := range extraEnv {
+					if _, declared := spec[k]; declared {
+						fmt.Fprintf(os.Stderr, "warning: --env %s overrides a declared secret; on ECS the task-definition secret takes precedence, so this override will not take effect\n", k)
+					}
+				}
 			}
 
 			id, err := runid.Generate()
@@ -286,6 +310,7 @@ kill some runs before launching more.`,
 				HomeDir:        homeDir,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,
+				ExtraEnv:       extraEnv,
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
@@ -1052,6 +1077,44 @@ name, displays the full article.`,
 
 type liveCosts struct {
 	TotalCostUSD float64 `json:"total_cost_usd"`
+}
+
+// envKeyPattern matches a valid POSIX-style env-var name.
+var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// reservedEnvKeys are the horde-managed control vars wired from other launch
+// flags / run metadata. A --env override of any of these would break the run,
+// so parseEnvFlags rejects them.
+var reservedEnvKeys = map[string]bool{
+	"REPO_URL":         true,
+	"TICKET":           true,
+	"BRANCH":           true,
+	"WORKFLOW":         true,
+	"RUN_ID":           true,
+	"ARTIFACTS_BUCKET": true,
+	"ORC_EXTRA_ARGS":   true,
+}
+
+// parseEnvFlags turns repeatable --env KEY=VALUE entries into a map. KEY must
+// be a valid env-var name and must not be one of the horde-managed control
+// vars. VALUE may be empty and may itself contain '='. On a duplicate key the
+// last occurrence wins (consistent with docker run -e).
+func parseEnvFlags(raw []string) (map[string]string, error) {
+	out := make(map[string]string, len(raw))
+	for _, entry := range raw {
+		key, val, found := strings.Cut(entry, "=")
+		if !found {
+			return nil, fmt.Errorf("parsing --env %q: expected KEY=VALUE", entry)
+		}
+		if !envKeyPattern.MatchString(key) {
+			return nil, fmt.Errorf("parsing --env %q: invalid key %q (must match [A-Za-z_][A-Za-z0-9_]*)", entry, key)
+		}
+		if reservedEnvKeys[key] {
+			return nil, fmt.Errorf("parsing --env %q: %q is reserved by horde and cannot be overridden", entry, key)
+		}
+		out[key] = val
+	}
+	return out, nil
 }
 
 // fetchLiveCost reads the current cost from a running container's costs.json.

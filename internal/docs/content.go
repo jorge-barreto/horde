@@ -208,6 +208,36 @@ secrets (map, optional):
             env: STRIPE_API_KEY
             aws-secret: prepdesk/stripe-api-key
 
+Per-launch env vars (--env)
+---------------------------
+
+    Everything above is project-level: every run for a repo gets the same
+    set. For values that vary per launch — a feature flag, an experiment
+    variant, an orchestrator's run ID — pass --env KEY=VALUE on the launch.
+    The flag is repeatable:
+
+        horde launch PROJ-1 --workflow build \
+          --env PROMPT_VARIANT=v3 --env DEBUG=1
+
+    Keys must be valid env-var names ([A-Za-z_][A-Za-z0-9_]*). VALUE may be
+    empty (--env FLAG=) and may itself contain '='. On a duplicate key the
+    last --env wins. The horde-managed control vars (REPO_URL, TICKET,
+    BRANCH, WORKFLOW, RUN_ID, ARTIFACTS_BUCKET, ORC_EXTRA_ARGS) are reserved
+    and rejected.
+
+    Override of project secrets:
+
+        docker — a per-launch --env value overrides a project secret (or
+                 any .env value) of the same key. Use it to point one run at
+                 a staging key without editing .env.
+
+        ECS    — a declared secret of the same name takes precedence: the
+                 secret lives on the task definition and AWS wins over the
+                 RunTask environment override. horde injects the --env value
+                 anyway and prints a warning that it will not take effect.
+                 Overriding a non-secret key, and setting brand-new keys,
+                 work the same on both providers.
+
 File Location
 -------------
 

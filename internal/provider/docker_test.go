@@ -141,6 +141,66 @@ func TestDockerProvider_Launch_WithOrcArgs(t *testing.T) {
 	}
 }
 
+func TestDockerProvider_Launch_WithExtraEnv(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	containerID := strings.Repeat("e", 64)
+	dir := t.TempDir()
+	script := fmt.Sprintf("printf '%%s\\n' \"$@\" > %s\necho '%s'\n", argsFile, containerID)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Launch(context.Background(), LaunchOpts{
+		Repo: "r", Ticket: "T", Branch: "b", Workflow: "w", RunID: "id",
+		EnvFile:  "/secrets/.env",
+		ExtraEnv: map[string]string{"ZED": "last", "FOO": "bar=baz", "EMPTY": ""},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	joined := strings.Join(args, " ")
+
+	for _, want := range []string{
+		"-e FOO=bar=baz",
+		"-e ZED=last",
+		"-e EMPTY=",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args missing %q; got: %s", want, joined)
+		}
+	}
+
+	// Per-launch env must come AFTER --env-file so docker's later-wins
+	// semantics let it override an --env-file value of the same key.
+	envFileIdx := indexOf(args, "--env-file")
+	fooIdx := indexOf(args, "FOO=bar=baz")
+	if envFileIdx == -1 || fooIdx == -1 {
+		t.Fatalf("expected both --env-file and FOO=...; got: %v", args)
+	}
+	if fooIdx < envFileIdx {
+		t.Errorf("ExtraEnv FOO (idx %d) must come after --env-file (idx %d); got: %v", fooIdx, envFileIdx, args)
+	}
+
+	// Keys are emitted in sorted order for deterministic argv.
+	emptyIdx, fIdx, zIdx := indexOf(args, "EMPTY="), indexOf(args, "FOO=bar=baz"), indexOf(args, "ZED=last")
+	if !(emptyIdx < fIdx && fIdx < zIdx) {
+		t.Errorf("ExtraEnv keys not in sorted order: EMPTY=%d FOO=%d ZED=%d; got: %v", emptyIdx, fIdx, zIdx, args)
+	}
+}
+
+func indexOf(args []string, s string) int {
+	for i, a := range args {
+		if a == s {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestDockerProvider_Launch_NoOrcArgs(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args.txt")
 	dir := t.TempDir()

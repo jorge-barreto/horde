@@ -160,6 +160,13 @@ func (h *harness) Launch(ticket, workflow string, timeout time.Duration) string 
 // out (empty = provider default). ECS resume tests use this to run workflows
 // that only exist on the feature branch, not yet on origin's default branch.
 func (h *harness) LaunchBranch(ticket, workflow, branch string, timeout time.Duration) string {
+	return h.launchWith(ticket, workflow, branch, nil, timeout)
+}
+
+// launchWith is the general launch path: extraArgs are inserted before the
+// positional ticket (e.g. []string{"--env", "FOO=bar"}). Launch/LaunchBranch
+// delegate here with nil extraArgs.
+func (h *harness) launchWith(ticket, workflow, branch string, extraArgs []string, timeout time.Duration) string {
 	h.t.Helper()
 	args := append(h.providerArgs(), "launch", "--timeout", timeout.String())
 	if workflow != "" {
@@ -168,6 +175,7 @@ func (h *harness) LaunchBranch(ticket, workflow, branch string, timeout time.Dur
 	if branch != "" {
 		args = append(args, "--branch", branch)
 	}
+	args = append(args, extraArgs...)
 	args = append(args, ticket)
 	out, err := h.runHorde(args...)
 	if err != nil {

@@ -285,6 +285,47 @@ func TestECSProvider_Launch_Success(t *testing.T) {
 	}
 }
 
+func TestECSProvider_Launch_WithExtraEnv(t *testing.T) {
+	t.Parallel()
+	fake := &fakeECSClient{
+		runTaskOutput: &ecs.RunTaskOutput{
+			Tasks: []ecstypes.Task{
+				{TaskArn: aws.String("arn:aws:ecs:us-east-1:123456789012:task/horde/abc")},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	opts := LaunchOpts{
+		Repo:     "github.com/org/repo.git",
+		Ticket:   "PROJ-1",
+		Branch:   "main",
+		Workflow: "default",
+		RunID:    "k7m2xp4qr9n3",
+		ExtraEnv: map[string]string{"PROMPT_VARIANT": "v3", "EMPTY": ""},
+	}
+	if _, err := p.Launch(context.Background(), opts); err != nil {
+		t.Fatalf("Launch() error = %v, want nil", err)
+	}
+	in := fake.runTaskInput
+	if in == nil {
+		t.Fatal("RunTask was not called")
+	}
+	envMap := make(map[string]string)
+	for _, kv := range in.Overrides.ContainerOverrides[0].Environment {
+		envMap[*kv.Name] = *kv.Value
+	}
+	if v, ok := envMap["PROMPT_VARIANT"]; !ok || v != "v3" {
+		t.Errorf("env[PROMPT_VARIANT] = %q (present=%v), want %q", v, ok, "v3")
+	}
+	if v, ok := envMap["EMPTY"]; !ok || v != "" {
+		t.Errorf("env[EMPTY] = %q (present=%v), want empty string present", v, ok)
+	}
+	// Canonical run params must still be present alongside per-launch vars.
+	if envMap["RUN_ID"] != "k7m2xp4qr9n3" {
+		t.Errorf("env[RUN_ID] = %q, want %q", envMap["RUN_ID"], "k7m2xp4qr9n3")
+	}
+}
+
 func TestECSProvider_Launch_RunTaskError(t *testing.T) {
 	t.Parallel()
 	fake := &fakeECSClient{runTaskErr: fmt.Errorf("AccessDeniedException: not authorized")}

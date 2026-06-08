@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -38,6 +39,47 @@ const (
 	// money; a cancelled run definitionally did neither.
 	StatusCancelled Status = "cancelled"
 )
+
+// Priority is the queue drain-order lever set at enqueue and adjustable via
+// `horde queue prioritize`. The drain picks highest priority first, then
+// oldest enqueued_at within a level. It is purely mechanical: horde never
+// decides priority from ticket meaning — the operator (or an agent above
+// horde) curates the backlog.
+type Priority string
+
+const (
+	PriorityLowest  Priority = "lowest"
+	PriorityLow     Priority = "low"
+	PriorityMed     Priority = "med"
+	PriorityHigh    Priority = "high"
+	PriorityHighest Priority = "highest"
+)
+
+var priorityOrdinals = map[Priority]int{
+	PriorityLowest: 0, PriorityLow: 1, PriorityMed: 2, PriorityHigh: 3, PriorityHighest: 4,
+}
+
+// Ordinal is the sortable rank; higher drains first. Unknown priorities sort
+// as med so a malformed stored value never starves the queue.
+func (p Priority) Ordinal() int {
+	if o, ok := priorityOrdinals[p]; ok {
+		return o
+	}
+	return priorityOrdinals[PriorityMed]
+}
+
+// ParsePriority validates a user-supplied priority string. Empty defaults to
+// med. Unknown values are an error (surfaced to the CLI user).
+func ParsePriority(s string) (Priority, error) {
+	if s == "" {
+		return PriorityMed, nil
+	}
+	p := Priority(s)
+	if _, ok := priorityOrdinals[p]; !ok {
+		return "", fmt.Errorf("invalid priority %q: want one of lowest, low, med, high, highest", s)
+	}
+	return p, nil
+}
 
 // matchesFilter reports whether a run satisfies the non-repo dimensions of a
 // RunFilter (Repo scoping is handled by the query that fetched the run). It is
@@ -126,6 +168,13 @@ type Run struct {
 	CompletedAt  *time.Time
 	TimeoutAt    time.Time
 	TotalCostUSD *float64
+	// EnqueuedAt is set when a run enters the backlog via --enqueue; it is the
+	// zero value for directly-launched runs. It is the drain-order tiebreaker
+	// (oldest first within a priority level). Distinct from StartedAt, which is
+	// set when the run actually begins running (at drain time for queued runs).
+	EnqueuedAt time.Time
+	// Priority is the drain-order lever; empty for directly-launched runs.
+	Priority Priority
 	// Tokens is nil until orc reports usage (pre-finalize, or an orc old
 	// enough that neither costs.json nor run-result.json carried token totals).
 	Tokens *TokenUsage
@@ -142,6 +191,7 @@ type RunUpdate struct {
 	TotalCostUSD *float64
 	Tokens       *TokenUsage
 	TimeoutAt    *time.Time
+	Priority     *Priority // nil = don't update
 }
 
 // RunFilter scopes a ListRuns query. Repo is always required (listing is

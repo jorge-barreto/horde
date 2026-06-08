@@ -139,3 +139,31 @@ Homebrew users should run 'brew upgrade horde' instead.`,
 		},
 	}
 }
+
+// newerVersionNote returns a one-line upgrade note if a newer release exists,
+// or "" on any error/equal/dev build. Best-effort: short timeout, never errors
+// to the caller. Suppressed in CI or when HORDE_NO_UPDATE_CHECK is set.
+func newerVersionNote(ctx context.Context) string {
+	if os.Getenv("CI") != "" || os.Getenv("HORDE_NO_UPDATE_CHECK") != "" {
+		return ""
+	}
+	latest, err := fetchLatestTag(ctx)
+	if err != nil || !isNewer(version, latest) {
+		return ""
+	}
+	return fmt.Sprintf("A newer horde is available: %s (run 'horde update').", latest)
+}
+
+func versionCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "Print the horde version (and note any available update)",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			fmt.Printf("horde version %s (%s, built %s)\n", version, commit, buildDate)
+			if note := newerVersionNote(ctx); note != "" {
+				fmt.Println(note)
+			}
+			return nil
+		},
+	}
+}

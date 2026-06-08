@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestNormalizeVersion(t *testing.T) {
 	cases := map[string]string{
@@ -46,5 +49,12 @@ func TestParseLatestTag(t *testing.T) {
 	}
 	if tag != "v0.3.1" {
 		t.Errorf("tag = %q, want v0.3.1", tag)
+	}
+}
+
+func TestNewerVersionNoteRespectsCIGuard(t *testing.T) {
+	t.Setenv("CI", "1")
+	if note := newerVersionNote(context.Background()); note != "" {
+		t.Errorf("expected no note under CI guard, got %q", note)
 	}
 }

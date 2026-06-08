@@ -128,6 +128,7 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 			bootstrapCmd(),
 			pushCmd(),
 			updateCmd(),
+			versionCmd(),
 			docsCmd(),
 		},
 	}

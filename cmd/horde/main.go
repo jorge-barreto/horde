@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -146,7 +147,7 @@ kill some runs before launching more.`,
 			&cli.StringSliceFlag{
 				Name:    "env",
 				Aliases: []string{"e"},
-				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see `horde docs config` for the ECS caveat).",
+				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see `horde docs config` for the ECS caveat). Applies to launch only — `horde retry` does not carry it forward.",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -221,12 +222,8 @@ kill some runs before launching more.`,
 			// precedence over the RunTask environment override. Warn rather
 			// than fail — the var is still injected, and non-secret keys (plus
 			// every key on docker) override as expected.
-			if provName == config.ProviderECS {
-				for k := range extraEnv {
-					if _, declared := spec[k]; declared {
-						fmt.Fprintf(os.Stderr, "warning: --env %s overrides a declared secret; on ECS the task-definition secret takes precedence, so this override will not take effect\n", k)
-					}
-				}
+			for _, k := range secretCollisionsOnECS(provName, spec, extraEnv) {
+				fmt.Fprintf(os.Stderr, "warning: --env %s overrides a declared secret; on ECS the task-definition secret takes precedence, so this override will not take effect\n", k)
 			}
 
 			id, err := runid.Generate()
@@ -1115,6 +1112,25 @@ func parseEnvFlags(raw []string) (map[string]string, error) {
 		out[key] = val
 	}
 	return out, nil
+}
+
+// secretCollisionsOnECS returns the sorted --env keys that collide with a
+// declared secret when launching on ECS. Such overrides cannot take effect
+// there (AWS gives the task-definition secret precedence over the RunTask
+// environment override), so the caller warns the user. Returns nil for any
+// other provider, where per-launch --env overrides declared secrets normally.
+func secretCollisionsOnECS(provName string, spec config.SecretSpec, extraEnv map[string]string) []string {
+	if provName != config.ProviderECS {
+		return nil
+	}
+	var collisions []string
+	for k := range extraEnv {
+		if _, declared := spec[k]; declared {
+			collisions = append(collisions, k)
+		}
+	}
+	sort.Strings(collisions)
+	return collisions
 }
 
 // fetchLiveCost reads the current cost from a running container's costs.json.

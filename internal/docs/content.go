@@ -238,6 +238,10 @@ Per-launch env vars (--env)
                  Overriding a non-secret key, and setting brand-new keys,
                  work the same on both providers.
 
+    --env applies to 'horde launch' only. Per-launch values are not stored
+    on the run record, so 'horde retry' does not carry them forward — pass
+    --env again on a fresh launch if a resumed run needs them.
+
 File Location
 -------------
 

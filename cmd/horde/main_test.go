@@ -4943,3 +4943,72 @@ func TestParseEnvFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestSecretCollisionsOnECS(t *testing.T) {
+	t.Parallel()
+	// spec keyed by container env-var name; canonicals are always present in a
+	// real merged spec, plus a declared extra here.
+	spec := config.SecretSpec{
+		"CLAUDE_CODE_OAUTH_TOKEN": {},
+		"GIT_TOKEN":               {},
+		"STRIPE_API_KEY":          {},
+	}
+	tests := []struct {
+		name     string
+		provName string
+		extraEnv map[string]string
+		want     []string
+	}{
+		{
+			name:     "ecs collision with declared secret",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"STRIPE_API_KEY": "sk_test"},
+			want:     []string{"STRIPE_API_KEY"},
+		},
+		{
+			name:     "ecs collision with canonical secret",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"GIT_TOKEN": "x"},
+			want:     []string{"GIT_TOKEN"},
+		},
+		{
+			name:     "ecs non-secret key does not warn",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"PROMPT_VARIANT": "v3"},
+			want:     nil,
+		},
+		{
+			name:     "ecs multiple collisions sorted",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"STRIPE_API_KEY": "x", "GIT_TOKEN": "y", "NEW": "z"},
+			want:     []string{"GIT_TOKEN", "STRIPE_API_KEY"},
+		},
+		{
+			name:     "docker never warns even on collision",
+			provName: config.ProviderDocker,
+			extraEnv: map[string]string{"STRIPE_API_KEY": "x", "GIT_TOKEN": "y"},
+			want:     nil,
+		},
+		{
+			name:     "ecs no extra env",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{},
+			want:     nil,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := secretCollisionsOnECS(tc.provName, spec, tc.extraEnv)
+			if len(got) != len(tc.want) {
+				t.Fatalf("secretCollisionsOnECS = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("secretCollisionsOnECS[%d] = %q, want %q (full: %v)", i, got[i], tc.want[i], got)
+				}
+			}
+		})
+	}
+}

@@ -8,7 +8,7 @@ Cloud launcher for orc workflows. See SPEC.md for design, ORC_CONTRACT_EXPECTATI
 
 - Go 1.24+, module: `github.com/jorge-barreto/horde`
 - CLI: `github.com/urfave/cli/v3`
-- SQLite: `github.com/mattn/go-sqlite3` (local run history)
+- SQLite: `modernc.org/sqlite` (pure-Go driver; local run history)
 - YAML: `gopkg.in/yaml.v3` (project config)
 - AWS (v0.2): `github.com/aws/aws-sdk-go-v2` (DynamoDB, SSM, STS, CloudWatch Logs, S3, ECS)
 

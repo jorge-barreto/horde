@@ -211,18 +211,37 @@ All four updated in the same PR:
 - **README.md**: add a `--label` launch example and the filtered `horde list` examples next to the
   existing `horde list` block.
 - **CLAUDE.md**: add a Key Design Decision line — user labels live in `Run.Labels` (own
-  column/attribute), strictly separate from provider-internal `Run.Metadata`; set once at launch.
-  Also fix the stale `horde docs json` reference in the existing `--json` decision line: there is
-  no `json` topic today (topics are `quickstart`, `config`, `worker-image`, `providers`, `retry`,
-  `hydrate`, `env`, `bootstrap`, `ecs-integration`, `cdk`) — point it at where the `--json`
-  contract is actually documented (the `quickstart` topic) instead.
-- **`horde docs`** (`internal/docs/content.go`): there is no `list`, `launch`, or `json` topic
-  today. Add label-setting + filtering + the `summary` aggregate to the `quickstart` topic (which
-  already covers core CLI usage), and add a dedicated **`labels`** topic covering the full
-  label/filter/cohort-cost story (set at launch, AND-style exact-match filtering, the
-  metadata-vs-labels distinction, and the `summary` block on `list --json`). A new topic is added
-  by appending a `Topic{...}` to the `topics` slice in `content.go`; `docs_test.go` asserts the
-  first topic stays `quickstart`, so append, don't prepend.
+  column/attribute), strictly separate from provider-internal `Run.Metadata`; set once at launch;
+  the `ListRuns`/`RunFilter` query split (DynamoDB FilterExpression vs SQLite Go predicate).
+- **`horde docs`** (`internal/docs/content.go`): add label-setting + filtering + the `summary`
+  aggregate to the `quickstart` topic (which already covers core CLI usage), and add a dedicated
+  **`labels`** topic covering the full label/filter/cohort-cost story. A new topic is appended to
+  the `topics` slice; `docs_test.go` asserts the first topic stays `quickstart`, so append, don't
+  prepend.
+
+## Verification
+
+- `make unit-test`, `make vet`, `make integration-test`, and cdk-test (`npm test`, 81 tests) all
+  pass. Store conformance covers labels + every `RunFilter` dimension against both SQLite and
+  DynamoDB (the in-memory fake was generalized to evaluate the real FilterExpression).
+- A **live DynamoDB e2e** (`internal/store/dynamo_labels_e2e_test.go`, gated behind
+  `HORDE_E2E_LABELS=1` + `HORDE_E2E_PROFILE`/`HORDE_E2E_RUNS_TABLE`, never CI) exercises the full
+  query path against a real runs table: round-trip, single/multi-label AND, status set,
+  workflow+ticket, started_at range (key condition), combined filter, and ordering. Verified green
+  against the prepdesk stack (`horde-runs-aetherialproductions-prepdesk`); it writes under a unique
+  synthetic repo and deletes every row it creates.
+- Real-CLI smoke (docker/SQLite): `horde launch --label`, `horde list --label/--status/--workflow`
+  (single + combined/AND), the `summary` block in `--json`, and the human `N runs, $X total` line
+  all confirmed.
+
+## Integration note
+
+This branch was developed against `main` at the time and rebased onto an advanced `main` that had
+meanwhile merged #27 (launch `--json` contract), #25 (richer `list --json`), and #22 (`--env`).
+Resolutions: `launch` carries both `--env` and `--label`; `ListRunV1` is the #25 rich struct **plus**
+a `Labels` field; `ListV1` keeps the #25 derive-from-`statusToV1` shape **plus** the new `summary`
+block. `Run.Labels` set-at-launch is independent of the launch `--json` output shape (labels are an
+input, surfaced on read via `status`/`list`).
 
 ## Testing
 

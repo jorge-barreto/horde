@@ -8,16 +8,33 @@ See [SPEC.md](SPEC.md) for the full design.
 
 ## Prerequisites
 
-- Go (1.24+)
+- Go (1.24+) — only to build from source; the install script and Homebrew ship a prebuilt binary
 - Docker — required for local mode and for `horde push` (which builds the worker image)
 - AWS account with credentials configured (only for the v0.2 AWS path) — either [Path A](#path-a--cloudformation-bootstrap-no-cdk-required) or [Path B](#path-b--cdk-construct-teams-with-an-existing-cdk-app) below
 - Node.js 18+ (only for Path B, which uses CDK)
 
 ## Install
 
+Download the latest release (no Go toolchain needed):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
+```
+
+Or via Homebrew:
+
+```bash
+brew tap jorge-barreto/tap
+brew install horde
+```
+
+Or from source (requires Go 1.24+):
+
 ```bash
 make install
 ```
+
+Update later with `horde update` (script/binary installs) or `brew upgrade horde`. Run `horde docs install` for details.
 
 ## Setup
 

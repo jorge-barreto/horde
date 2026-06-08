@@ -8,7 +8,7 @@ Cloud launcher for orc workflows. See SPEC.md for design, ORC_CONTRACT_EXPECTATI
 
 - Go 1.24+, module: `github.com/jorge-barreto/horde`
 - CLI: `github.com/urfave/cli/v3`
-- SQLite: `github.com/mattn/go-sqlite3` (local run history)
+- SQLite: `modernc.org/sqlite` (pure-Go driver; local run history)
 - YAML: `gopkg.in/yaml.v3` (project config)
 - AWS (v0.2): `github.com/aws/aws-sdk-go-v2` (DynamoDB, SSM, STS, CloudWatch Logs, S3, ECS)
 
@@ -52,7 +52,7 @@ target (or `cd cdk && npm ci && npm run build && npm test` for cdk-test).
 
 ## Architecture
 
-- `cmd/horde/` — CLI entry point, all commands (launch, retry, status, logs, kill, results, hydrate, list, clean, shell, bootstrap, push, docs), factory for provider/store
+- `cmd/horde/` — CLI entry point, all commands (launch, retry, status, logs, kill, results, hydrate, list, clean, shell, bootstrap, push, update, version, docs), factory for provider/store
 - `internal/bootstrap/` — CloudFormation template generation + project-slug derivation for `horde bootstrap` (v0.2)
 - `internal/provider/` — Provider interface (`provider.go`) + Docker implementation (`docker.go`, `dockerimage.go`); ECS provider in v0.2
 - `internal/store/` — Store interface (`store.go`) + SQLite (`sqlite.go`) and DynamoDB (`dynamo.go`, v0.2) implementations. Both pass shared conformance tests.

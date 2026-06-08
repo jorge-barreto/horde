@@ -1,6 +1,6 @@
 name: publish-cdk
 
-# Publish @horde.io/cdk on every v-prefix tag. Auth is npm trusted-publisher
+# Publish @horde.io/cdk on every `cdk-v*` tag. Auth is npm trusted-publisher
 # OIDC — no NODE_AUTH_TOKEN, no secrets in the repo. One-time setup at
 # https://www.npmjs.com/package/@horde.io/cdk/access must link this repo +
 # workflow + job before the first tag is cut.
@@ -8,7 +8,7 @@ name: publish-cdk
 on:
   push:
     tags:
-      - "v*"
+      - "cdk-v*"
 
 jobs:
   publish-cdk:

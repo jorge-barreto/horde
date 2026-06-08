@@ -44,6 +44,12 @@ var topics = []Topic{
 		Content: topicJSON,
 	},
 	{
+		Name:    "install",
+		Title:   "Installing and Updating horde",
+		Summary: "Install via script or Homebrew; self-update with 'horde update'",
+		Content: topicInstall,
+	},
+	{
 		Name:    "env",
 		Title:   "Environment Setup",
 		Summary: "Required secrets, .env file, token permissions",
@@ -78,9 +84,12 @@ var topics = []Topic{
 const topicQuickstart = `Quick Start
 ===========
 
-1. Install horde:
+1. Install horde (no Go toolchain required):
 
-    make install
+    curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
+
+   Or 'brew install jorge-barreto/tap/horde', or 'make install' from source.
+   See 'horde docs install' for all methods and how to update.
 
 2. Create a .env file in your project root:
 
@@ -799,6 +808,51 @@ Other commands report a status object too: retry -> "retrying",
 kill -> "killed", clean -> "cleaned" (with removed_run_ids), push ->
 "pushed" (with image + digest), hydrate -> aggregate counts plus a
 per-run "runs" array.
+`
+
+const topicInstall = `Installing and Updating horde
+=============================
+
+Install (no Go toolchain required)
+----------------------------------
+
+Download the latest release binary:
+
+    curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
+
+Pin a version or change the install directory:
+
+    HORDE_VERSION=v0.1.0 HORDE_BINDIR="$HOME/.local/bin" \
+      curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
+
+The script detects your OS/arch, downloads the matching release archive,
+verifies its SHA-256 checksum, and installs the binary.
+
+Install via Homebrew
+--------------------
+
+    brew tap jorge-barreto/tap
+    brew install horde
+
+Install from source (requires Go 1.24+)
+---------------------------------------
+
+    make install
+
+Updating
+--------
+
+If you installed via the script or a downloaded binary:
+
+    horde update          # install the latest release if newer
+    horde update --check  # only report whether an update is available
+
+If you installed via Homebrew:
+
+    brew upgrade horde
+
+'horde version' prints the running version and notes when a newer release is
+available. Set HORDE_NO_UPDATE_CHECK=1 to disable that check.
 `
 
 const topicBootstrap = `AWS Bootstrap

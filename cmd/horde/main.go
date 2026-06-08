@@ -78,7 +78,7 @@ func newApp() *cli.Command {
 	return &cli.Command{
 		Name:    "horde",
 		Usage:   "Cloud launcher for orc workflows",
-		Version: fmt.Sprintf("%s (%s, built %s)", version, commit, buildDate),
+		Version: versionString(),
 		Description: `horde runs orc workflows on ephemeral containers (Docker locally,
 ECS Fargate in AWS). It clones a repo, runs orc, collects results, and tears down.
 
@@ -127,6 +127,8 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 			shellCmd(),
 			bootstrapCmd(),
 			pushCmd(),
+			updateCmd(),
+			versionCmd(),
 			docsCmd(),
 		},
 	}

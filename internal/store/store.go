@@ -79,6 +79,19 @@ func (s Status) IsTerminal() bool {
 	return false
 }
 
+// TokenUsage is the per-run token telemetry orc reports, as run-level totals
+// summed across phases. Zero counts are meaningful (a run can legitimately use
+// 0 cache-read tokens), so presence is tracked by the enclosing *TokenUsage
+// being nil — mirroring the TotalCostUSD *float64 "nil = not yet known"
+// convention. Turns is the agent-invocation count summed across phases.
+type TokenUsage struct {
+	InputTokens         int
+	OutputTokens        int
+	CacheCreationTokens int
+	CacheReadTokens     int
+	Turns               int
+}
+
 type Run struct {
 	ID         string
 	Repo       string
@@ -103,6 +116,9 @@ type Run struct {
 	CompletedAt  *time.Time
 	TimeoutAt    time.Time
 	TotalCostUSD *float64
+	// Tokens is nil until orc reports usage (pre-finalize, or an orc old
+	// enough that neither costs.json nor run-result.json carried token totals).
+	Tokens *TokenUsage
 }
 
 // RunUpdate holds fields to update on an existing run.
@@ -114,6 +130,7 @@ type RunUpdate struct {
 	ExitCode     *int
 	CompletedAt  *time.Time
 	TotalCostUSD *float64
+	Tokens       *TokenUsage
 	TimeoutAt    *time.Time
 }
 

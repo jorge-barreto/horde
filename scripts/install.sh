@@ -171,6 +171,18 @@ fetch "$CHECKSUMS_URL" "$tmp/checksums.txt" ||
 # checksums.txt lines look like:  <sha256>  horde_0.1.0_linux_amd64.tar.gz
 # We pull the line for our asset and pipe it to a checker in -c (check) mode.
 # Run from inside the temp dir so the relative filename in the line resolves.
+#
+# Subshell exit semantics: the outer `|| err` checks the subshell's exit
+# status, so every branch must encode pass/fail in that status.
+#   - sha256sum / shasum: their -c exit status (0 match, non-zero mismatch)
+#     propagates as the subshell's status — the outer guard reports a mismatch.
+#   - no tool, no opt-out: we FAIL CLOSED. We print the specific guidance to
+#     stderr here and `exit 1`, letting the outer `|| err` abort with its
+#     generic message. We deliberately do NOT call err() from inside the
+#     subshell (err exits the subshell non-zero, which the outer `|| err` would
+#     then DOUBLE-report). One specific message + the outer abort = one clear
+#     failure.
+#   - no tool, opt-out set: warn and `exit 0` so the install proceeds.
 # ----------------------------------------------------------------------------
 (
 	cd "$tmp"
@@ -179,8 +191,11 @@ fetch "$CHECKSUMS_URL" "$tmp/checksums.txt" ||
 	elif have shasum; then
 		# macOS / BSD: shasum -a 256 provides the same -c behavior.
 		grep " ${ASSET}\$" checksums.txt | shasum -a 256 -c -
+	elif [ -n "${HORDE_INSECURE_SKIP_CHECKSUM:-}" ]; then
+		echo "warning: skipping checksum verification by request (HORDE_INSECURE_SKIP_CHECKSUM set)" >&2
 	else
-		info "warning: neither sha256sum nor shasum found; skipping checksum verification"
+		echo "error: no sha256sum/shasum found to verify download; install 'coreutils' or re-run with HORDE_INSECURE_SKIP_CHECKSUM=1 to bypass" >&2
+		exit 1
 	fi
 ) || err "checksum verification failed for $ASSET"
 

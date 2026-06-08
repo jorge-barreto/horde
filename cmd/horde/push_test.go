@@ -294,6 +294,86 @@ func TestPush_TagAndPush(t *testing.T) {
 	}
 }
 
+// runPushJSONInDir is the --json variant of runPushInDir: it registers the
+// global --json flag (as the real root command does) and passes --json so the
+// push Action takes its JSON branch.
+func runPushJSONInDir(t *testing.T, dir string, deps pushDeps) (string, error) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	var buf bytes.Buffer
+	app := &cli.Command{
+		Name: "horde",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "profile"},
+			&cli.BoolFlag{Name: "json"},
+		},
+		Commands: []*cli.Command{pushCmdWith(deps)},
+	}
+	app.Writer = &buf
+	app.ErrWriter = &buf
+	err = app.Run(context.Background(), []string{"horde", "--json", "push"})
+	return buf.String(), err
+}
+
+// TestPush_JSON verifies the --json branch emits a PushV1 with the pushed
+// image target and parsed digest, and nothing else on stdout.
+func TestPush_JSON(t *testing.T) {
+	dir := t.TempDir()
+	setupGitRepo(t, dir, "https://github.com/acme/widgets.git")
+
+	cfg := healthyHordeConfig()
+	target := cfg.EcrRepoURI + ":latest"
+
+	docker := &fakeDocker{
+		respond: func(c dockerCall) ([]byte, error) {
+			if len(c.args) > 0 && c.args[0] == "push" {
+				return []byte("latest: digest: sha256:abc123def4567890 size: 1234\n"), nil
+			}
+			return nil, nil
+		},
+	}
+	deps := pushDeps{
+		awsLoad:   func(ctx context.Context, profile string) (aws.Config, error) { return aws.Config{}, nil },
+		ssmClient: func(aws.Config) config.SSMClient { return &fakePushSSM{cfg: cfg} },
+		ecrClient: func(aws.Config) ecrAuthClient {
+			return &fakeECR{token: "AWS:pw", endpoint: "https://x.dkr.ecr.us-east-1.amazonaws.com"}
+		},
+		docker: docker,
+		slug:   func(s string) (string, error) { return "acme-widgets", nil },
+	}
+
+	out, err := runPushJSONInDir(t, dir, deps)
+	if err != nil {
+		t.Fatalf("runPush --json: %v\n%s", err, out)
+	}
+
+	dec := json.NewDecoder(strings.NewReader(out))
+	var v PushV1
+	if err := dec.Decode(&v); err != nil {
+		t.Fatalf("decoding PushV1: %v\noutput: %s", err, out)
+	}
+	if dec.More() {
+		t.Errorf("stdout has a second JSON value: %s", out)
+	}
+	if v.Status != "pushed" {
+		t.Errorf("Status = %q, want pushed", v.Status)
+	}
+	if v.Image != target {
+		t.Errorf("Image = %q, want %q", v.Image, target)
+	}
+	if v.Digest != "sha256:abc123def4567890" {
+		t.Errorf("Digest = %q, want sha256:abc123def4567890", v.Digest)
+	}
+}
+
 // TestPush_SSMMissing verifies that a ParameterNotFound from SSM produces an
 // error that guides the user to run `horde bootstrap deploy`.
 func TestPush_SSMMissing(t *testing.T) {

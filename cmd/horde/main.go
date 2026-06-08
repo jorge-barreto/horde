@@ -151,9 +151,13 @@ kill some runs before launching more.`,
 				Usage: "Git branch to use",
 			},
 			&cli.StringFlag{
-				Name:     "workflow",
-				Usage:    "Orc workflow to run (required, e.g. implement-ticket)",
-				Required: true,
+				// Not Required: the Action validates this itself (empty or
+				// whitespace-only is rejected below). A urfave Required flag
+				// fails *before* the Action and prints help to stdout without
+				// routing through the root ExitErrHandler — which would break
+				// the --json contract that stdout carries only a JSON object.
+				Name:  "workflow",
+				Usage: "Orc workflow to run (required, e.g. implement-ticket)",
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",

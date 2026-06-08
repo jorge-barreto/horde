@@ -270,9 +270,10 @@ func TestLaunch_MissingTicket(t *testing.T) {
 }
 
 // TestLaunch_MissingWorkflow ensures launch refuses to proceed when --workflow
-// is omitted entirely (urfave's Required-flag check). Without this guard,
-// orc would silently apply its own default workflow and write audit files
-// under a path horde wouldn't read, leaving cost data orphaned.
+// is omitted entirely (validated inside the Action, not as a urfave Required
+// flag, so the error routes through the JSON envelope under --json). Without
+// this guard, orc would silently apply its own default workflow and write
+// audit files under a path horde wouldn't read, leaving cost data orphaned.
 func TestLaunch_MissingWorkflow(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()
@@ -4214,7 +4215,7 @@ func TestList_JSON_ActiveOnly(t *testing.T) {
 	now := time.Now()
 	completedAt := now.Add(-10 * time.Minute)
 	runs := []*store.Run{
-		{ID: "listjson001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listjson001", Ticket: "T-1", Workflow: "implement-ticket", Branch: "develop", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", InstanceID: "inst-001", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
 		{ID: "listjson002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
 		{ID: "listjson003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
 	}
@@ -4261,6 +4262,33 @@ func TestList_JSON_ActiveOnly(t *testing.T) {
 		if bad == "listjson003" {
 			t.Errorf("runs should not contain listjson003")
 		}
+	}
+
+	// #25: list --json must carry the same per-run detail as status --json so
+	// callers don't need N+1 status lookups. Verify the fields on listjson001.
+	var r1 *ListRunV1
+	for i := range v.Runs {
+		if v.Runs[i].ID == "listjson001" {
+			r1 = &v.Runs[i]
+		}
+	}
+	if r1 == nil {
+		t.Fatal("listjson001 not found in output")
+	}
+	if r1.Workflow != "implement-ticket" {
+		t.Errorf("Workflow = %q, want implement-ticket", r1.Workflow)
+	}
+	if r1.Branch != "develop" {
+		t.Errorf("Branch = %q, want develop", r1.Branch)
+	}
+	if r1.InstanceID != "inst-001" {
+		t.Errorf("InstanceID = %q, want inst-001", r1.InstanceID)
+	}
+	if r1.LaunchedBy != "testuser" {
+		t.Errorf("LaunchedBy = %q, want testuser", r1.LaunchedBy)
+	}
+	if r1.StartedAt == "" {
+		t.Errorf("StartedAt is empty")
 	}
 }
 
@@ -5286,6 +5314,87 @@ func TestClean_JSON_Empty(t *testing.T) {
 		t.Errorf("expected empty array for removed_run_ids, got: %s", buf.String())
 	}
 	_ = env
+}
+
+func TestHydrate_JSON_FailureSingleEnvelope(t *testing.T) {
+	// End-to-end guard for the no-double-envelope behavior: hydrate --json
+	// emits one HydrateV1 (status:"error") and returns emittedExit{1}, so the
+	// root ExitErrHandler must NOT also write an ErrorV1. A non-terminal run
+	// produces a failure outcome without needing a real provider HydrateRun.
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	runID := "hydratejson01"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "u", StartedAt: time.Now(),
+		TimeoutAt: time.Now().Add(time.Hour), Status: store.StatusRunning, // non-terminal → failure
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	into := filepath.Join(env.tmpHome, "hydrate-into")
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "hydrate", runID, "--into", into})
+	if runErr == nil {
+		t.Fatal("expected non-nil error (exit 1) for a failing hydrate")
+	}
+
+	// Stdout must be exactly ONE JSON object (a HydrateV1, not a trailing
+	// ErrorV1 envelope). json.Decoder.More() catches a second value.
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	var v HydrateV1
+	if err := dec.Decode(&v); err != nil {
+		t.Fatalf("decoding HydrateV1: %v\noutput: %s", err, buf.Bytes())
+	}
+	if dec.More() {
+		t.Errorf("stdout has a second JSON value (double envelope): %s", buf.Bytes())
+	}
+	if v.Status != "error" {
+		t.Errorf("Status = %q, want error", v.Status)
+	}
+	if v.Failed != 1 || len(v.Runs) != 1 {
+		t.Errorf("failed=%d runs=%d, want 1/1", v.Failed, len(v.Runs))
+	}
+	if v.Runs[0].RunID != runID || v.Runs[0].Status != "failed" || v.Runs[0].Reason == "" {
+		t.Errorf("run outcome = %+v, want failed with a reason", v.Runs[0])
+	}
+}
+
+func TestStatus_JSON_ErrorEnvelope(t *testing.T) {
+	// The JSON error envelope is produced by the shared root ExitErrHandler,
+	// so exercise it through a non-launch command (status on a missing run)
+	// to guard against a per-command routing regression.
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	// Create an empty store so the run genuinely doesn't exist.
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", "nonexistentrn"})
+	if runErr == nil {
+		t.Fatal("expected error for missing run")
+	}
+	var v ErrorV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing ErrorV1: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "error" || v.Reason == "" {
+		t.Errorf("envelope = %+v, want status=error with reason", v)
+	}
 }
 
 func TestResults_JSON_DurationSeconds(t *testing.T) {

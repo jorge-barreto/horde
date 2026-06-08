@@ -361,6 +361,54 @@ func launchQueuedV1(runID, ticket, workflow, branch, priority string) LaunchV1 {
 	return LaunchV1{Status: "queued", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Priority: priority}
 }
 
+// QueueListItemV1 / QueueListV1 are the `horde queue list --json` contract.
+// Items are in drain order (priority desc, then oldest enqueued_at first).
+type QueueListItemV1 struct {
+	RunID      string `json:"run_id"`
+	Ticket     string `json:"ticket"`
+	Workflow   string `json:"workflow"`
+	Priority   string `json:"priority"`
+	EnqueuedAt string `json:"enqueued_at"`
+}
+
+// QueueListV1 wraps the queued items under `horde queue list --json`.
+type QueueListV1 struct {
+	Status string            `json:"status"`
+	Queued []QueueListItemV1 `json:"queued"`
+}
+
+func queueListV1(runs []*store.Run) QueueListV1 {
+	out := QueueListV1{Status: "ok", Queued: make([]QueueListItemV1, 0, len(runs))}
+	for _, r := range runs {
+		out.Queued = append(out.Queued, QueueListItemV1{
+			RunID: r.ID, Ticket: r.Ticket, Workflow: r.Workflow,
+			Priority: string(r.Priority), EnqueuedAt: r.EnqueuedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return out
+}
+
+// QueuePrioritizeV1 is the `horde queue prioritize --json` contract.
+type QueuePrioritizeV1 struct {
+	Status   string `json:"status"`
+	RunID    string `json:"run_id"`
+	Priority string `json:"priority"`
+}
+
+func queuePrioritizeV1(runID, priority string) QueuePrioritizeV1 {
+	return QueuePrioritizeV1{Status: "reprioritized", RunID: runID, Priority: priority}
+}
+
+// QueueCancelV1 is the `horde queue cancel --json` contract.
+type QueueCancelV1 struct {
+	Status string `json:"status"`
+	RunID  string `json:"run_id"`
+}
+
+func queueCancelV1(runID string) QueueCancelV1 {
+	return QueueCancelV1{Status: "cancelled", RunID: runID}
+}
+
 // RetryV1 is the JSON contract for `horde retry --json`.
 type RetryV1 struct {
 	Status string `json:"status"` // "retrying"

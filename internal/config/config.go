@@ -68,11 +68,14 @@ func CanonicalRepo(rawURL string) (string, error) {
 	if err != nil {
 		// Accept input already in "host/path" form (e.g. a --repo override
 		// supplied as "github.com/org/repo"). NormalizeRepoURL only handles
-		// inputs with a scheme or scp-style "git@host:" prefix.
-		if !IsAlreadyNormalized(strings.TrimSpace(rawURL)) {
+		// inputs with a scheme or scp-style "git@host:" prefix. Trim a trailing
+		// slash first so it collapses with the scheme path (which already does)
+		// — otherwise "github.com/org/repo/" would key differently.
+		trimmed := strings.TrimSuffix(strings.TrimSpace(rawURL), "/")
+		if !IsAlreadyNormalized(trimmed) {
 			return "", err
 		}
-		normalized = strings.TrimSpace(rawURL)
+		normalized = trimmed
 	}
 	normalized = strings.TrimSuffix(normalized, ".git")
 	return strings.ToLower(normalized), nil

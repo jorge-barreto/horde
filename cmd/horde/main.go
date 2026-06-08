@@ -82,8 +82,12 @@ func newApp() *cli.Command {
 		Description: `horde runs orc workflows on ephemeral containers (Docker locally,
 ECS Fargate in AWS). It clones a repo, runs orc, collects results, and tears down.
 
-horde must be run from inside a git repository — the repo URL is inferred
-from the local git remote. Run 'horde docs' for detailed documentation.`,
+By default horde infers the repo URL from the local git remote and reads
+config from .horde/ in the working directory, so it's normally run from
+inside a checkout. Programmatic callers without one (Lambda, CI outside the
+repo) can override every discovery step: --repo/HORDE_REPO_URL,
+--config/HORDE_CONFIG_PATH, --ssm-path/HORDE_SSM_PATH. Run 'horde docs' for
+detailed documentation.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "provider",

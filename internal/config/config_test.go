@@ -63,6 +63,11 @@ func TestCanonicalRepo(t *testing.T) {
 		{"trailing whitespace", "https://github.com/org/repo.git\n", "github.com/org/repo"},
 		// Only a trailing ".git" is stripped, not ".git" appearing mid-path.
 		{"git in repo name kept", "https://github.com/org/dotgit", "github.com/org/dotgit"},
+		// Trailing slash collapses on every input form, so an override typed
+		// with a slash keys the same as the scheme/discovery forms.
+		{"normalized trailing slash", "github.com/org/repo/", "github.com/org/repo"},
+		{"normalized .git + trailing slash", "github.com/org/repo.git/", "github.com/org/repo"},
+		{"scheme trailing slash", "https://github.com/org/repo.git/", "github.com/org/repo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,10 +102,37 @@ func TestCanonicalRepo_CollapsesGitSuffixVariants(t *testing.T) {
 
 func TestCanonicalRepo_Errors(t *testing.T) {
 	t.Parallel()
-	// Canonicalization defers to NormalizeRepoURL for validation.
-	for _, in := range []string{"", "  ", "justahostname"} {
+	// Canonicalization defers to NormalizeRepoURL for validation. The scp-style
+	// remnant "git@host:" must NOT be accepted as an already-normalized key —
+	// IsAlreadyNormalized rejects inputs containing "@".
+	for _, in := range []string{"", "  ", "justahostname", "git@host:"} {
 		if _, err := CanonicalRepo(in); err == nil {
 			t.Errorf("CanonicalRepo(%q) expected error, got nil", in)
+		}
+	}
+}
+
+func TestIsAlreadyNormalized(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"github.com/org/repo", true},
+		{"github.com/org/sub/repo", true},
+		{"github.com/org/repo.git", true},
+		// Rejected: a scheme, scp-style userinfo, no path, or empty host.
+		{"https://github.com/org/repo", false},
+		{"git@github.com:org/repo", false},
+		{"user@host/path", false},
+		{"justahostname", false},
+		{"/leading-slash", false},
+		{"host/", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := IsAlreadyNormalized(tc.in); got != tc.want {
+			t.Errorf("IsAlreadyNormalized(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
 }

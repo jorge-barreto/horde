@@ -712,3 +712,42 @@ func (s *DynamoStore) ListActive(ctx context.Context) ([]*Run, error) {
 	})
 	return runs, nil
 }
+
+func (s *DynamoStore) ClaimNextQueued(ctx context.Context, repo string) (*Run, error) {
+	// Query the by-repo GSI (via ListRuns) for queued runs; order in-memory
+	// (the backlog is small, bounded by what was enqueued). Try to claim
+	// candidates in order until one conditional update wins.
+	candidates, err := s.ListRuns(ctx, RunFilter{Repo: repo, Statuses: []Status{StatusQueued}})
+	if err != nil {
+		return nil, fmt.Errorf("listing queued: %w", err)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		oi, oj := candidates[i].Priority.Ordinal(), candidates[j].Priority.Ordinal()
+		if oi != oj {
+			return oi > oj // higher priority first
+		}
+		return candidates[i].EnqueuedAt.Before(candidates[j].EnqueuedAt) // oldest first
+	})
+	for _, c := range candidates {
+		_, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName:                aws.String(s.tableName),
+			Key:                      map[string]types.AttributeValue{AttrID: &types.AttributeValueMemberS{Value: c.ID}},
+			UpdateExpression:         aws.String("SET #s = :pending"),
+			ConditionExpression:      aws.String("#s = :queued"),
+			ExpressionAttributeNames: map[string]string{"#s": AttrStatus},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pending": &types.AttributeValueMemberS{Value: string(StatusPending)},
+				":queued":  &types.AttributeValueMemberS{Value: string(StatusQueued)},
+			},
+		})
+		if err != nil {
+			var ccf *types.ConditionalCheckFailedException
+			if errors.As(err, &ccf) {
+				continue // lost the race for this candidate; try the next
+			}
+			return nil, fmt.Errorf("claiming queued run %s: %w", c.ID, err)
+		}
+		return s.GetRun(ctx, c.ID)
+	}
+	return nil, nil
+}

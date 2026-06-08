@@ -575,3 +575,44 @@ func (s *SQLiteStore) ListActive(ctx context.Context) ([]*Run, error) {
 	}
 	return runs, nil
 }
+
+func (s *SQLiteStore) ClaimNextQueued(ctx context.Context, repo string) (*Run, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin claim tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+
+	// Order by priority ordinal desc, then enqueued_at asc. SQLite has no map,
+	// so encode the ordinal via a CASE on the stored priority string.
+	row := tx.QueryRowContext(ctx, `
+		SELECT id FROM runs
+		WHERE repo = ? AND status = ?
+		ORDER BY
+			CASE priority
+				WHEN 'highest' THEN 4 WHEN 'high' THEN 3 WHEN 'med' THEN 2
+				WHEN 'low' THEN 1 WHEN 'lowest' THEN 0 ELSE 2 END DESC,
+			enqueued_at ASC
+		LIMIT 1`, repo, string(StatusQueued))
+	var id string
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("selecting next queued: %w", err)
+	}
+	res, err := tx.ExecContext(ctx,
+		`UPDATE runs SET status = ? WHERE id = ? AND status = ?`,
+		string(StatusPending), id, string(StatusQueued))
+	if err != nil {
+		return nil, fmt.Errorf("claiming queued run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Lost the race; caller retries.
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit claim: %w", err)
+	}
+	return s.GetRun(ctx, id)
+}

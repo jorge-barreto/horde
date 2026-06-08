@@ -235,4 +235,11 @@ type Store interface {
 	// fetch them in separate queries must merge-sort before returning so
 	// callers can rely on a stable cross-status ordering.
 	ListActive(ctx context.Context) ([]*Run, error)
+	// ClaimNextQueued atomically claims the highest-priority, oldest-enqueued
+	// queued run for the repo, transitioning it queued→pending, and returns it
+	// (with Status already set to pending). Returns (nil, nil) when no queued
+	// run is eligible. The transition is atomic: under concurrent callers
+	// exactly one wins a given run; losers skip it. This is the double-launch
+	// guard for both the drain Lambda and the lazy CLI drain.
+	ClaimNextQueued(ctx context.Context, repo string) (*Run, error)
 }

@@ -1245,3 +1245,65 @@ func TestFindActiveByTicketWorkflowScoped(t *testing.T) {
 		t.Fatalf("want only run a (workflow plan), got %+v", got)
 	}
 }
+
+func TestClaimNextQueuedOrderAndAtomicity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	mk := func(id string, p Priority, enq time.Time) *Run {
+		return &Run{ID: id, Repo: "r", Ticket: id, Workflow: "w", Provider: "aws-ecs",
+			Status: StatusQueued, Priority: p, EnqueuedAt: enq, LaunchedBy: "me",
+			TimeoutAt: enq.Add(time.Hour)}
+	}
+	t0 := time.Date(2026, 6, 8, 9, 0, 0, 0, time.UTC)
+	// low-but-older, high-newer, high-older → expect high-older first.
+	if err := s.CreateRun(ctx, mk("low-old", PriorityLow, t0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, mk("high-new", PriorityHigh, t0.Add(2*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, mk("high-old", PriorityHigh, t0.Add(1*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := s.ClaimNextQueued(ctx, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil || claimed.ID != "high-old" {
+		t.Fatalf("want high-old claimed first, got %+v", claimed)
+	}
+	if claimed.Status != StatusPending {
+		t.Errorf("claimed run status = %q, want pending", claimed.Status)
+	}
+	// Second claim cannot re-take the same run.
+	again, err := s.ClaimNextQueued(ctx, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != nil && again.ID == "high-old" {
+		t.Error("high-old claimed twice — atomicity broken")
+	}
+}
+
+func TestClaimNextQueuedEmpty(t *testing.T) {
+	t.Parallel()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+	got, err := s.ClaimNextQueued(context.Background(), "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("want nil on empty queue, got %+v", got)
+	}
+}

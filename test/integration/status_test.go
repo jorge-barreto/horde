@@ -38,6 +38,37 @@ func TestNormalSuccess(t *testing.T) {
 	}
 }
 
+// TestTokenTelemetrySurfaces verifies the end-to-end token path: orc writes
+// costs.json, prov.Finalize reads it via ReadTokenUsage, the store persists it,
+// and `status --json` surfaces a "tokens" object. The quick-success workflow is
+// script-only (no agent phase), so orc reports zero tokens — we assert the
+// object is PRESENT, not non-zero, because zero is the correct honest value
+// here. (A real agent workflow would carry non-zero counts; the contract is
+// "tokens present once the run has a finalized costs.json".)
+func TestTokenTelemetrySurfaces(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	h := newHarness(t)
+	runID := h.Launch("TEST-tokens", "quick-success", 5*time.Minute)
+	h.WaitForOrc(runID, 2*time.Minute)
+
+	out, err := h.runHorde("status", runID, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `"tokens"`) {
+		t.Errorf("status --json missing \"tokens\" object for a finalized run, got:\n%s", out)
+	}
+	// The five token keys must all be present inside the object.
+	for _, key := range []string{`"input"`, `"output"`, `"cache_creation"`, `"cache_read"`, `"turns"`} {
+		if !strings.Contains(out, key) {
+			t.Errorf("status --json tokens object missing %s, got:\n%s", key, out)
+		}
+	}
+}
+
 // TestTimeoutMasksSuccess reproduces Bug #1: prov.Finalize checks timeout
 // before the .horde-exit-code marker file. When orc completes successfully but
 // the container is past its timeout, horde reports "killed" instead of "success".

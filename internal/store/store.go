@@ -27,6 +27,16 @@ const (
 	// exit code 4 (cost/rate limit) → StatusRateLimited (see mapExitCode).
 	StatusTimedOut    Status = "timed_out"
 	StatusRateLimited Status = "rate_limited"
+	// StatusQueued is a launch parked in the server-side backlog
+	// (`horde launch --enqueue`), waiting for a concurrency slot and budget
+	// headroom. It is NON-terminal and NOT "active" — it consumes no slot
+	// (CountActive counts only pending+running). It drains to pending.
+	StatusQueued Status = "queued"
+	// StatusCancelled is a queued run cancelled before it ever ran
+	// (`horde queue cancel`). Terminal. Distinct from StatusKilled, which
+	// means a RUNNING task was stopped and may have committed work / spent
+	// money; a cancelled run definitionally did neither.
+	StatusCancelled Status = "cancelled"
 )
 
 // matchesFilter reports whether a run satisfies the non-repo dimensions of a
@@ -73,7 +83,7 @@ func matchesFilter(run *Run, f RunFilter) bool {
 // to decide "active vs done" without enumerating statuses inline.
 func (s Status) IsTerminal() bool {
 	switch s {
-	case StatusSuccess, StatusFailed, StatusKilled, StatusTimedOut, StatusRateLimited:
+	case StatusSuccess, StatusFailed, StatusKilled, StatusTimedOut, StatusRateLimited, StatusCancelled:
 		return true
 	}
 	return false

@@ -173,6 +173,10 @@ func TestStatus_IsTerminal(t *testing.T) {
 		{StatusSuccess, true},
 		{StatusFailed, true},
 		{StatusKilled, true},
+		{StatusTimedOut, true},
+		{StatusRateLimited, true},
+		{StatusCancelled, true},
+		{StatusQueued, false},
 		{Status("unknown-future-status"), false},
 	}
 	for _, tc := range cases {

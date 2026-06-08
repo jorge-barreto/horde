@@ -42,6 +42,69 @@ func TestNormalizeRepoURL(t *testing.T) {
 	}
 }
 
+func TestCanonicalRepo(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// The whole point of canonicalization: .git and no-.git collapse,
+		// git@ and https collapse, mixed case collapses — to one bucket key.
+		{"https with .git", "https://github.com/Org/Repo.git", "github.com/org/repo"},
+		{"https without .git", "https://github.com/Org/Repo", "github.com/org/repo"},
+		{"ssh scp-style with .git", "git@github.com:Org/Repo.git", "github.com/org/repo"},
+		{"ssh scp-style without .git", "git@github.com:Org/Repo", "github.com/org/repo"},
+		{"ssh url-style", "ssh://git@github.com/Org/Repo.git", "github.com/org/repo"},
+		{"already normalized with .git", "github.com/org/repo.git", "github.com/org/repo"},
+		{"already normalized no .git", "github.com/org/repo", "github.com/org/repo"},
+		{"uppercase host", "https://GitHub.com/org/repo.git", "github.com/org/repo"},
+		{"deep path", "https://github.com/Org/Sub/Repo.git", "github.com/org/sub/repo"},
+		{"trailing whitespace", "https://github.com/org/repo.git\n", "github.com/org/repo"},
+		// Only a trailing ".git" is stripped, not ".git" appearing mid-path.
+		{"git in repo name kept", "https://github.com/org/dotgit", "github.com/org/dotgit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := CanonicalRepo(tc.in)
+			if err != nil {
+				t.Fatalf("CanonicalRepo(%q) error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("CanonicalRepo(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalRepo_CollapsesGitSuffixVariants(t *testing.T) {
+	t.Parallel()
+	// The bug from #33: dev clones keep ".git", actions/checkout drops it.
+	// Both must produce the identical key.
+	withGit, err := CanonicalRepo("https://github.com/Org/prepdesk.git")
+	if err != nil {
+		t.Fatalf("CanonicalRepo(.git) error: %v", err)
+	}
+	withoutGit, err := CanonicalRepo("https://github.com/Org/prepdesk")
+	if err != nil {
+		t.Fatalf("CanonicalRepo(no .git) error: %v", err)
+	}
+	if withGit != withoutGit {
+		t.Errorf(".git and no-.git forms diverge: %q vs %q", withGit, withoutGit)
+	}
+}
+
+func TestCanonicalRepo_Errors(t *testing.T) {
+	t.Parallel()
+	// Canonicalization defers to NormalizeRepoURL for validation.
+	for _, in := range []string{"", "  ", "justahostname"} {
+		if _, err := CanonicalRepo(in); err == nil {
+			t.Errorf("CanonicalRepo(%q) expected error, got nil", in)
+		}
+	}
+}
+
 func TestNormalizeRepoURL_Errors(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -106,7 +169,8 @@ func TestRepoURL_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RepoURL() error: %v", err)
 	}
-	want := "github.com/test/repo.git"
+	// RepoURL now canonicalizes: the ".git" suffix is stripped.
+	want := "github.com/test/repo"
 	if got != want {
 		t.Errorf("RepoURL() = %q, want %q", got, want)
 	}

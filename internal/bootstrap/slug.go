@@ -46,7 +46,7 @@ func Slug(remoteURL string) (string, error) {
 	// already normalized and skip re-normalization.
 	normalized, err := config.NormalizeRepoURL(remoteURL)
 	if err != nil {
-		if isAlreadyNormalized(remoteURL) {
+		if config.IsAlreadyNormalized(remoteURL) {
 			normalized = remoteURL
 		} else {
 			return "", fmt.Errorf("deriving project slug: %w", err)
@@ -94,15 +94,4 @@ func Slug(remoteURL string) (string, error) {
 	}
 
 	return slug, nil
-}
-
-// isAlreadyNormalized reports whether s looks like the "host/path" output
-// of config.NormalizeRepoURL (no scheme, no scp-style userinfo, at least
-// one "/", and a non-empty host segment).
-func isAlreadyNormalized(s string) bool {
-	if strings.Contains(s, "://") || strings.Contains(s, "@") {
-		return false
-	}
-	slash := strings.Index(s, "/")
-	return slash > 0 && slash < len(s)-1
 }

@@ -22,23 +22,39 @@ import (
 // resolveSSMPath returns the SSM parameter path holding the runtime config
 // for the current project. Order of precedence:
 //
-//  1. If HORDE_SSM_PATH is set, use it verbatim (escape hatch for custom
-//     deployments or projects sharing config across repos).
-//  2. If the current directory has a git remote, derive the project slug
-//     the same way `horde bootstrap init` and `horde push` do and return
-//     /horde/<slug>/config. This matches the path the bootstrap stack
-//     actually writes to.
-//  3. Fall back to the legacy global config.DefaultSSMPath (/horde/config)
-//     so pre-slug deployments keep working.
-func resolveSSMPath() string {
-	if p := os.Getenv("HORDE_SSM_PATH"); p != "" {
-		return p
+//  1. SSM override (--ssm-path / HORDE_SSM_PATH): used verbatim (escape hatch
+//     for custom deployments or projects sharing config across repos).
+//  2. Repo override (--repo / HORDE_REPO_URL): derive the slug from it the
+//     same way bootstrap/push do and return /horde/<slug>/config. Deterministic
+//     and filesystem-free — a malformed override falls back to DefaultSSMPath.
+//  3. Discovery: if the working directory has a git remote, derive the slug
+//     from it. Any failure here is swallowed to the legacy global
+//     config.DefaultSSMPath (/horde/config) so docker-only users with no git
+//     and pre-slug deployments keep working.
+//
+// Slug derivation lives here (not on config.Resolver) because Slug is in the
+// bootstrap package, which imports config — config cannot import bootstrap.
+func resolveSSMPath(r *config.Resolver) string {
+	if r != nil && r.SSMOverride != "" {
+		return r.SSMOverride
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
+	if r != nil && r.RepoOverride != "" {
+		return slugSSMPath(func() (string, error) { return config.CanonicalRepo(r.RepoOverride) })
+	}
+	dir := ""
+	if r != nil {
+		dir = r.Dir
+	}
+	if dir == "" {
 		return config.DefaultSSMPath
 	}
-	repo, err := config.RepoURL(cwd)
+	return slugSSMPath(func() (string, error) { return config.RepoURL(dir) })
+}
+
+// slugSSMPath derives /horde/<slug>/config from a repo produced by getRepo,
+// swallowing any failure to config.DefaultSSMPath.
+func slugSSMPath(getRepo func() (string, error)) string {
+	repo, err := getRepo()
 	if err != nil {
 		return config.DefaultSSMPath
 	}
@@ -53,14 +69,28 @@ type factoryDeps struct {
 	loadAWSConfig func(ctx context.Context, profile string) (aws.Config, error)
 	newSSMClient  func(cfg aws.Config) config.SSMClient
 	openStore     func(providerName string) (store.Store, func(), error)
+	// resolver carries the identity/discovery overrides into the ECS bring-up
+	// (resolveSSMPath). Defaults to a discovery-only resolver scoped to the
+	// working directory; CLI entry points replace it via withResolver so flag
+	// and env overrides take effect.
+	resolver *config.Resolver
 }
 
 func defaultFactoryDeps() factoryDeps {
+	cwd, _ := os.Getwd()
 	return factoryDeps{
 		loadAWSConfig: awscfg.Load,
 		newSSMClient:  func(cfg aws.Config) config.SSMClient { return ssm.NewFromConfig(cfg) },
 		openStore:     openStore,
+		resolver:      &config.Resolver{Dir: cwd},
 	}
+}
+
+// withResolver returns a copy of deps with the resolver replaced. CLI entry
+// points use this to inject the flag/env-aware resolver built from the command.
+func (d factoryDeps) withResolver(r *config.Resolver) factoryDeps {
+	d.resolver = r
+	return d
 }
 
 // openStore opens the local SQLite store used by the docker provider.
@@ -90,7 +120,7 @@ func newProviderWith(ctx context.Context, name, profile string, deps factoryDeps
 			return nil, fmt.Errorf("initializing aws-ecs provider: %w", err)
 		}
 		ssmClient := deps.newSSMClient(awsCfg)
-		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
+		hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath(deps.resolver))
 		if err != nil {
 			return nil, fmt.Errorf("initializing aws-ecs provider: %s", config.Diagnostic(err))
 		}
@@ -201,7 +231,7 @@ func initECSProviderAndStore(ctx context.Context, profile string, deps factoryDe
 		return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("%s: %w%s", errPrefix, err, hint)
 	}
 	ssmClient := deps.newSSMClient(awsCfg)
-	hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath())
+	hordeCfg, err := config.LoadFromSSM(ctx, ssmClient, resolveSSMPath(deps.resolver))
 	if err != nil {
 		// Diagnostic returns a formatted string (not an error), so use %s.
 		return nil, nil, 0, "", nil, nil, nil, fmt.Errorf("%s: %s%s", errPrefix, config.Diagnostic(err), hint)

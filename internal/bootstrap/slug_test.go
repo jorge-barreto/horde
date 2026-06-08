@@ -41,6 +41,29 @@ func TestSlug(t *testing.T) {
 	}
 }
 
+func TestSlug_GitSuffixIdempotent(t *testing.T) {
+	t.Parallel()
+	// The bucket-key fix layers config.CanonicalRepo (which strips .git) under
+	// the SSM path derivation, which feeds Slug. Slug must already be
+	// idempotent w.r.t. the .git suffix so the canonical and raw forms resolve
+	// to the same SSM path / resource names — otherwise dev and CI launches
+	// would target different stacks. This locks that property.
+	withGit, err := Slug("github.com/org/repo.git")
+	if err != nil {
+		t.Fatalf("Slug(.git) error: %v", err)
+	}
+	withoutGit, err := Slug("github.com/org/repo")
+	if err != nil {
+		t.Fatalf("Slug(no .git) error: %v", err)
+	}
+	if withGit != withoutGit {
+		t.Errorf(".git and no-.git slugs diverge: %q vs %q", withGit, withoutGit)
+	}
+	if withGit != "org-repo" {
+		t.Errorf("Slug = %q, want %q", withGit, "org-repo")
+	}
+}
+
 func TestSlug_TruncationBoundary(t *testing.T) {
 	t.Parallel()
 	in := "https://github.com/org/" + strings.Repeat("a", 200) + ".git"

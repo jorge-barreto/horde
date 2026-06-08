@@ -116,7 +116,7 @@ func TestLaunch_Success(t *testing.T) {
 	}
 	defer st.Close()
 
-	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -127,8 +127,8 @@ func TestLaunch_Success(t *testing.T) {
 	if r.ID != runID {
 		t.Errorf("ID = %q, want %q", r.ID, runID)
 	}
-	if r.Repo != "github.com/test/repo.git" {
-		t.Errorf("Repo = %q, want %q", r.Repo, "github.com/test/repo.git")
+	if r.Repo != "github.com/test/repo" {
+		t.Errorf("Repo = %q, want %q", r.Repo, "github.com/test/repo")
 	}
 	if r.Ticket != "TICKET-1" {
 		t.Errorf("Ticket = %q, want %q", r.Ticket, "TICKET-1")
@@ -186,7 +186,7 @@ func TestLaunch_WithFlags(t *testing.T) {
 	}
 	defer st.Close()
 
-	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestLaunch_WithLabels(t *testing.T) {
 	}
 	defer st.Close()
 
-	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestLaunch_TimeoutAt_Regression(t *testing.T) {
 			// Mirrors launchCmd lines 192-204 in cmd/horde/main.go
 			run := &store.Run{
 				ID:         id,
-				Repo:       "github.com/test/repo.git",
+				Repo:       "github.com/test/repo",
 				Ticket:     "TICKET-1",
 				Branch:     "",
 				Workflow:   "",
@@ -403,7 +403,7 @@ func assertNoRunsRecorded(t *testing.T, env launchEnv) {
 		t.Fatalf("opening store: %v", err)
 	}
 	defer st.Close()
-	runs, err := st.ListByRepo(context.Background(), "github.com/test/repo.git", true)
+	runs, err := st.ListByRepo(context.Background(), "github.com/test/repo", true)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestLaunch_DuplicateTicket_NoForce(t *testing.T) {
 	now := time.Now()
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         "existingrunid",
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Status:     store.StatusRunning,
 		Provider:   "docker",
@@ -548,7 +548,7 @@ func TestLaunch_DuplicateTicket_NoForce(t *testing.T) {
 	}
 	defer st2.Close()
 
-	runs, err := st2.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st2.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 	now := time.Now()
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         "existingrunid",
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Status:     store.StatusRunning,
 		Provider:   "docker",
@@ -606,7 +606,7 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 	}
 	defer st2.Close()
 
-	runs, err := st2.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st2.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -642,7 +642,7 @@ func TestLaunch_MaxConcurrent_Rejected(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		err = st.CreateRun(ctx, &store.Run{
 			ID:         fmt.Sprintf("run-%03d", i),
-			Repo:       "github.com/test/repo.git",
+			Repo:       "github.com/test/repo",
 			Ticket:     fmt.Sprintf("TICKET-%d", i),
 			Status:     store.StatusRunning,
 			Provider:   "docker",
@@ -686,7 +686,7 @@ func TestLaunch_DockerFailure(t *testing.T) {
 	}
 	defer st.Close()
 
-	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -738,7 +738,7 @@ func TestLaunch_DockerFailure_NoStderrWarning(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	defer st.Close()
-	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -876,7 +876,7 @@ func TestStatus_CompletedRun(t *testing.T) {
 	runID := "testrunid001"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:           runID,
-		Repo:         "github.com/test/repo.git",
+		Repo:         "github.com/test/repo",
 		Ticket:       "TICKET-1",
 		Status:       store.StatusSuccess,
 		Provider:     "docker",
@@ -946,7 +946,7 @@ esac
 	runID := "testrunid002"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-2",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
@@ -1053,7 +1053,7 @@ esac
 	}
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute),
 		Status: store.StatusRunning, InstanceID: "abc123",
@@ -1108,7 +1108,7 @@ esac
 	}
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute),
 		Status: store.StatusRunning, InstanceID: "abc123",
@@ -1148,7 +1148,7 @@ esac
 	runID := "testrunid005"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-5",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
@@ -1246,7 +1246,7 @@ esac
 			now := time.Now()
 			runID := "lazy15m00001"
 			if err := st.CreateRun(ctx, &store.Run{
-				ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-15M",
+				ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-15M",
 				Status: store.StatusRunning, InstanceID: "abc123",
 				Provider: "docker", LaunchedBy: "testuser",
 				StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute),
@@ -1312,7 +1312,7 @@ esac
 	runID := "testrunid-m0e"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-m0e",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
@@ -1402,7 +1402,7 @@ esac
 	runID := "testrunid006"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "",
 		Status:     store.StatusRunning,
@@ -1476,7 +1476,7 @@ esac
 	runID := "testrunid007"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-7",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
@@ -1545,7 +1545,7 @@ esac
 	runID := "testrunid008"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-8",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
@@ -1617,7 +1617,7 @@ esac
 	runID := "testrunid009"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "review",
 		Status:     store.StatusRunning,
@@ -1681,7 +1681,7 @@ esac
 func TestPrintRunStatus_NilCost(t *testing.T) {
 	run := &store.Run{
 		ID:         "abcdef123456",
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "test-flow",
 		Provider:   "docker",
@@ -1706,7 +1706,7 @@ func TestPrintRunStatus_WithCost(t *testing.T) {
 	cost := 1.23
 	run := &store.Run{
 		ID:           "abcdef123456",
-		Repo:         "github.com/test/repo.git",
+		Repo:         "github.com/test/repo",
 		Ticket:       "TICKET-1",
 		Workflow:     "test-flow",
 		Provider:     "docker",
@@ -1763,9 +1763,9 @@ func TestList_ActiveOnly(t *testing.T) {
 	completedAt := now.Add(-10 * time.Minute)
 
 	runs := []*store.Run{
-		{ID: "listrun00001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
-		{ID: "listrun00002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
-		{ID: "listrun00003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
+		{ID: "listrun00001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
+		{ID: "listrun00003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
 	}
 	for _, r := range runs {
 		if err := st.CreateRun(ctx, r); err != nil {
@@ -1819,9 +1819,9 @@ func TestList_All(t *testing.T) {
 	completedAt := now.Add(-10 * time.Minute)
 
 	runs := []*store.Run{
-		{ID: "listrun00001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
-		{ID: "listrun00002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
-		{ID: "listrun00003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
+		{ID: "listrun00001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
+		{ID: "listrun00003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
 	}
 	for _, r := range runs {
 		if err := st.CreateRun(ctx, r); err != nil {
@@ -1952,7 +1952,7 @@ esac
 		Ticket:     "TICKET-5",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
 		StartedAt:  now.Add(-15 * time.Minute),
@@ -2030,8 +2030,8 @@ esac
 	}
 	now := time.Now()
 	for _, r := range []*store.Run{
-		{ID: "lazyrun00001", Ticket: "TICKET-1", Status: store.StatusRunning, InstanceID: "container1", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute)},
-		{ID: "lazyrun00002", Ticket: "TICKET-2", Status: store.StatusRunning, InstanceID: "container2", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute)},
+		{ID: "lazyrun00001", Ticket: "TICKET-1", Status: store.StatusRunning, InstanceID: "container1", Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute)},
+		{ID: "lazyrun00002", Ticket: "TICKET-2", Status: store.StatusRunning, InstanceID: "container2", Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute)},
 	} {
 		if err := st.CreateRun(ctx, r); err != nil {
 			t.Fatalf("creating run %s: %v", r.ID, err)
@@ -2094,7 +2094,7 @@ esac
 		Ticket:     "TICKET-3",
 		Status:     store.StatusRunning,
 		InstanceID: "container3",
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
 		StartedAt:  now.Add(-15 * time.Minute),
@@ -2157,8 +2157,8 @@ esac
 	}
 	now := time.Now()
 	for _, r := range []*store.Run{
-		{ID: "errrun00001", Ticket: "TICKET-1", Status: store.StatusRunning, InstanceID: "badcontainer", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute)},
-		{ID: "errrun00002", Ticket: "TICKET-2", Status: store.StatusRunning, InstanceID: "goodcontainer", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute)},
+		{ID: "errrun00001", Ticket: "TICKET-1", Status: store.StatusRunning, InstanceID: "badcontainer", Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-15 * time.Minute), TimeoutAt: now.Add(45 * time.Minute)},
+		{ID: "errrun00002", Ticket: "TICKET-2", Status: store.StatusRunning, InstanceID: "goodcontainer", Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-10 * time.Minute), TimeoutAt: now.Add(50 * time.Minute)},
 	} {
 		if err := st.CreateRun(ctx, r); err != nil {
 			t.Fatalf("creating run %s: %v", r.ID, err)
@@ -2222,7 +2222,7 @@ func TestList_TableFormat(t *testing.T) {
 		Branch:       "feature-x",
 		Workflow:     "implement-ticket",
 		Status:       store.StatusSuccess,
-		Repo:         "github.com/test/repo.git",
+		Repo:         "github.com/test/repo",
 		Provider:     "docker",
 		LaunchedBy:   "testuser",
 		StartedAt:    now.Add(-10 * time.Minute),
@@ -2281,8 +2281,8 @@ func TestList_OtherRepoFiltered(t *testing.T) {
 	}
 	now := time.Now()
 	runs := []*store.Run{
-		{ID: "listrun00007", Repo: "github.com/test/repo.git", Ticket: "T-LOCAL", Status: store.StatusRunning, Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
-		{ID: "listrun00008", Repo: "github.com/other/repo.git", Ticket: "T-OTHER", Status: store.StatusRunning, Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00007", Repo: "github.com/test/repo", Ticket: "T-LOCAL", Status: store.StatusRunning, Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listrun00008", Repo: "github.com/other/repo", Ticket: "T-OTHER", Status: store.StatusRunning, Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
 	}
 	for _, r := range runs {
 		if err := st.CreateRun(ctx, r); err != nil {
@@ -2329,7 +2329,7 @@ func TestLogs_Success(t *testing.T) {
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2378,7 +2378,7 @@ func TestLogs_Follow_Success(t *testing.T) {
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2449,7 +2449,7 @@ esac
 	}
 	if err := st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2571,7 +2571,7 @@ func TestLogs_CompletedRun(t *testing.T) {
 			}
 			err = st.CreateRun(ctx, &store.Run{
 				ID:         runID,
-				Repo:       "github.com/test/repo.git",
+				Repo:       "github.com/test/repo",
 				Ticket:     "TICKET-1",
 				Provider:   "docker",
 				LaunchedBy: "testuser",
@@ -2610,7 +2610,7 @@ func TestLogs_PendingNoContainer(t *testing.T) {
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2648,7 +2648,7 @@ func TestLogs_ContainerGone(t *testing.T) {
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2718,7 +2718,7 @@ func TestKill_AlreadyCompleted(t *testing.T) {
 			}
 			err = st.CreateRun(ctx, &store.Run{
 				ID:         runID,
-				Repo:       "github.com/test/repo.git",
+				Repo:       "github.com/test/repo",
 				Ticket:     "TICKET-1",
 				Provider:   "docker",
 				LaunchedBy: "testuser",
@@ -2760,7 +2760,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2835,7 +2835,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-2",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -2900,7 +2900,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "",
 		Provider:   "docker",
@@ -2989,7 +2989,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "plan",
 		Provider:   "docker",
@@ -3051,7 +3051,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -3115,7 +3115,7 @@ func TestKill_PendingRun(t *testing.T) {
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Provider:   "docker",
 		LaunchedBy: "testuser",
@@ -3185,7 +3185,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "",
 		Provider:   "docker",
@@ -3266,7 +3266,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "",
 		Provider:   "docker",
@@ -3341,7 +3341,7 @@ esac
 	}
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "plan",
 		Provider:   "docker",
@@ -3426,7 +3426,7 @@ esac
 	}
 	if err := st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
 		Workflow:   "",
 		Provider:   "docker",
@@ -3521,7 +3521,7 @@ func TestResults_StillRunning(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusRunning, InstanceID: "abc123",
@@ -3559,7 +3559,7 @@ func TestResults_CompletedWithResults(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusSuccess,
@@ -3604,7 +3604,7 @@ func TestResults_CompletedNoCost(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusSuccess,
@@ -3652,7 +3652,7 @@ func TestResults_CompletedWithWorkflow(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1", Workflow: "review",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1", Workflow: "review",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusSuccess,
@@ -3703,7 +3703,7 @@ func TestResults_MissingRunResult(t *testing.T) {
 	exitCode := 1
 	cost := 2.50
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusFailed, ExitCode: &exitCode, TotalCostUSD: &cost,
@@ -3765,7 +3765,7 @@ func TestResults_CorruptJSON(t *testing.T) {
 			exitCode := 1
 			cost := 2.50
 			if err := st.CreateRun(ctx, &store.Run{
-				ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+				ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 				Provider: "docker", LaunchedBy: "testuser",
 				StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 				Status: store.StatusFailed, ExitCode: &exitCode, TotalCostUSD: &cost,
@@ -3818,7 +3818,7 @@ func TestResults_JSON_CorruptJSON(t *testing.T) {
 	}
 	exitCode := 1
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusFailed, ExitCode: &exitCode,
@@ -3858,7 +3858,7 @@ func TestResults_LazyCompletion(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-5",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-5",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now().Add(-15 * time.Minute), TimeoutAt: time.Now().Add(45 * time.Minute),
 		Status: store.StatusRunning, InstanceID: "abc123",
@@ -3889,13 +3889,30 @@ func TestResults_LazyCompletion(t *testing.T) {
 
 func TestResolveCanonicalRepo_FromSSMConfig(t *testing.T) {
 	t.Parallel()
+	// SSM authority: cfg.Repo wins verbatim, regardless of the resolver's Dir
+	// (here a nonexistent dir, which would error if discovery were consulted).
 	cfg := &config.HordeConfig{Repo: "github.com/example/myproj"}
-	got, err := resolveCanonicalRepo(cfg, "/nonexistent/dir")
+	got, err := resolveCanonicalRepo(cfg, &config.Resolver{Dir: "/nonexistent/dir"})
 	if err != nil {
 		t.Fatalf("resolveCanonicalRepo unexpected error: %v", err)
 	}
 	if got != "github.com/example/myproj" {
 		t.Errorf("resolveCanonicalRepo = %q, want %q", got, "github.com/example/myproj")
+	}
+}
+
+func TestResolveCanonicalRepo_SSMAuthorityBeatsRepoOverride(t *testing.T) {
+	t.Parallel()
+	// Even with a --repo override present, the SSM value is the authority for
+	// ECS so existing deployments are not re-partitioned.
+	cfg := &config.HordeConfig{Repo: "github.com/example/myproj"}
+	r := &config.Resolver{RepoOverride: "github.com/other/repo"}
+	got, err := resolveCanonicalRepo(cfg, r)
+	if err != nil {
+		t.Fatalf("resolveCanonicalRepo unexpected error: %v", err)
+	}
+	if got != "github.com/example/myproj" {
+		t.Errorf("resolveCanonicalRepo = %q, want SSM value %q", got, "github.com/example/myproj")
 	}
 }
 
@@ -3912,20 +3929,23 @@ func TestResolveCanonicalRepo_FallsBackToGitRemote(t *testing.T) {
 	run("git", "init")
 	run("git", "remote", "add", "origin", "https://github.com/example/fallback.git")
 
-	got, err := resolveCanonicalRepo(nil, dir)
+	// Docker (no SSM): falls back to the resolver, which canonicalizes the
+	// local git remote — the ".git" suffix is stripped.
+	want := "github.com/example/fallback"
+	got, err := resolveCanonicalRepo(nil, &config.Resolver{Dir: dir})
 	if err != nil {
 		t.Fatalf("resolveCanonicalRepo(nil) unexpected error: %v", err)
 	}
-	if got != "github.com/example/fallback.git" {
-		t.Errorf("resolveCanonicalRepo(nil) = %q, want %q", got, "github.com/example/fallback.git")
+	if got != want {
+		t.Errorf("resolveCanonicalRepo(nil) = %q, want %q", got, want)
 	}
 
-	got, err = resolveCanonicalRepo(&config.HordeConfig{Repo: ""}, dir)
+	got, err = resolveCanonicalRepo(&config.HordeConfig{Repo: ""}, &config.Resolver{Dir: dir})
 	if err != nil {
 		t.Fatalf("resolveCanonicalRepo(empty Repo) unexpected error: %v", err)
 	}
-	if got != "github.com/example/fallback.git" {
-		t.Errorf("resolveCanonicalRepo(empty Repo) = %q, want %q", got, "github.com/example/fallback.git")
+	if got != want {
+		t.Errorf("resolveCanonicalRepo(empty Repo) = %q, want %q", got, want)
 	}
 }
 
@@ -4010,7 +4030,7 @@ func TestOpenStore_Docker(t *testing.T) {
 	ctx := context.Background()
 	run := &store.Run{
 		ID:        "testrun123ab",
-		Repo:      "github.com/test/repo.git",
+		Repo:      "github.com/test/repo",
 		Ticket:    "TEST-1",
 		Provider:  "docker",
 		Status:    store.StatusPending,
@@ -4064,7 +4084,7 @@ func TestStatus_JSON_CompletedRun(t *testing.T) {
 	runID := "jsonstatusrun001"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:           runID,
-		Repo:         "github.com/test/repo.git",
+		Repo:         "github.com/test/repo",
 		Ticket:       "TICKET-1",
 		Status:       store.StatusSuccess,
 		Provider:     "docker",
@@ -4140,7 +4160,7 @@ esac
 	runID := "jsonstatusrun002"
 	err = st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-2",
 		Status:     store.StatusRunning,
 		InstanceID: "abc123",
@@ -4210,7 +4230,7 @@ esac
 	runID := "fin5ezjson01"
 	if err := st.CreateRun(ctx, &store.Run{
 		ID:         runID,
-		Repo:       "github.com/test/repo.git",
+		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-5EZ",
 		Status:     store.StatusRunning, // pre-call: running
 		InstanceID: "abc123",
@@ -4283,9 +4303,9 @@ func TestList_JSON_ActiveOnly(t *testing.T) {
 	now := time.Now()
 	completedAt := now.Add(-10 * time.Minute)
 	runs := []*store.Run{
-		{ID: "listjson001", Ticket: "T-1", Workflow: "implement-ticket", Branch: "develop", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", InstanceID: "inst-001", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
-		{ID: "listjson002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
-		{ID: "listjson003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
+		{ID: "listjson001", Ticket: "T-1", Workflow: "implement-ticket", Branch: "develop", Status: store.StatusPending, Repo: "github.com/test/repo", Provider: "docker", InstanceID: "inst-001", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listjson002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
+		{ID: "listjson003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
 	}
 	for _, r := range runs {
 		if err := st.CreateRun(ctx, r); err != nil {
@@ -4401,7 +4421,7 @@ func seedFilterRuns(t *testing.T, dbPath string) {
 	defer st.Close()
 	now := time.Now()
 	done := now.Add(-10 * time.Minute)
-	repo := "github.com/test/repo.git"
+	repo := "github.com/test/repo"
 	mk := func(id, ticket, workflow string, status store.Status, labels map[string]string, cost *float64) *store.Run {
 		r := &store.Run{
 			ID: id, Ticket: ticket, Workflow: workflow, Status: status, Repo: repo,
@@ -4539,7 +4559,7 @@ func TestList_SinceUntil_EndToEnd(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	done := now.Add(-time.Hour)
-	repo := "github.com/test/repo.git"
+	repo := "github.com/test/repo"
 	mk := func(id string, age time.Duration) *store.Run {
 		return &store.Run{
 			ID: id, Repo: repo, Ticket: id, Workflow: "w", Provider: "docker",
@@ -4619,7 +4639,7 @@ func TestResults_JSON_CompletedWithResults(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusSuccess,
@@ -4682,7 +4702,7 @@ func TestResults_JSON_StillRunning(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusRunning, InstanceID: "abc123",
@@ -4725,7 +4745,7 @@ func TestResults_JSON_MissingRunResult(t *testing.T) {
 	exitCode := 1
 	cost := 2.50
 	err = st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser",
 		StartedAt: time.Now(), TimeoutAt: time.Now().Add(60 * time.Minute),
 		Status: store.StatusFailed, ExitCode: &exitCode, TotalCostUSD: &cost,
@@ -4823,7 +4843,7 @@ func (p *noopProvider) Finalize(_ context.Context, _ *store.Run, _ string) error
 
 func TestList_DynamoStore_ColumnOutput(t *testing.T) {
 	ctx := context.Background()
-	repo := "github.com/test/repo.git"
+	repo := "github.com/test/repo"
 	now := time.Now()
 	completedAt := now.Add(-5 * time.Minute)
 	cost := 4.52
@@ -4859,7 +4879,7 @@ func TestList_DynamoStore_ColumnOutput(t *testing.T) {
 				Ticket:     "OTHER-1",
 				Branch:     "main",
 				Status:     store.StatusSuccess,
-				Repo:       "github.com/other/repo.git",
+				Repo:       "github.com/other/repo",
 				Provider:   "aws-ecs",
 				LaunchedBy: "testuser",
 				StartedAt:  now.Add(-30 * time.Minute),
@@ -4998,7 +5018,7 @@ esac
 	runID := "testrun123ab"
 	err = st.CreateRun(context.Background(), &store.Run{
 		ID:          runID,
-		Repo:        "github.com/test/repo.git",
+		Repo:        "github.com/test/repo",
 		Ticket:      "TICKET-1",
 		Provider:    "aws-ecs",
 		InstanceID:  "abc123",
@@ -5083,7 +5103,7 @@ esac
 	runID := "dockrun12345"
 	if err := st.CreateRun(context.Background(), &store.Run{
 		ID:          runID,
-		Repo:        "github.com/test/repo.git",
+		Repo:        "github.com/test/repo",
 		Ticket:      "TICKET-1",
 		Provider:    "docker",
 		InstanceID:  "abc123",
@@ -5140,8 +5160,8 @@ esac
 	now := time.Now()
 	completedAt := now.Add(-1 * time.Hour)
 	for _, r := range []*store.Run{
-		{ID: "badrun000001", Ticket: "T-1", Status: store.StatusFailed, InstanceID: "badcid", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-2 * time.Hour), CompletedAt: &completedAt, TimeoutAt: now.Add(24 * time.Hour)},
-		{ID: "goodrun00001", Ticket: "T-2", Status: store.StatusSuccess, InstanceID: "goodcid", Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-2 * time.Hour), CompletedAt: &completedAt, TimeoutAt: now.Add(24 * time.Hour)},
+		{ID: "badrun000001", Ticket: "T-1", Status: store.StatusFailed, InstanceID: "badcid", Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-2 * time.Hour), CompletedAt: &completedAt, TimeoutAt: now.Add(24 * time.Hour)},
+		{ID: "goodrun00001", Ticket: "T-2", Status: store.StatusSuccess, InstanceID: "goodcid", Repo: "github.com/test/repo", Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-2 * time.Hour), CompletedAt: &completedAt, TimeoutAt: now.Add(24 * time.Hour)},
 	} {
 		if err := st.CreateRun(ctx, r); err != nil {
 			t.Fatalf("creating run %s: %v", r.ID, err)
@@ -5244,7 +5264,7 @@ func TestLaunch_JSON_Launched(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	defer st.Close()
-	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo", false)
 	if err != nil {
 		t.Fatalf("listing runs: %v", err)
 	}
@@ -5264,7 +5284,7 @@ func TestLaunch_JSON_Duplicate(t *testing.T) {
 	}
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: "existingrunid", Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: "existingrunid", Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
 		StartedAt: now, TimeoutAt: now.Add(time.Hour),
 	}); err != nil {
@@ -5311,7 +5331,7 @@ func TestLaunch_JSON_Capped(t *testing.T) {
 	now := time.Now()
 	for i := 0; i < 100; i++ { // docker cap is 100
 		if err := st.CreateRun(ctx, &store.Run{
-			ID: fmt.Sprintf("cap-run-%03d", i), Repo: "github.com/test/repo.git",
+			ID: fmt.Sprintf("cap-run-%03d", i), Repo: "github.com/test/repo",
 			Ticket: fmt.Sprintf("CAP-%d", i), Status: store.StatusRunning, Provider: "docker",
 			LaunchedBy: "someone", StartedAt: now.Add(time.Duration(i) * time.Second), TimeoutAt: now.Add(25 * time.Hour),
 		}); err != nil {
@@ -5387,7 +5407,7 @@ func TestLaunch_HumanDuplicate_StillExits1(t *testing.T) {
 	}
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: "existingrunid", Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: "existingrunid", Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
 		StartedAt: now, TimeoutAt: now.Add(time.Hour),
 	}); err != nil {
@@ -5446,7 +5466,7 @@ esac
 		t.Fatalf("creating workspace: %v", err)
 	}
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Workflow: "implement-ticket", Status: store.StatusFailed, Provider: "docker",
 		LaunchedBy: "someone", StartedAt: now.Add(-10 * time.Minute), CompletedAt: &completedAt,
 		TimeoutAt: now.Add(time.Hour), InstanceID: "oldcontainer",
@@ -5496,7 +5516,7 @@ esac
 		t.Fatalf("opening store: %v", err)
 	}
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "testuser", StartedAt: time.Now(),
 		TimeoutAt: time.Now().Add(60 * time.Minute), Status: store.StatusRunning, InstanceID: "abc123",
 	}); err != nil {
@@ -5548,7 +5568,7 @@ esac
 	terminal := []string{"cleanjson001", "cleanjson002"}
 	for _, id := range terminal {
 		if err := st.CreateRun(ctx, &store.Run{
-			ID: id, Repo: "github.com/test/repo.git", Ticket: id, Status: store.StatusSuccess,
+			ID: id, Repo: "github.com/test/repo", Ticket: id, Status: store.StatusSuccess,
 			Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-10 * time.Minute),
 			CompletedAt: &completedAt, TimeoutAt: now.Add(time.Hour), InstanceID: id + "-c",
 		}); err != nil {
@@ -5556,7 +5576,7 @@ esac
 		}
 	}
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: "cleanjson999", Repo: "github.com/test/repo.git", Ticket: "T-run", Status: store.StatusRunning,
+		ID: "cleanjson999", Repo: "github.com/test/repo", Ticket: "T-run", Status: store.StatusRunning,
 		Provider: "docker", LaunchedBy: "u", StartedAt: now, TimeoutAt: now.Add(time.Hour), InstanceID: "run-c",
 	}); err != nil {
 		t.Fatalf("creating running run: %v", err)
@@ -5619,7 +5639,7 @@ func TestHydrate_JSON_FailureSingleEnvelope(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "u", StartedAt: time.Now(),
 		TimeoutAt: time.Now().Add(time.Hour), Status: store.StatusRunning, // non-terminal → failure
 	}); err != nil {
@@ -5734,7 +5754,7 @@ func TestResults_JSON_DurationSeconds(t *testing.T) {
 		t.Fatalf("opening store: %v", err)
 	}
 	if err := st.CreateRun(ctx, &store.Run{
-		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
 		Provider: "docker", LaunchedBy: "u", StartedAt: time.Now(),
 		TimeoutAt: time.Now().Add(60 * time.Minute), Status: store.StatusSuccess,
 	}); err != nil {

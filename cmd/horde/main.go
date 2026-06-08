@@ -97,6 +97,27 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 				Name:  "json",
 				Usage: "Machine-readable JSON output (launch, retry, status, results, list, kill, clean, hydrate, push)",
 			},
+			// Identity/discovery overrides. Each folds flag>env via Sources, so
+			// cmd.String(...) returns the flag value if set, else the env var.
+			// None are Required — urfave validates Required flags before the
+			// Action and prints help to stdout, which would break the --json
+			// contract; the resolver validates instead. These let programmatic
+			// callers (Lambda, CI outside the repo) run without a checkout.
+			&cli.StringFlag{
+				Name:    "repo",
+				Usage:   "Canonical repo URL/identifier; overrides git remote discovery",
+				Sources: cli.EnvVars("HORDE_REPO_URL"),
+			},
+			&cli.StringFlag{
+				Name:    "config",
+				Usage:   "Path to project config (.horde/config.yaml file or a directory containing it); overrides cwd discovery",
+				Sources: cli.EnvVars("HORDE_CONFIG_PATH"),
+			},
+			&cli.StringFlag{
+				Name:    "ssm-path",
+				Usage:   "SSM parameter path for aws-ecs config; overrides slug-derived path",
+				Sources: cli.EnvVars("HORDE_SSM_PATH"),
+			},
 		},
 		// ExitErrHandler is the single place that turns a command error into a
 		// JSON error envelope on stdout when --json is set. urfave/cli routes
@@ -256,12 +277,14 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				return fmt.Errorf("getting working directory: %w", err)
 			}
 
-			repo, err := resolveCanonicalRepo(hordeCfg, cwd)
+			resolver := newResolver(cmd)
+
+			repo, err := resolveCanonicalRepo(hordeCfg, resolver)
 			if err != nil {
 				return err
 			}
 
-			envPath, spec, secretRemap, err := resolveSecretsForLaunch(provName, cwd)
+			envPath, spec, secretRemap, err := resolveSecretsForLaunch(provName, resolver)
 			if err != nil {
 				return err
 			}
@@ -347,7 +370,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				}
 			}
 
-			projCfg, err := config.LoadProjectConfig(cwd)
+			projCfg, err := resolver.ProjectConfig()
 			if err != nil {
 				return err
 			}
@@ -485,11 +508,12 @@ resumes any interrupted agent session. Override with explicit orc args:
 			if err != nil {
 				return fmt.Errorf("getting working directory: %w", err)
 			}
-			envPath, _, secretRemap, err := resolveSecretsForLaunch(run.Provider, cwd)
+			resolver := newResolver(cmd)
+			envPath, _, secretRemap, err := resolveSecretsForLaunch(run.Provider, resolver)
 			if err != nil {
 				return err
 			}
-			projCfg, err := config.LoadProjectConfig(cwd)
+			projCfg, err := resolver.ProjectConfig()
 			if err != nil {
 				return err
 			}
@@ -889,7 +913,7 @@ duration-ago (1h, 30m, 7d).`,
 				return fmt.Errorf("--until: %w", err)
 			}
 
-			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -900,12 +924,7 @@ duration-ago (1h, 30m, 7d).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("getting working directory: %w", err)
-			}
-
-			repo, err := resolveCanonicalRepo(hordeCfg, cwd)
+			repo, err := resolveCanonicalRepo(hordeCfg, newResolver(cmd))
 			if err != nil {
 				return err
 			}
@@ -1015,7 +1034,7 @@ directories (all code changes will be lost).`,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -1074,11 +1093,7 @@ directories (all code changes will be lost).`,
 			}
 
 			// Clean all terminal runs
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("getting working directory: %w", err)
-			}
-			repo, err := resolveCanonicalRepo(hordeCfg, cwd)
+			repo, err := resolveCanonicalRepo(hordeCfg, newResolver(cmd))
 			if err != nil {
 				return err
 			}
@@ -1313,8 +1328,8 @@ func secretCollisionsOnECS(provName string, spec config.SecretSpec, extraEnv map
 // and a non-canonical "container-name -> host-env-name" remap for the
 // docker provider; the ECS provider gets nil remap (its task definition
 // is baked at bootstrap time).
-func resolveSecretsForLaunch(provName, dir string) (envPath string, spec config.SecretSpec, remap map[string]string, err error) {
-	cfg, err := config.LoadProjectConfig(dir)
+func resolveSecretsForLaunch(provName string, r *config.Resolver) (envPath string, spec config.SecretSpec, remap map[string]string, err error) {
+	cfg, err := r.ProjectConfig()
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -1323,7 +1338,7 @@ func resolveSecretsForLaunch(provName, dir string) (envPath string, spec config.
 		return "", nil, nil, err
 	}
 	if provName == config.ProviderDocker {
-		envPath, err = config.ValidateEnvFileFor(dir, spec)
+		envPath, err = config.ValidateEnvFileFor(r.EnvFileDir(), spec)
 		if err != nil {
 			return "", nil, nil, err
 		}
@@ -1590,14 +1605,29 @@ func resolveLaunchedBy(ctx context.Context, providerName string, cwd string, aws
 // resolveCanonicalRepo returns the canonical repository identifier used to
 // scope run records. On aws-ecs the value comes from SSM (cfg.Repo), so every
 // CLI invocation against the same deployment writes and queries the same
-// string regardless of the local git remote. Docker has no SSM analog, so
-// it falls back to deriving from the local git remote — fine in practice
-// because the docker provider is single-user.
-func resolveCanonicalRepo(cfg *config.HordeConfig, cwd string) (string, error) {
+// string regardless of the local git remote — this is the SSM-as-authority
+// rule, and it is preserved verbatim even if a --repo override is present.
+// Docker has no SSM analog, so it falls back to the resolver, which honors
+// --repo / HORDE_REPO_URL and otherwise canonicalizes the local git remote.
+func resolveCanonicalRepo(cfg *config.HordeConfig, r *config.Resolver) (string, error) {
 	if cfg != nil && cfg.Repo != "" {
 		return cfg.Repo, nil
 	}
-	return config.RepoURL(cwd)
+	return r.CanonicalRepo()
+}
+
+// newResolver builds the identity/discovery resolver for a command from its
+// flag/env values (folded by the flags' Sources) plus the working directory.
+// A failed os.Getwd yields an empty Dir, which is non-fatal: resolution then
+// relies entirely on the overrides.
+func newResolver(cmd *cli.Command) *config.Resolver {
+	cwd, _ := os.Getwd()
+	return &config.Resolver{
+		RepoOverride:   cmd.String("repo"),
+		ConfigOverride: cmd.String("config"),
+		SSMOverride:    cmd.String("ssm-path"),
+		Dir:            cwd,
+	}
 }
 
 // initProviderAndStore creates the Provider and Store based on the --provider flag.
@@ -1608,13 +1638,15 @@ func resolveCanonicalRepo(cfg *config.HordeConfig, cwd string) (string, error) {
 // aws-ecs so callers can read deployment-scoped values (e.g. cfg.Repo). Returns
 // a cleanup function that must be deferred to release store resources.
 func initProviderAndStore(ctx context.Context, cmd *cli.Command) (provider.Provider, store.Store, int, string, *aws.Config, *config.HordeConfig, func(), error) {
-	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
+	deps := defaultFactoryDeps().withResolver(newResolver(cmd))
+	return initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), deps)
 }
 
 // initFromRunID opens the store, looks up the run, and creates the provider
 // from the stored run record. If --provider is set, it overrides the stored value.
 func initFromRunID(ctx context.Context, cmd *cli.Command, runID string) (provider.Provider, store.Store, *store.Run, func(), error) {
-	return initFromRunIDWith(ctx, cmd.String("provider"), cmd.String("profile"), runID, defaultFactoryDeps())
+	deps := defaultFactoryDeps().withResolver(newResolver(cmd))
+	return initFromRunIDWith(ctx, cmd.String("provider"), cmd.String("profile"), runID, deps)
 }
 
 // finalizeAndSync runs prov.Finalize on the in-memory run and persists any

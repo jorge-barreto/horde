@@ -38,6 +38,38 @@ func TestNormalSuccess(t *testing.T) {
 	}
 }
 
+// TestTokenTelemetryOmittedForZeroUsage verifies the end-to-end token path's
+// nil semantics: orc writes costs.json, prov.Finalize reads it via
+// ReadTokenUsage, the store persists it, and `status --json` reflects it. The
+// quick-success workflow is script-only (no agent phase), so orc reports an
+// all-zero costs.json — which means "no usage observed" and is treated as nil
+// (the same boundary the live reader uses), so the "tokens" object is OMITTED.
+// This pins the contract: zero/empty usage → no tokens object, not a {0,0,...}
+// object. (A real agent workflow carries non-zero counts and surfaces the
+// object — covered by the provider/jsonv1/lambda unit tests with real values.)
+func TestTokenTelemetryOmittedForZeroUsage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	h := newHarness(t)
+	runID := h.Launch("TEST-tokens", "quick-success", 5*time.Minute)
+	h.WaitForOrc(runID, 2*time.Minute)
+
+	out, err := h.runHorde("status", runID, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v\n%s", err, out)
+	}
+	// The run completed successfully and emitted valid JSON...
+	if !strings.Contains(out, `"status"`) {
+		t.Fatalf("status --json is not a valid status object, got:\n%s", out)
+	}
+	// ...but a script-only run used no tokens, so the object is omitted.
+	if strings.Contains(out, `"tokens"`) {
+		t.Errorf("status --json should omit \"tokens\" for a zero-usage run, got:\n%s", out)
+	}
+}
+
 // TestTimeoutMasksSuccess reproduces Bug #1: prov.Finalize checks timeout
 // before the .horde-exit-code marker file. When orc completes successfully but
 // the container is past its timeout, horde reports "killed" instead of "success".

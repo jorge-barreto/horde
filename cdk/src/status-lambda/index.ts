@@ -114,6 +114,63 @@ async function fetchTotalCost(runId: string): Promise<number | null> {
   }
 }
 
+interface TokenUsage {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+  readonly cache_creation_tokens: number;
+  readonly cache_read_tokens: number;
+  readonly turns: number;
+}
+
+// fetchTokenUsage pulls per-run token totals from costs.json in S3 (best-effort,
+// mirrors fetchTotalCost). orc writes the token totals to costs.json today;
+// turns is summed across the per-phase array (orc has no run-total turns).
+// Attribute names written downstream match the Go store consts and the Python
+// lambda — a cross-language contract.
+async function fetchTokenUsage(runId: string): Promise<TokenUsage | null> {
+  const prefix = `horde-runs/${runId}/`;
+  try {
+    const listing = await s3.send(
+      new ListObjectsV2Command({ Bucket: ARTIFACTS_BUCKET, Prefix: prefix }),
+    );
+    const match = (listing.Contents ?? []).find((o) => o.Key?.endsWith("/costs.json"));
+    if (!match?.Key) return null;
+    const obj = await s3.send(new GetObjectCommand({ Bucket: ARTIFACTS_BUCKET, Key: match.Key }));
+    const body = await obj.Body?.transformToString();
+    if (!body) return null;
+    const data = JSON.parse(body) as {
+      total_input_tokens?: number;
+      total_output_tokens?: number;
+      total_cache_creation_input_tokens?: number;
+      total_cache_read_input_tokens?: number;
+      phases?: ReadonlyArray<{ turns?: number }>;
+    };
+    // Coerce to an integer token count, kept in lockstep with the Python
+    // lambda's num(): accept a number or numeric string, truncate toward zero,
+    // reject booleans and anything non-finite -> 0. orc emits integers, so this
+    // only matters for malformed costs.json — but both backends must agree.
+    const num = (v: unknown): number => {
+      if (typeof v === "boolean") return 0;
+      const n = typeof v === "number" ? v : Number(v);
+      return Number.isFinite(n) ? Math.trunc(n) : 0;
+    };
+    const turns = (data.phases ?? []).reduce((acc, p) => acc + num(p.turns), 0);
+    return {
+      input_tokens: num(data.total_input_tokens),
+      output_tokens: num(data.total_output_tokens),
+      cache_creation_tokens: num(data.total_cache_creation_input_tokens),
+      cache_read_tokens: num(data.total_cache_read_input_tokens),
+      turns,
+    };
+  } catch (err) {
+    console.log("status-lambda: fetchTokenUsage non-fatal error", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 type TerminalStatus = "success" | "failed" | "killed" | "timed_out" | "rate_limited";
 
 // Mirrors internal/provider/docker.go::mapExitCode. orc exit codes:
@@ -168,6 +225,7 @@ export const handler: Handler<
 
   const stoppedAt = detail.stoppedAt;
   const cost = await fetchTotalCost(runId);
+  const tokens = await fetchTokenUsage(runId);
 
   const names: Record<string, string> = {
     "#s": "status",
@@ -192,6 +250,19 @@ export const handler: Handler<
     names["#tc"] = "total_cost_usd";
     values[":tc"] = { N: String(cost) };
     setExprs.push("#tc = :tc");
+  }
+  if (tokens !== null) {
+    names["#it"] = "input_tokens";
+    names["#ot"] = "output_tokens";
+    names["#cct"] = "cache_creation_tokens";
+    names["#crt"] = "cache_read_tokens";
+    names["#tn"] = "turns";
+    values[":it"] = { N: String(tokens.input_tokens) };
+    values[":ot"] = { N: String(tokens.output_tokens) };
+    values[":cct"] = { N: String(tokens.cache_creation_tokens) };
+    values[":crt"] = { N: String(tokens.cache_read_tokens) };
+    values[":tn"] = { N: String(tokens.turns) };
+    setExprs.push("#it = :it", "#ot = :ot", "#cct = :cct", "#crt = :crt", "#tn = :tn");
   }
 
   // Record the ECS stop reason FIRST and unconditionally. It is diagnostic,
@@ -257,6 +328,6 @@ export const handler: Handler<
     throw err;
   }
 
-  console.log("status-lambda: updated", { runId, status, exitCode, hasCost: cost !== null });
+  console.log("status-lambda: updated", { runId, status, exitCode, hasCost: cost !== null, hasTokens: tokens !== null });
   return { updated: true, runId, status, exitCode };
 };

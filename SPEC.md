@@ -78,7 +78,7 @@ The horde CLI reads infrastructure config from SSM Parameter Store, then calls E
 The status Lambda:
 - Receives ECS task state change events filtered to the horde cluster
 - Extracts the task ARN and maps it to a run ID via DynamoDB query
-- Updates `status`, `exit_code`, `completed_at`, and `total_cost_usd` (reads `run-result.json` from S3 if present) on terminal states (STOPPED). The exit code is read from the **worker** container (found by name, `horde-worker`), not the first container in the event — so sidecar containers can't be mistaken for the worker. The same by-name selection is applied in the Go provider's lazy reconciliation (`internal/provider/ecs.go`), the third place that derives run status from a container exit code.
+- Updates `status`, `exit_code`, `completed_at`, `total_cost_usd` (reads `run-result.json` from S3 if present), and token counts (`input_tokens`/`output_tokens`/`cache_creation_tokens`/`cache_read_tokens`/`turns`, read from `costs.json` in S3 if present) on terminal states (STOPPED). The exit code is read from the **worker** container (found by name, `horde-worker`), not the first container in the event — so sidecar containers can't be mistaken for the worker. The same by-name selection is applied in the Go provider's lazy reconciliation (`internal/provider/ecs.go`), the third place that derives run status from a container exit code.
 - Records the ECS stop reason (`stopCode`/`stoppedReason` from the event) into the run's `metadata` map as `stop_code`/`stop_reason`. This is diagnostic today and is the signal a future spot auto-resume keys off — a Fargate spot interruption surfaces as `stop_code == "TerminationNotice"`.
 - Is idempotent — CLI-driven updates and Lambda-driven updates converge to the same state. The CDK (`cdk/src/status-lambda/index.ts`) and bootstrap-CloudFormation (Python) implementations are kept in lockstep.
 
@@ -169,11 +169,16 @@ widens the listing to terminal runs the way `--all` does), `--workflow`,
 Status is applied *after* lazy `Finalize()` runs, so a run that completes during
 the call is classified correctly.
 
-**Cohort cost.** `horde list --json` includes a `summary` block —
-`{ "count": N, "total_cost_usd": X }` — aggregating the filtered result set, so
-a label cohort's spend (e.g. `--label epic=KS-100`) is readable without
-client-side summing. The human table prints the same as a trailing
-`N runs, $X total` line.
+**Cohort cost and tokens.** `horde list --json` includes a `summary` block —
+`{ "count": N, "total_cost_usd": X, "tokens": {...} }` — aggregating the
+filtered result set, so a label cohort's spend and token total (e.g.
+`--label epic=KS-100`) are readable without client-side summing. The `tokens`
+object (per-run on `status`/`list`/`results`, summed in the list `summary`)
+reports `input`/`output`/`cache_creation`/`cache_read`/`turns`; with per-run
+`started_at`/`completed_at` it lets an orchestrator derive a token burn rate
+over any window. Token counts come from orc's `costs.json` (preferred — live,
+per-phase) with `run-result.json` as a forward fallback. The human table prints
+the same cost as a trailing `N runs, $X total` line.
 
 ### 2. Monitor
 

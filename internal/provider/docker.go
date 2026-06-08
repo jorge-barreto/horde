@@ -459,6 +459,15 @@ func resolveStoppedExitCode(markerData []byte, markerErr error, instExit *int, r
 type RunResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
+	// Forward token fields: orc does not write these to run-result.json yet
+	// (tracked in jorge-barreto/orc#4). costs.json is the source today; these
+	// become the run-summary fallback once orc promotes them. Field names match
+	// costs.json's run-total names.
+	TotalInputTokens         *int `json:"total_input_tokens"`
+	TotalOutputTokens        *int `json:"total_output_tokens"`
+	TotalCacheCreationTokens *int `json:"total_cache_creation_input_tokens"`
+	TotalCacheReadTokens     *int `json:"total_cache_read_input_tokens"`
+	Turns                    *int `json:"turns"`
 }
 
 // ReadRunResult parses run-result.json from the local results directory for
@@ -476,6 +485,98 @@ func ReadRunResult(homeDir string, run *store.Run) (cost *float64, exitCode *int
 		return nil, nil
 	}
 	return rr.TotalCostUSD, rr.ExitCode
+}
+
+// costsFile is the subset of orc's costs.json that horde reads for token
+// telemetry. orc writes run-total token counts plus a per-phase array (each
+// phase carries a turns count). costs.json is the live, per-phase-flushed
+// source — preferred over run-result.json because it exists during a run and
+// already carries tokens on every orc version.
+type costsFile struct {
+	TotalInputTokens         int `json:"total_input_tokens"`
+	TotalOutputTokens        int `json:"total_output_tokens"`
+	TotalCacheCreationTokens int `json:"total_cache_creation_input_tokens"`
+	TotalCacheReadTokens     int `json:"total_cache_read_input_tokens"`
+	Phases                   []struct {
+		Turns int `json:"turns"`
+	} `json:"phases"`
+}
+
+// tokenUsageFromCostsJSON parses raw costs.json bytes into a TokenUsage,
+// summing per-phase turns into a run total (orc has no run-total turns).
+// Returns nil on malformed JSON, and nil for an all-zero/empty parse (e.g.
+// orc has flushed costs.json but no phase has produced usage yet, or a
+// script-only run): all-zero means "no usage observed", which is the same
+// "not yet known" boundary the live reader (fetchLiveTelemetry) uses, so the
+// nil semantics of the shared costs.json contract stay consistent and
+// ReadTokenUsage can fall through to run-result.json's forward fields.
+func tokenUsageFromCostsJSON(data []byte) *store.TokenUsage {
+	var cf costsFile
+	if json.Unmarshal(data, &cf) != nil {
+		return nil
+	}
+	turns := 0
+	for _, p := range cf.Phases {
+		turns += p.Turns
+	}
+	if cf.TotalInputTokens == 0 && cf.TotalOutputTokens == 0 &&
+		cf.TotalCacheCreationTokens == 0 && cf.TotalCacheReadTokens == 0 && turns == 0 {
+		return nil
+	}
+	return &store.TokenUsage{
+		InputTokens:         cf.TotalInputTokens,
+		OutputTokens:        cf.TotalOutputTokens,
+		CacheCreationTokens: cf.TotalCacheCreationTokens,
+		CacheReadTokens:     cf.TotalCacheReadTokens,
+		Turns:               turns,
+	}
+}
+
+// tokenUsageFromRunResult extracts the forward token fields from an already
+// parsed run-result.json. Returns nil when none are present (older orc).
+func tokenUsageFromRunResult(rr RunResult) *store.TokenUsage {
+	if rr.TotalInputTokens == nil && rr.TotalOutputTokens == nil &&
+		rr.TotalCacheCreationTokens == nil && rr.TotalCacheReadTokens == nil && rr.Turns == nil {
+		return nil
+	}
+	deref := func(p *int) int {
+		if p == nil {
+			return 0
+		}
+		return *p
+	}
+	return &store.TokenUsage{
+		InputTokens:         deref(rr.TotalInputTokens),
+		OutputTokens:        deref(rr.TotalOutputTokens),
+		CacheCreationTokens: deref(rr.TotalCacheCreationTokens),
+		CacheReadTokens:     deref(rr.TotalCacheReadTokens),
+		Turns:               deref(rr.Turns),
+	}
+}
+
+// ReadTokenUsage reads per-run token totals from the run's local audit dir.
+// costs.json is preferred (orc writes token totals there today, flushed
+// per-phase and atomically); the run-result.json token fields are the forward
+// fallback once orc promotes them (jorge-barreto/orc#4). Returns nil when
+// neither source carries usage — best-effort, exactly like ReadRunResult.
+func ReadTokenUsage(homeDir string, run *store.Run) *store.TokenUsage {
+	auditBase := LocalResultsDir(homeDir, run.ID)
+
+	costsPath := filepath.Join(auditBase, AuditRelPath(run.Workflow, run.Ticket, "costs.json"))
+	if data, err := os.ReadFile(costsPath); err == nil {
+		if tu := tokenUsageFromCostsJSON(data); tu != nil {
+			return tu
+		}
+	}
+
+	resultPath := filepath.Join(auditBase, AuditRelPath(run.Workflow, run.Ticket, "run-result.json"))
+	if data, err := os.ReadFile(resultPath); err == nil {
+		var rr RunResult
+		if json.Unmarshal(data, &rr) == nil {
+			return tokenUsageFromRunResult(rr)
+		}
+	}
+	return nil
 }
 
 // SaveContainerLog writes captured container logs to <resultsDir>/container.log.
@@ -592,6 +693,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			run.ExitCode = &exitCode
 			run.CompletedAt = &now
 			run.TotalCostUSD = cost
+			run.Tokens = ReadTokenUsage(homeDir, run)
 			return nil
 		}
 
@@ -619,6 +721,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			run.ExitCode = exitCode
 			run.CompletedAt = &now
 			run.TotalCostUSD = cost
+			run.Tokens = ReadTokenUsage(homeDir, run)
 			return nil
 		}
 
@@ -667,6 +770,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		run.ExitCode = exitCode
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
+		run.Tokens = ReadTokenUsage(homeDir, run)
 
 	case StateUnknown:
 		var cost *float64
@@ -719,6 +823,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		run.ExitCode = exitCode
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
+		run.Tokens = ReadTokenUsage(homeDir, run)
 	}
 
 	return nil

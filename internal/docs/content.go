@@ -123,7 +123,7 @@ const topicQuickstart = `Quick Start
 
     horde results j87pi2i5tzqd           # view results summary
 
-   Results include status, total cost, duration, and a per-phase breakdown.
+   Results include status, total cost, duration, token usage, and a per-phase breakdown.
 
 6. List all runs for the current repo:
 
@@ -844,6 +844,32 @@ Other commands report a status object too: retry -> "retrying",
 kill -> "killed", clean -> "cleaned" (with removed_run_ids), push ->
 "pushed" (with image + digest), hydrate -> aggregate counts plus a
 per-run "runs" array.
+
+Token telemetry
+---------------
+
+'horde status --json', 'horde list --json', and 'horde results --json'
+include a "tokens" object on each run, reporting the per-run token totals
+orc consumed:
+
+    "tokens": {
+      "input": 54791,
+      "output": 87915,
+      "cache_creation": 529692,
+      "cache_read": 8934181,
+      "turns": 12
+    }
+
+The object is omitted entirely when horde has no token data for the run.
+Docker reports tokens live (read from the running container on each
+status/list call); ECS reports them at finalize, after the run stops.
+
+'horde list --json' also sums tokens across the filtered set into its
+"summary" object (alongside total_cost_usd), so the orchestrator can derive
+a burn rate — tokens over a time window — directly from one query, using the
+per-run started_at/completed_at to bound the window:
+
+    horde list --status running --json | jq '.summary.tokens'
 `
 
 const topicInstall = `Installing and Updating horde
@@ -1309,10 +1335,16 @@ result set:
 
     {
       "runs": [ ... ],
-      "summary": { "count": 12, "total_cost_usd": 4.82 }
+      "summary": {
+        "count": 12,
+        "total_cost_usd": 4.82,
+        "tokens": { "input": 5, "output": 9, "cache_creation": 1, "cache_read": 3, "turns": 40 }
+      }
     }
 
-So a label cohort's spend is one command away — no client-side summing:
+So a label cohort's spend — and token total — is one command away, no
+client-side summing (the "tokens" object is omitted when no run in the set
+has token data):
 
     horde list --all --label epic=KS-100 --json | jq .summary
 

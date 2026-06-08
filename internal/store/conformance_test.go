@@ -327,6 +327,13 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		run.ExitCode = ptr(0)
 		run.CompletedAt = ptr(now.Add(5 * time.Minute))
 		run.TotalCostUSD = ptr(1.23)
+		run.Tokens = &TokenUsage{
+			InputTokens:         100,
+			OutputTokens:        200,
+			CacheCreationTokens: 300,
+			CacheReadTokens:     400,
+			Turns:               5,
+		}
 		run.Metadata = map[string]string{"key": "val", "k2": "v2"}
 
 		if err := s.CreateRun(ctx, run); err != nil {
@@ -378,6 +385,12 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if got.TotalCostUSD == nil || *got.TotalCostUSD != *run.TotalCostUSD {
 			t.Errorf("TotalCostUSD: got %v, want %v", got.TotalCostUSD, run.TotalCostUSD)
 		}
+		if got.Tokens == nil {
+			t.Fatalf("Tokens: got nil, want %+v", run.Tokens)
+		}
+		if *got.Tokens != *run.Tokens {
+			t.Errorf("Tokens: got %+v, want %+v", *got.Tokens, *run.Tokens)
+		}
 		if len(got.Metadata) != 2 {
 			t.Errorf("Metadata len: got %d, want 2", len(got.Metadata))
 		}
@@ -409,6 +422,9 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if got.TotalCostUSD != nil {
 			t.Errorf("TotalCostUSD: expected nil, got %v", got.TotalCostUSD)
+		}
+		if got.Tokens != nil {
+			t.Errorf("Tokens: expected nil, got %+v", got.Tokens)
 		}
 		if got.Metadata != nil {
 			t.Errorf("Metadata: expected nil, got %v", got.Metadata)
@@ -550,6 +566,9 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if got.TotalCostUSD != nil {
 			t.Errorf("TotalCostUSD: expected nil, got %v", got.TotalCostUSD)
 		}
+		if got.Tokens != nil {
+			t.Errorf("Tokens: expected nil, got %+v", got.Tokens)
+		}
 		if got.Metadata != nil {
 			t.Errorf("Metadata: expected nil, got %v", got.Metadata)
 		}
@@ -571,8 +590,15 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			ExitCode:     ptr(42),
 			CompletedAt:  ptr(completedAt),
 			TotalCostUSD: ptr(9.99),
-			Metadata:     map[string]string{"updated": "true"},
-			TimeoutAt:    ptr(timeoutAt),
+			Tokens: &TokenUsage{
+				InputTokens:         11,
+				OutputTokens:        22,
+				CacheCreationTokens: 33,
+				CacheReadTokens:     44,
+				Turns:               2,
+			},
+			Metadata:  map[string]string{"updated": "true"},
+			TimeoutAt: ptr(timeoutAt),
 		}
 		if err := s.UpdateRun(ctx, "r1", update); err != nil {
 			t.Fatalf("UpdateRun: %v", err)
@@ -595,6 +621,14 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if got.TotalCostUSD == nil || *got.TotalCostUSD != 9.99 {
 			t.Errorf("TotalCostUSD: got %v, want 9.99", got.TotalCostUSD)
+		}
+		if got.Tokens == nil {
+			t.Fatalf("Tokens after update: got nil, want non-nil")
+		}
+		if got.Tokens.InputTokens != 11 || got.Tokens.OutputTokens != 22 ||
+			got.Tokens.CacheCreationTokens != 33 || got.Tokens.CacheReadTokens != 44 ||
+			got.Tokens.Turns != 2 {
+			t.Errorf("Tokens after update: got %+v", *got.Tokens)
 		}
 		if got.Metadata["updated"] != "true" {
 			t.Errorf("Metadata[updated]: got %q, want %q", got.Metadata["updated"], "true")
@@ -1545,6 +1579,74 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if _, leaked := got.Metadata["epic"]; leaked {
 			t.Error("Metadata leaked a Labels key")
 		}
+	})
+
+	// TokensRoundTrip/AllListPaths guards the SQLite SELECT/scan column-order
+	// coupling: every list query carries its own literal column list feeding
+	// the shared scanRun, so a reorder/typo of the trailing token columns in
+	// ONE query would corrupt that path while GetRun-based tests still pass.
+	// Asserting distinct non-zero token VALUES (not just non-nil) through all
+	// four list paths catches a positional mismatch in any single SELECT, for
+	// both stores.
+	t.Run("TokensRoundTrip/AllListPaths", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/tokens-repo"
+		run := conformanceRun("tk1", repo, "TOK-1", StatusRunning)
+		want := &TokenUsage{
+			InputTokens:         101,
+			OutputTokens:        202,
+			CacheCreationTokens: 303,
+			CacheReadTokens:     404,
+			Turns:               5,
+		}
+		run.Tokens = want
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+
+		check := func(path string, runs []*Run) {
+			var found *Run
+			for _, r := range runs {
+				if r.ID == "tk1" {
+					found = r
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("%s: run tk1 not returned", path)
+			}
+			if found.Tokens == nil {
+				t.Fatalf("%s: Tokens nil, want %+v", path, *want)
+			}
+			if *found.Tokens != *want {
+				t.Errorf("%s: Tokens = %+v, want %+v", path, *found.Tokens, *want)
+			}
+		}
+
+		byRepo, err := s.ListByRepo(ctx, repo, false)
+		if err != nil {
+			t.Fatalf("ListByRepo: %v", err)
+		}
+		check("ListByRepo", byRepo)
+
+		listRuns, err := s.ListRuns(ctx, RunFilter{Repo: repo})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		check("ListRuns", listRuns)
+
+		byTicket, err := s.FindActiveByTicket(ctx, repo, "TOK-1")
+		if err != nil {
+			t.Fatalf("FindActiveByTicket: %v", err)
+		}
+		check("FindActiveByTicket", byTicket)
+
+		active, err := s.ListActive(ctx)
+		if err != nil {
+			t.Fatalf("ListActive: %v", err)
+		}
+		check("ListActive", active)
 	})
 }
 

@@ -588,9 +588,9 @@ func statusCmd() *cli.Command {
 		Name:      "status",
 		Usage:     "Show status of a run",
 		ArgsUsage: "<run-id>",
-		Description: `Shows run detail: ID, ticket, status, exit code, duration, cost, and
-who launched it. For running containers, reads live cost from the
-container. Also detects completed or timed-out runs and triggers
+		Description: `Shows run detail: ID, ticket, status, exit code, duration, cost,
+token usage, and who launched it. For running containers, reads live cost
+and token counts from the container. Also detects completed or timed-out runs and triggers
 result collection.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
@@ -614,7 +614,11 @@ result collection.`,
 			}
 			if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
 				if dp, ok := prov.(*provider.DockerProvider); ok {
-					run.TotalCostUSD = fetchLiveCost(ctx, dp, run)
+					cost, tokens := fetchLiveTelemetry(ctx, dp, run)
+					run.TotalCostUSD = cost
+					if run.Tokens == nil {
+						run.Tokens = tokens
+					}
 				}
 			}
 			if cmd.Bool("json") {
@@ -794,7 +798,7 @@ func resultsCmd() *cli.Command {
 		Usage:     "Show results of a run",
 		ArgsUsage: "<run-id>",
 		Description: `Displays the run's result summary from run-result.json: overall status,
-total cost, total duration, and a per-phase breakdown. Reports partial
+total cost, total duration, token usage, and a per-phase breakdown. Reports partial
 information if the result file is missing (e.g., orc crashed early).`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
@@ -963,7 +967,11 @@ duration-ago (1h, 30m, 7d).`,
 				}
 				if dp, ok := prov.(*provider.DockerProvider); ok {
 					if run.TotalCostUSD == nil && (run.Status == store.StatusRunning || run.Status == store.StatusPending) {
-						run.TotalCostUSD = fetchLiveCost(ctx, dp, run)
+						cost, tokens := fetchLiveTelemetry(ctx, dp, run)
+						run.TotalCostUSD = cost
+						if run.Tokens == nil {
+							run.Tokens = tokens
+						}
 					}
 				}
 			}
@@ -1271,7 +1279,14 @@ name, displays the full article.`,
 }
 
 type liveCosts struct {
-	TotalCostUSD float64 `json:"total_cost_usd"`
+	TotalCostUSD             float64 `json:"total_cost_usd"`
+	TotalInputTokens         int     `json:"total_input_tokens"`
+	TotalOutputTokens        int     `json:"total_output_tokens"`
+	TotalCacheCreationTokens int     `json:"total_cache_creation_input_tokens"`
+	TotalCacheReadTokens     int     `json:"total_cache_read_input_tokens"`
+	Phases                   []struct {
+		Turns int `json:"turns"`
+	} `json:"phases"`
 }
 
 // envKeyPattern matches a valid POSIX-style env-var name.
@@ -1331,7 +1346,6 @@ func secretCollisionsOnECS(provName string, spec config.SecretSpec, extraEnv map
 	return collisions
 }
 
-// fetchLiveCost reads the current cost from a running container's costs.json.
 // resolveSecretsForLaunch loads .horde/config.yaml, merges in the canonical
 // secret defaults, and validates the result against the active provider.
 // For docker it also verifies dir/.env covers every host env-var name the
@@ -1377,20 +1391,43 @@ func resolveSecretsForLaunch(provName string, r *config.Resolver) (envPath strin
 	return envPath, spec, remap, nil
 }
 
-func fetchLiveCost(ctx context.Context, prov *provider.DockerProvider, run *store.Run) *float64 {
+// fetchLiveTelemetry reads current cost and token totals from a running
+// container's costs.json. Both are best-effort (nil when unavailable). This is
+// the Docker lazy-live path: the store has no values for a running run until
+// Finalize, so status/list read the live file on demand.
+func fetchLiveTelemetry(ctx context.Context, prov *provider.DockerProvider, run *store.Run) (*float64, *store.TokenUsage) {
 	if run.InstanceID == "" {
-		return nil
+		return nil, nil
 	}
 	costsPath := "/workspace/.orc/" + provider.AuditRelPath(run.Workflow, run.Ticket, "costs.json")
 	data, err := prov.ReadContainerFile(ctx, run.InstanceID, costsPath)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var lc liveCosts
-	if json.Unmarshal(data, &lc) != nil || lc.TotalCostUSD == 0 {
-		return nil
+	if json.Unmarshal(data, &lc) != nil {
+		return nil, nil
 	}
-	return &lc.TotalCostUSD
+	var cost *float64
+	if lc.TotalCostUSD != 0 {
+		cost = &lc.TotalCostUSD
+	}
+	turns := 0
+	for _, p := range lc.Phases {
+		turns += p.Turns
+	}
+	var tokens *store.TokenUsage
+	if lc.TotalInputTokens != 0 || lc.TotalOutputTokens != 0 ||
+		lc.TotalCacheCreationTokens != 0 || lc.TotalCacheReadTokens != 0 || turns != 0 {
+		tokens = &store.TokenUsage{
+			InputTokens:         lc.TotalInputTokens,
+			OutputTokens:        lc.TotalOutputTokens,
+			CacheCreationTokens: lc.TotalCacheCreationTokens,
+			CacheReadTokens:     lc.TotalCacheReadTokens,
+			Turns:               turns,
+		}
+	}
+	return cost, tokens
 }
 
 type fullRunResult struct {
@@ -1401,6 +1438,12 @@ type fullRunResult struct {
 	TotalCostUSD  *float64      `json:"total_cost_usd"`
 	TotalDuration string        `json:"total_duration"`
 	Phases        []phaseResult `json:"phases"`
+
+	TotalInputTokens         *int `json:"total_input_tokens"`
+	TotalOutputTokens        *int `json:"total_output_tokens"`
+	TotalCacheCreationTokens *int `json:"total_cache_creation_input_tokens"`
+	TotalCacheReadTokens     *int `json:"total_cache_read_input_tokens"`
+	Turns                    *int `json:"turns"`
 }
 
 type phaseResult struct {
@@ -1515,6 +1558,9 @@ func printRunStatus(run *store.Run) {
 	} else {
 		fmt.Printf("Cost:        -\n")
 	}
+	if run.Tokens != nil {
+		fmt.Printf("Tokens:      %s\n", formatTokens(run.Tokens))
+	}
 	fmt.Printf("Launched by: %s\n", run.LaunchedBy)
 	if len(run.Labels) > 0 {
 		fmt.Printf("Labels:      %s\n", formatLabels(run.Labels))
@@ -1525,6 +1571,16 @@ func printRunStatus(run *store.Run) {
 			fmt.Printf("Workspace:   %s\n", wsDir)
 		}
 	}
+}
+
+// formatTokens renders token usage as a compact one-line summary for the human
+// status/results output, e.g. "in 54791, out 87915, cache 9463873 (529692 write
+// / 8934181 read), 12 turns".
+func formatTokens(t *store.TokenUsage) string {
+	return fmt.Sprintf("in %d, out %d, cache %d (%d write / %d read), %d turns",
+		t.InputTokens, t.OutputTokens,
+		t.CacheCreationTokens+t.CacheReadTokens, t.CacheCreationTokens, t.CacheReadTokens,
+		t.Turns)
 }
 
 // formatLabels renders a label map as "k=v, k2=v2" with keys sorted for stable,
@@ -1551,6 +1607,9 @@ func printFullResults(run *store.Run, result *fullRunResult) {
 	fmt.Printf("Status:         %s\n", run.Status)
 	if result.TotalCostUSD != nil {
 		fmt.Printf("Total Cost:     $%.2f\n", *result.TotalCostUSD)
+	}
+	if run.Tokens != nil {
+		fmt.Printf("Total Tokens:   %s\n", formatTokens(run.Tokens))
 	}
 	fmt.Printf("Total Duration: %s\n", result.TotalDuration)
 

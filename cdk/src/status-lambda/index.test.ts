@@ -308,6 +308,99 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(update.ExpressionAttributeValues?.[":tc"]).toEqual({ N: "1.23" });
   });
 
+  it("includes token attributes from costs.json when present", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-tok" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({
+      Contents: [
+        { Key: "horde-runs/run-tok/audit/wf/T-1/run-result.json" },
+        { Key: "horde-runs/run-tok/audit/wf/T-1/costs.json" },
+      ],
+    });
+    s3Mock
+      .on(GetObjectCommand, { Key: "horde-runs/run-tok/audit/wf/T-1/run-result.json" })
+      .resolves({
+        Body: streamFromString(JSON.stringify({ total_cost_usd: 1.23, exit_code: 0 })),
+      } as never);
+    s3Mock.on(GetObjectCommand, { Key: "horde-runs/run-tok/audit/wf/T-1/costs.json" }).resolves({
+      Body: streamFromString(
+        JSON.stringify({
+          phases: [{ turns: 1 }, { turns: 4 }],
+          total_input_tokens: 54791,
+          total_output_tokens: 87915,
+          total_cache_creation_input_tokens: 529692,
+          total_cache_read_input_tokens: 8934181,
+        }),
+      ),
+    } as never);
+
+    const r = await handler(
+      event({ lastStatus: "STOPPED", taskArn: "arn:task/tok", containers: [{ exitCode: 0 }] }),
+      ctx,
+      () => {},
+    );
+    expect(r).toMatchObject({ updated: true, status: "success" });
+
+    const update = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(update.UpdateExpression).toContain("#it = :it");
+    expect(update.UpdateExpression).toContain("#tn = :tn");
+    expect(update.ExpressionAttributeValues?.[":it"]).toEqual({ N: "54791" });
+    expect(update.ExpressionAttributeValues?.[":ot"]).toEqual({ N: "87915" });
+    expect(update.ExpressionAttributeValues?.[":cct"]).toEqual({ N: "529692" });
+    expect(update.ExpressionAttributeValues?.[":crt"]).toEqual({ N: "8934181" });
+    expect(update.ExpressionAttributeValues?.[":tn"]).toEqual({ N: "5" });
+  });
+
+  it("coerces malformed token values consistently (lockstep with the Python lambda's num())", async () => {
+    // orc emits integers; this pins the agreed coercion for malformed input so
+    // the TS and Python lambdas can't silently diverge: numeric string -> int,
+    // float -> truncated, bool/garbage -> 0.
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-coerce" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({
+      Contents: [{ Key: "horde-runs/run-coerce/audit/wf/T-1/costs.json" }],
+    });
+    s3Mock.on(GetObjectCommand, { Key: "horde-runs/run-coerce/audit/wf/T-1/costs.json" }).resolves({
+      Body: streamFromString(
+        JSON.stringify({
+          phases: [{ turns: "2" }, { turns: 1.9 }],
+          total_input_tokens: "54791", // numeric string -> 54791
+          total_output_tokens: 87915.7, // float -> truncated 87915
+          total_cache_creation_input_tokens: true, // bool -> 0
+          total_cache_read_input_tokens: "garbage", // non-numeric -> 0
+        }),
+      ),
+    } as never);
+
+    await handler(
+      event({ lastStatus: "STOPPED", taskArn: "arn:task/coerce", containers: [{ exitCode: 0 }] }),
+      ctx,
+      () => {},
+    );
+    const update = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(update.ExpressionAttributeValues?.[":it"]).toEqual({ N: "54791" });
+    expect(update.ExpressionAttributeValues?.[":ot"]).toEqual({ N: "87915" });
+    expect(update.ExpressionAttributeValues?.[":cct"]).toEqual({ N: "0" });
+    expect(update.ExpressionAttributeValues?.[":crt"]).toEqual({ N: "0" });
+    expect(update.ExpressionAttributeValues?.[":tn"]).toEqual({ N: "3" }); // 2 + trunc(1.9)
+  });
+
+  it("omits token attributes when costs.json is missing", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-notok" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    const r = await handler(
+      event({ lastStatus: "STOPPED", taskArn: "arn:task/notok", containers: [{ exitCode: 0 }] }),
+      ctx,
+      () => {},
+    );
+    expect(r).toMatchObject({ updated: true, status: "success" });
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.UpdateExpression).not.toContain("#it");
+    expect(input.UpdateExpression).not.toContain("#tn");
+  });
+
   it("proceeds without cost when run-result.json is missing", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-nocost" } }] });
     ddbMock.on(UpdateItemCommand).resolves({});

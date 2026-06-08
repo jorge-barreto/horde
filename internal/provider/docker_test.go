@@ -1494,6 +1494,19 @@ func TestDockerProvider_Finalize_RunningWithMarkerAndCost(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"total_cost_usd":%v}`, cost)), 0o644); err != nil {
 		t.Fatalf("writing run-result.json: %v", err)
 	}
+	costs := `{
+		"phases": [
+			{"name": "plan", "turns": 1},
+			{"name": "implement", "turns": 4}
+		],
+		"total_input_tokens": 54791,
+		"total_output_tokens": 87915,
+		"total_cache_creation_input_tokens": 529692,
+		"total_cache_read_input_tokens": 8934181
+	}`
+	if err := os.WriteFile(filepath.Join(resultDir, "costs.json"), []byte(costs), 0o644); err != nil {
+		t.Fatalf("writing costs.json: %v", err)
+	}
 
 	run := &store.Run{
 		ID:         "r5",
@@ -1510,6 +1523,14 @@ func TestDockerProvider_Finalize_RunningWithMarkerAndCost(t *testing.T) {
 	}
 	if *run.TotalCostUSD != cost {
 		t.Errorf("TotalCostUSD = %v, want %v", *run.TotalCostUSD, cost)
+	}
+	if run.Tokens == nil {
+		t.Fatal("Finalize: run.Tokens is nil, want populated from costs.json")
+	}
+	if run.Tokens.InputTokens != 54791 || run.Tokens.OutputTokens != 87915 ||
+		run.Tokens.CacheCreationTokens != 529692 || run.Tokens.CacheReadTokens != 8934181 ||
+		run.Tokens.Turns != 5 {
+		t.Errorf("Finalize: run.Tokens = %+v", *run.Tokens)
 	}
 }
 
@@ -2418,5 +2439,137 @@ func TestSaveContainerLog_WarnsOnMkdirFailure(t *testing.T) {
 
 	if !strings.Contains(string(stderr), "warning: creating results dir for run r-fail") {
 		t.Errorf("stderr missing mkdir warning, got: %s", string(stderr))
+	}
+}
+
+func TestReadTokenUsage_CostsJSON(t *testing.T) {
+	home := t.TempDir()
+	run := &store.Run{ID: "run123", Workflow: "implement-ticket", Ticket: "PROJ-1"}
+
+	auditDir := filepath.Join(LocalResultsDir(home, run.ID), "audit", run.Workflow, run.Ticket)
+	if err := os.MkdirAll(auditDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	costs := `{
+		"phases": [
+			{"name": "plan", "turns": 1},
+			{"name": "implement", "turns": 4}
+		],
+		"total_input_tokens": 54791,
+		"total_output_tokens": 87915,
+		"total_cache_creation_input_tokens": 529692,
+		"total_cache_read_input_tokens": 8934181
+	}`
+	if err := os.WriteFile(filepath.Join(auditDir, "costs.json"), []byte(costs), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ReadTokenUsage(home, run)
+	if got == nil {
+		t.Fatal("ReadTokenUsage: got nil, want non-nil")
+	}
+	want := store.TokenUsage{
+		InputTokens:         54791,
+		OutputTokens:        87915,
+		CacheCreationTokens: 529692,
+		CacheReadTokens:     8934181,
+		Turns:               5,
+	}
+	if *got != want {
+		t.Errorf("ReadTokenUsage: got %+v, want %+v", *got, want)
+	}
+}
+
+func TestReadTokenUsage_Missing(t *testing.T) {
+	home := t.TempDir()
+	run := &store.Run{ID: "run123", Workflow: "implement-ticket", Ticket: "PROJ-1"}
+	if got := ReadTokenUsage(home, run); got != nil {
+		t.Errorf("ReadTokenUsage with no files: got %+v, want nil", got)
+	}
+}
+
+// TestReadTokenUsage_AllZeroCostsJSON pins the nil semantics: an all-zero /
+// empty costs.json (script-only run, or orc flushed before any phase produced
+// usage) means "no usage observed" and must yield nil — matching the live
+// reader's boundary — not a non-nil {0,0,0,0,0}. With no run-result.json to
+// fall through to, the overall result is nil.
+func TestReadTokenUsage_AllZeroCostsJSON(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty-object": `{}`,
+		"explicit-zeros": `{"phases":null,"total_input_tokens":0,"total_output_tokens":0,` +
+			`"total_cache_creation_input_tokens":0,"total_cache_read_input_tokens":0}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			run := &store.Run{ID: "run123", Workflow: "implement-ticket", Ticket: "PROJ-1"}
+			auditDir := filepath.Join(LocalResultsDir(home, run.ID), "audit", run.Workflow, run.Ticket)
+			if err := os.MkdirAll(auditDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(auditDir, "costs.json"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := ReadTokenUsage(home, run); got != nil {
+				t.Errorf("ReadTokenUsage all-zero costs.json: got %+v, want nil", got)
+			}
+		})
+	}
+}
+
+// TestReadTokenUsage_MalformedCostsFallsThrough verifies that a present-but-
+// malformed costs.json does not abort the read — ReadTokenUsage falls through
+// to run-result.json's forward token fields.
+func TestReadTokenUsage_MalformedCostsFallsThrough(t *testing.T) {
+	home := t.TempDir()
+	run := &store.Run{ID: "run123", Workflow: "implement-ticket", Ticket: "PROJ-1"}
+	auditDir := filepath.Join(LocalResultsDir(home, run.ID), "audit", run.Workflow, run.Ticket)
+	if err := os.MkdirAll(auditDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auditDir, "costs.json"), []byte("not valid json {"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rr := `{"total_input_tokens":7,"total_output_tokens":8,"total_cache_creation_input_tokens":9,"total_cache_read_input_tokens":10,"turns":2}`
+	if err := os.WriteFile(filepath.Join(auditDir, "run-result.json"), []byte(rr), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ReadTokenUsage(home, run)
+	if got == nil {
+		t.Fatal("ReadTokenUsage: got nil, want fallback from run-result.json")
+	}
+	want := store.TokenUsage{InputTokens: 7, OutputTokens: 8, CacheCreationTokens: 9, CacheReadTokens: 10, Turns: 2}
+	if *got != want {
+		t.Errorf("ReadTokenUsage malformed-costs fallthrough: got %+v, want %+v", *got, want)
+	}
+}
+
+func TestReadTokenUsage_RunResultFallback(t *testing.T) {
+	home := t.TempDir()
+	run := &store.Run{ID: "run123", Workflow: "implement-ticket", Ticket: "PROJ-1"}
+
+	auditDir := filepath.Join(LocalResultsDir(home, run.ID), "audit", run.Workflow, run.Ticket)
+	if err := os.MkdirAll(auditDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No costs.json; run-result.json carries the forward token fields.
+	rr := `{
+		"exit_code": 0,
+		"total_input_tokens": 10,
+		"total_output_tokens": 20,
+		"total_cache_creation_input_tokens": 30,
+		"total_cache_read_input_tokens": 40,
+		"turns": 3
+	}`
+	if err := os.WriteFile(filepath.Join(auditDir, "run-result.json"), []byte(rr), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ReadTokenUsage(home, run)
+	if got == nil {
+		t.Fatal("ReadTokenUsage: got nil, want non-nil from run-result.json fallback")
+	}
+	want := store.TokenUsage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40, Turns: 3}
+	if *got != want {
+		t.Errorf("ReadTokenUsage fallback: got %+v, want %+v", *got, want)
 	}
 }

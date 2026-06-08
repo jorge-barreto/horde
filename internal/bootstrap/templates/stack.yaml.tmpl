@@ -706,8 +706,14 @@ Resources:
                   return None
 
               def num(v):
+                  # Kept in lockstep with the TS lambda's num(): accept a number
+                  # or numeric string, truncate toward zero, reject booleans and
+                  # anything non-numeric -> 0. orc emits integers; this only
+                  # matters for malformed costs.json, but both backends must agree.
+                  if isinstance(v, bool):
+                      return 0
                   try:
-                      return int(v)
+                      return int(float(v))
                   except (TypeError, ValueError):
                       return 0
 

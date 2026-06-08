@@ -504,7 +504,12 @@ type costsFile struct {
 
 // tokenUsageFromCostsJSON parses raw costs.json bytes into a TokenUsage,
 // summing per-phase turns into a run total (orc has no run-total turns).
-// Returns nil on malformed JSON.
+// Returns nil on malformed JSON, and nil for an all-zero/empty parse (e.g.
+// orc has flushed costs.json but no phase has produced usage yet, or a
+// script-only run): all-zero means "no usage observed", which is the same
+// "not yet known" boundary the live reader (fetchLiveTelemetry) uses, so the
+// nil semantics of the shared costs.json contract stay consistent and
+// ReadTokenUsage can fall through to run-result.json's forward fields.
 func tokenUsageFromCostsJSON(data []byte) *store.TokenUsage {
 	var cf costsFile
 	if json.Unmarshal(data, &cf) != nil {
@@ -513,6 +518,10 @@ func tokenUsageFromCostsJSON(data []byte) *store.TokenUsage {
 	turns := 0
 	for _, p := range cf.Phases {
 		turns += p.Turns
+	}
+	if cf.TotalInputTokens == 0 && cf.TotalOutputTokens == 0 &&
+		cf.TotalCacheCreationTokens == 0 && cf.TotalCacheReadTokens == 0 && turns == 0 {
+		return nil
 	}
 	return &store.TokenUsage{
 		InputTokens:         cf.TotalInputTokens,

@@ -126,7 +126,7 @@ Example `horde status --json` output:
   "workflow": "default",
   "branch": "horde/PROJ-123",
   "status": "running",
-  "instance_id": "arn:aws:ecs:us-east-1:123456789012:task/horde-acme-widgets/abc123",
+  "instance_id": "9e3c24f9a779",
   "duration_seconds": 42.7,
   "tokens": { "input": 54791, "output": 87915, "cache_creation": 529692, "cache_read": 8934181, "turns": 12 },
   "launched_by": "you@example.com",

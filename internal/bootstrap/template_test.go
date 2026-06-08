@@ -308,11 +308,11 @@ func TestRender_NoSecretsLeaked(t *testing.T) {
 	s := string(out)
 	// Substrings that would indicate a secret was serialized into the template.
 	forbidden := []string{
-		"sk-ant-",        // Anthropic API key prefix
-		"github_pat_",    // GitHub fine-grained PAT prefix
-		"ghp_",           // GitHub classic PAT prefix
-		"AKIA",           // AWS access key prefix
-		"ASIA",           // AWS temporary access key prefix
+		"sk-ant-",     // Anthropic API key prefix
+		"github_pat_", // GitHub fine-grained PAT prefix
+		"ghp_",        // GitHub classic PAT prefix
+		"AKIA",        // AWS access key prefix
+		"ASIA",        // AWS temporary access key prefix
 		"aws_secret_access_key",
 	}
 	for _, f := range forbidden {
@@ -565,6 +565,20 @@ func TestRender_StatusLambdaPython(t *testing.T) {
 		`#m = if_not_exists(#m, :emptymap)`,
 		`#m.#sc = :sc`,
 		`#m.#sr = :sr`,
+		// Token telemetry: the function reads costs.json and writes the five
+		// token attributes. The attribute NAMES are a cross-language contract
+		// with the Go store consts (internal/store/dynamo_schema.go) and the TS
+		// lambda — a typo here silently drops tokens for ECS bootstrap users, so
+		// pin them by exact string.
+		"fetch_token_usage",
+		"costs.json",
+		"total_input_tokens",
+		"total_cache_creation_input_tokens",
+		`names["#it"] = "input_tokens"`,
+		`names["#ot"] = "output_tokens"`,
+		`names["#cct"] = "cache_creation_tokens"`,
+		`names["#crt"] = "cache_read_tokens"`,
+		`names["#tn"] = "turns"`,
 	} {
 		if !strings.Contains(zipfile, sub) {
 			t.Errorf("ZipFile missing expected substring %q", sub)

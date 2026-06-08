@@ -221,8 +221,8 @@ func listToV1(runs []*store.Run) ListV1 {
 
 // summaryTokens returns the cohort token total, or nil when no run in the set
 // carried token data (so the summary object is omitted entirely).
-func summaryTokens(any bool, sum store.TokenUsage) *TokensV1 {
-	if !any {
+func summaryTokens(present bool, sum store.TokenUsage) *TokensV1 {
+	if !present {
 		return nil
 	}
 	return tokensToV1(&sum)

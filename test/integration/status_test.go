@@ -38,14 +38,16 @@ func TestNormalSuccess(t *testing.T) {
 	}
 }
 
-// TestTokenTelemetrySurfaces verifies the end-to-end token path: orc writes
-// costs.json, prov.Finalize reads it via ReadTokenUsage, the store persists it,
-// and `status --json` surfaces a "tokens" object. The quick-success workflow is
-// script-only (no agent phase), so orc reports zero tokens — we assert the
-// object is PRESENT, not non-zero, because zero is the correct honest value
-// here. (A real agent workflow would carry non-zero counts; the contract is
-// "tokens present once the run has a finalized costs.json".)
-func TestTokenTelemetrySurfaces(t *testing.T) {
+// TestTokenTelemetryOmittedForZeroUsage verifies the end-to-end token path's
+// nil semantics: orc writes costs.json, prov.Finalize reads it via
+// ReadTokenUsage, the store persists it, and `status --json` reflects it. The
+// quick-success workflow is script-only (no agent phase), so orc reports an
+// all-zero costs.json — which means "no usage observed" and is treated as nil
+// (the same boundary the live reader uses), so the "tokens" object is OMITTED.
+// This pins the contract: zero/empty usage → no tokens object, not a {0,0,...}
+// object. (A real agent workflow carries non-zero counts and surfaces the
+// object — covered by the provider/jsonv1/lambda unit tests with real values.)
+func TestTokenTelemetryOmittedForZeroUsage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -58,14 +60,13 @@ func TestTokenTelemetrySurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status --json: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, `"tokens"`) {
-		t.Errorf("status --json missing \"tokens\" object for a finalized run, got:\n%s", out)
+	// The run completed successfully and emitted valid JSON...
+	if !strings.Contains(out, `"status"`) {
+		t.Fatalf("status --json is not a valid status object, got:\n%s", out)
 	}
-	// The five token keys must all be present inside the object.
-	for _, key := range []string{`"input"`, `"output"`, `"cache_creation"`, `"cache_read"`, `"turns"`} {
-		if !strings.Contains(out, key) {
-			t.Errorf("status --json tokens object missing %s, got:\n%s", key, out)
-		}
+	// ...but a script-only run used no tokens, so the object is omitted.
+	if strings.Contains(out, `"tokens"`) {
+		t.Errorf("status --json should omit \"tokens\" for a zero-usage run, got:\n%s", out)
 	}
 }
 

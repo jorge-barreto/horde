@@ -123,7 +123,7 @@ const topicQuickstart = `Quick Start
 
     horde results j87pi2i5tzqd           # view results summary
 
-   Results include status, total cost, duration, and a per-phase breakdown.
+   Results include status, total cost, duration, token usage, and a per-phase breakdown.
 
 6. List all runs for the current repo:
 

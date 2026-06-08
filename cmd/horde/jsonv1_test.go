@@ -171,3 +171,52 @@ func TestListToV1_SummarySumsTokens(t *testing.T) {
 		t.Errorf("ListRunV1[r3].Tokens: want nil, got %+v", v.Runs[2].Tokens)
 	}
 }
+
+func TestResultsTokens(t *testing.T) {
+	cases := []struct {
+		name   string
+		run    *store.Run
+		result *fullRunResult
+		want   *TokensV1
+	}{
+		{
+			name: "stored tokens win over run-result fields",
+			run:  &store.Run{Tokens: &store.TokenUsage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4, Turns: 5}},
+			result: &fullRunResult{
+				TotalInputTokens: ptrInt(99), TotalOutputTokens: ptrInt(99),
+			},
+			want: &TokensV1{Input: 1, Output: 2, CacheCreation: 3, CacheRead: 4, Turns: 5},
+		},
+		{
+			name: "fallback to run-result fields when run.Tokens nil",
+			run:  &store.Run{},
+			result: &fullRunResult{
+				TotalInputTokens: ptrInt(10), TotalOutputTokens: ptrInt(20),
+				TotalCacheCreationTokens: ptrInt(30), TotalCacheReadTokens: ptrInt(40), Turns: ptrInt(6),
+			},
+			want: &TokensV1{Input: 10, Output: 20, CacheCreation: 30, CacheRead: 40, Turns: 6},
+		},
+		{
+			name:   "nil when both absent",
+			run:    &store.Run{},
+			result: &fullRunResult{},
+			want:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resultsTokens(tc.run, tc.result)
+			if tc.want == nil {
+				if got != nil {
+					t.Errorf("got %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil || *got != *tc.want {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func ptrInt(i int) *int { return &i }

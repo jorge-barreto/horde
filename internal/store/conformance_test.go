@@ -1580,6 +1580,74 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Error("Metadata leaked a Labels key")
 		}
 	})
+
+	// TokensRoundTrip/AllListPaths guards the SQLite SELECT/scan column-order
+	// coupling: every list query carries its own literal column list feeding
+	// the shared scanRun, so a reorder/typo of the trailing token columns in
+	// ONE query would corrupt that path while GetRun-based tests still pass.
+	// Asserting distinct non-zero token VALUES (not just non-nil) through all
+	// four list paths catches a positional mismatch in any single SELECT, for
+	// both stores.
+	t.Run("TokensRoundTrip/AllListPaths", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/tokens-repo"
+		run := conformanceRun("tk1", repo, "TOK-1", StatusRunning)
+		want := &TokenUsage{
+			InputTokens:         101,
+			OutputTokens:        202,
+			CacheCreationTokens: 303,
+			CacheReadTokens:     404,
+			Turns:               5,
+		}
+		run.Tokens = want
+		if err := s.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+
+		check := func(path string, runs []*Run) {
+			var found *Run
+			for _, r := range runs {
+				if r.ID == "tk1" {
+					found = r
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("%s: run tk1 not returned", path)
+			}
+			if found.Tokens == nil {
+				t.Fatalf("%s: Tokens nil, want %+v", path, *want)
+			}
+			if *found.Tokens != *want {
+				t.Errorf("%s: Tokens = %+v, want %+v", path, *found.Tokens, *want)
+			}
+		}
+
+		byRepo, err := s.ListByRepo(ctx, repo, false)
+		if err != nil {
+			t.Fatalf("ListByRepo: %v", err)
+		}
+		check("ListByRepo", byRepo)
+
+		listRuns, err := s.ListRuns(ctx, RunFilter{Repo: repo})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		check("ListRuns", listRuns)
+
+		byTicket, err := s.FindActiveByTicket(ctx, repo, "TOK-1")
+		if err != nil {
+			t.Fatalf("FindActiveByTicket: %v", err)
+		}
+		check("FindActiveByTicket", byTicket)
+
+		active, err := s.ListActive(ctx)
+		if err != nil {
+			t.Fatalf("ListActive: %v", err)
+		}
+		check("ListActive", active)
+	})
 }
 
 func TestSQLiteStore_Conformance(t *testing.T) {

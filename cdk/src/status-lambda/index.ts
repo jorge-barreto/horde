@@ -145,7 +145,15 @@ async function fetchTokenUsage(runId: string): Promise<TokenUsage | null> {
       total_cache_read_input_tokens?: number;
       phases?: ReadonlyArray<{ turns?: number }>;
     };
-    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    // Coerce to an integer token count, kept in lockstep with the Python
+    // lambda's num(): accept a number or numeric string, truncate toward zero,
+    // reject booleans and anything non-finite -> 0. orc emits integers, so this
+    // only matters for malformed costs.json — but both backends must agree.
+    const num = (v: unknown): number => {
+      if (typeof v === "boolean") return 0;
+      const n = typeof v === "number" ? v : Number(v);
+      return Number.isFinite(n) ? Math.trunc(n) : 0;
+    };
     const turns = (data.phases ?? []).reduce((acc, p) => acc + num(p.turns), 0);
     return {
       input_tokens: num(data.total_input_tokens),

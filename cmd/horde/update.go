@@ -18,6 +18,8 @@ import (
 // normalizeVersion strips a cli-v / v prefix and returns a bare x.y.z, or ""
 // for anything that isn't a clean three-part numeric version (dev builds,
 // git-describe strings, garbage). Callers treat "" as "not comparable".
+// Pre-release tags (e.g. v1.2.3-rc1) are deliberately treated as not-a-clean-version
+// (return "") because horde only ships clean x.y.z releases via GoReleaser.
 func normalizeVersion(v string) string {
 	v = strings.TrimPrefix(v, "cli-v")
 	v = strings.TrimPrefix(v, "v")
@@ -76,14 +78,15 @@ const (
 	installScriptURL = "https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh"
 )
 
-func fetchLatestTag(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+func fetchLatestTag(ctx context.Context, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "horde/"+version)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("querying latest release: %w", err)
@@ -112,23 +115,27 @@ Homebrew users should run 'brew upgrade horde' instead.`,
 			&cli.BoolFlag{Name: "check", Usage: "Only report if a newer version exists; don't install"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			latest, err := fetchLatestTag(ctx)
+			latest, err := fetchLatestTag(ctx, 10*time.Second)
 			if err != nil {
 				return err
 			}
 			cur := version
 			if !isNewer(cur, latest) {
-				fmt.Printf("horde is up to date (%s).\n", cur)
+				fmt.Fprintf(cmd.Writer, "horde is up to date (%s).\n", cur)
 				return nil
 			}
-			fmt.Printf("A newer horde is available: %s (current: %s).\n", latest, cur)
+			fmt.Fprintf(cmd.Writer, "A newer horde is available: %s (current: %s).\n", latest, cur)
 			if cmd.Bool("check") {
-				fmt.Println("Run 'horde update' to install it.")
+				fmt.Fprintln(cmd.Writer, "Run 'horde update' to install it.")
 				return nil
 			}
-			fmt.Println("Installing...")
-			sh := exec.CommandContext(ctx, "sh", "-c",
-				fmt.Sprintf("curl -fsSL %s | sh", installScriptURL))
+			fmt.Fprintln(cmd.Writer, "Installing...")
+			// Mirror scripts/install.sh: prefer curl, fall back to wget, so `horde update`
+			// works on minimal images that ship only one of them.
+			const downloader = `if command -v curl >/dev/null 2>&1; then curl -fsSL "$0"; ` +
+				`elif command -v wget >/dev/null 2>&1; then wget -qO- "$0"; ` +
+				`else echo "horde update: need curl or wget" >&2; exit 1; fi | sh`
+			sh := exec.CommandContext(ctx, "sh", "-c", downloader, installScriptURL)
 			sh.Stdout = os.Stdout
 			sh.Stderr = os.Stderr
 			sh.Env = append(os.Environ(), "HORDE_VERSION="+latest)
@@ -147,7 +154,8 @@ func newerVersionNote(ctx context.Context) string {
 	if os.Getenv("CI") != "" || os.Getenv("HORDE_NO_UPDATE_CHECK") != "" {
 		return ""
 	}
-	latest, err := fetchLatestTag(ctx)
+	// short timeout: a passive nicety must not stall the version command
+	latest, err := fetchLatestTag(ctx, 2*time.Second)
 	if err != nil || !isNewer(version, latest) {
 		return ""
 	}

@@ -703,10 +703,17 @@ Resources:
               if not run_id:
                   return {"skipped": "task not managed by horde"}
 
+              # Status is the WORKER container's exit code, not the task's. If
+              # the task ever gains sidecars the event's `containers` order is
+              # not guaranteed, so find the worker by name; fall back to the
+              # first container for single-container events that omit the name.
               containers = detail.get("containers", [])
-              exit_code = None
-              if containers:
-                  exit_code = containers[0].get("exitCode")
+              worker = next(
+                  (c for c in containers if c.get("name") == "horde-worker"), None
+              )
+              if worker is None and containers:
+                  worker = containers[0]
+              exit_code = worker.get("exitCode") if worker else None
               # Mirrors internal/provider/docker.go::mapExitCode and the CDK
               # status lambda (cdk/src/status-lambda/index.ts): orc exit 2 ->
               # timed_out, 4 -> rate_limited, 5 -> killed (recoverable), 0 ->

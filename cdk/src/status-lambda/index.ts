@@ -33,6 +33,13 @@ import {
 const RUNS_TABLE = process.env.RUNS_TABLE ?? "";
 const ARTIFACTS_BUCKET = process.env.ARTIFACTS_BUCKET ?? "";
 
+// The worker container's name in the task definition. Run status is derived
+// from THIS container's exit code, never a sidecar's. Must stay equal to
+// WORKER_CONTAINER_NAME in ../horde-worker.ts — this Lambda is esbuild-bundled
+// standalone and cannot import construct code, so it keeps its own copy. The
+// Python lambda in internal/bootstrap/templates/stack.yaml.tmpl mirrors this.
+const WORKER_CONTAINER_NAME = "horde-worker";
+
 const ddb = new DynamoDBClient({});
 const s3 = new S3Client({});
 
@@ -148,11 +155,15 @@ export const handler: Handler<
     return { skipped: "task not managed by horde" };
   }
 
+  // Status is the WORKER container's exit code, not the task's. With sidecars
+  // in the task def the event's `containers` order is not guaranteed, so find
+  // the worker by name; fall back to the first container for legacy
+  // single-container events that may omit the name field.
   const containers = detail.containers ?? [];
+  const worker =
+    containers.find((c) => c.name === WORKER_CONTAINER_NAME) ?? containers[0];
   const exitCode =
-    containers.length > 0 && typeof containers[0].exitCode === "number"
-      ? containers[0].exitCode
-      : null;
+    worker && typeof worker.exitCode === "number" ? worker.exitCode : null;
   const status = mapStatus(exitCode);
 
   const stoppedAt = detail.stoppedAt;

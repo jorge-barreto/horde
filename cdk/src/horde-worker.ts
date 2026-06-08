@@ -14,6 +14,18 @@ import * as path from "path";
 
 import type { HordeWorkerProps } from "./horde-worker-props";
 
+/**
+ * Name of the worker container in the Fargate task definition. The status-sync
+ * Lambda derives run status from THIS container's exit code (never a sidecar's),
+ * and the horde CLI's ECS provider uses it to build the CloudWatch log-stream
+ * path and target env overrides at launch. It is therefore a cross-language
+ * contract — not a configurable prop. Three other places must stay equal to it:
+ * the standalone copy in `./status-lambda/index.ts`, `const containerName` in
+ * `internal/provider/ecs.go`, and the container `Name` in
+ * `internal/bootstrap/templates/stack.yaml.tmpl`.
+ */
+export const WORKER_CONTAINER_NAME = "horde-worker";
+
 const RETENTION_DAYS: ReadonlyMap<number, logs.RetentionDays> = new Map([
   [1, logs.RetentionDays.ONE_DAY],
   [3, logs.RetentionDays.THREE_DAYS],
@@ -97,6 +109,12 @@ export class HordeWorker extends Construct {
 
   /** The worker container inside `taskDefinition`. */
   public readonly container: ecs.ContainerDefinition;
+
+  /**
+   * Caller-defined sidecar containers added to `taskDefinition`, in declaration
+   * order. Empty when `props.sidecars` is unset. See `HordeWorkerProps.sidecars`.
+   */
+  public readonly sidecarContainers: ecs.ContainerDefinition[];
 
   /**
    * S3 bucket holding run artifacts (logs, run-result.json) under
@@ -306,7 +324,7 @@ export class HordeWorker extends Construct {
       taskDefSecrets[envName] = ecs.Secret.fromSecretsManager(isecret);
     }
     this.container = this.taskDefinition.addContainer("worker", {
-      containerName: "horde-worker",
+      containerName: WORKER_CONTAINER_NAME,
       image: props.workerImage,
       essential: true,
       stopTimeout: cdk.Duration.seconds(120),
@@ -315,6 +333,29 @@ export class HordeWorker extends Construct {
         streamPrefix: "ecs",
       }),
       secrets: taskDefSecrets,
+    });
+
+    // Sidecars are added AFTER the worker, so the worker is container index 0
+    // (defensive — the status Lambda finds the worker by name, not by index).
+    // Defaults: essential:false so a crashing sidecar doesn't stop the run, and
+    // logging routed to the worker log group keyed by the sidecar name. The
+    // caller's explicit values win (spread last).
+    this.sidecarContainers = (props.sidecars ?? []).map((sidecar, i) => {
+      if (sidecar.containerName === WORKER_CONTAINER_NAME) {
+        throw new Error(
+          `HordeWorker: sidecar containerName "${WORKER_CONTAINER_NAME}" is ` +
+            `reserved for the worker container.`,
+        );
+      }
+      const id = sidecar.containerName ?? `Sidecar${i}`;
+      return this.taskDefinition.addContainer(id, {
+        essential: false,
+        logging: ecs.LogDriver.awsLogs({
+          logGroup: this.logGroup,
+          streamPrefix: sidecar.containerName ?? `sidecar${i}`,
+        }),
+        ...sidecar,
+      });
     });
 
     // SSM config parameter consumed by the horde CLI. JSON keys must match

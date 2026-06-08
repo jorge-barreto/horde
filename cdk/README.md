@@ -46,6 +46,50 @@ writing or querying run records, so every CI runner and dev box launching
 against this stack writes to the same `by-repo` bucket — no drift from local
 git remote variations (with vs. without `.git`, https vs. ssh).
 
+## Sidecar containers
+
+Some projects need an auxiliary service alongside the worker for the duration of
+a run — a test database, a headless browser server, a mock API. The `sidecars`
+prop adds extra containers to the worker's Fargate task definition. They share
+the task's network namespace, so the worker reaches them on `localhost`, and
+they start and stop with it.
+
+```ts
+new HordeWorker(stack, "Horde", {
+  // ...required props...
+  memoryMiB: 4096, // task ceiling, shared across all containers
+  sidecars: [
+    {
+      containerName: "postgres",
+      image: ecs.ContainerImage.fromRegistry("postgres:16"),
+      environment: { POSTGRES_PASSWORD: "dev" },
+      memoryLimitMiB: 1024, // optional per-container cap
+      // essential defaults to false — a crashing sidecar won't stop the run
+    },
+  ],
+});
+```
+
+Each entry is a standard CDK
+[`ContainerDefinitionOptions`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecs.ContainerDefinitionOptions.html),
+so `healthCheck`, `portMappings`, `secrets`, `command`, and `dependsOn` are all
+available. The construct fills in two defaults when you omit them (your explicit
+value always wins):
+
+- **`essential: false`** — a crashing sidecar does not fail the run. Set
+  `essential: true` for a hard dependency (e.g. a database the worker can't run
+  without), so the task fails fast if it can't start.
+- **`logging`** — routed to the worker's CloudWatch log group with the
+  sidecar's `containerName` as the stream prefix.
+
+Run status always reflects the **worker** container's exit code, never a
+sidecar's — even an essential sidecar that exits non-zero. `memoryMiB` sizes the
+whole task; sidecars share that ceiling unless you set a per-container
+`memoryLimitMiB`. The name `horde-worker` is reserved and rejected at synth time.
+
+> Sidecars are a CDK-construct feature. The `horde bootstrap` (CloudFormation)
+> path and the local `--provider docker` runner do not provision sidecars.
+
 ## Development
 
 ```bash

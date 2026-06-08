@@ -75,6 +75,21 @@ const worker = new HordeWorker(stack, "Worker", {
   // to 20 to match the bootstrap CF stack's e2e budget. Production
   // consumers are expected to tune this per their own load.
   maxConcurrent: 20,
+  // Sidecar containers (#7). A Postgres the worker reaches on localhost:5432.
+  // TestECSCDK_Sidecar launches the `postgres-probe` workflow against this to
+  // prove (a) localhost reachability and (b) that run status is the WORKER's
+  // exit code, not this non-essential sidecar's (it is killed non-zero when the
+  // worker exits). essential is left at the construct default (false).
+  sidecars: [
+    {
+      containerName: "postgres",
+      image: ecs.ContainerImage.fromRegistry("public.ecr.aws/docker/library/postgres:16-alpine"),
+      environment: { POSTGRES_HOST_AUTH_METHOD: "trust" },
+      // Small cap so the sidecar can't starve the worker (memoryMiB is the
+      // task ceiling shared across containers).
+      memoryLimitMiB: 512,
+    },
+  ],
 });
 
 new cdk.CfnOutput(stack, "StackNameOut", { value: stack.stackName });

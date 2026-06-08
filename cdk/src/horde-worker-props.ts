@@ -1,5 +1,5 @@
 import type { IVpc } from "aws-cdk-lib/aws-ec2";
-import type { ContainerImage } from "aws-cdk-lib/aws-ecs";
+import type { ContainerDefinitionOptions, ContainerImage } from "aws-cdk-lib/aws-ecs";
 import type { IRepository } from "aws-cdk-lib/aws-ecr";
 import type { IBucket } from "aws-cdk-lib/aws-s3";
 import type { ISecret } from "aws-cdk-lib/aws-secretsmanager";
@@ -120,4 +120,31 @@ export interface HordeWorkerProps {
    *   CLI is pointed at.
    */
   readonly ssmParameterPath?: string;
+
+  /**
+   * Extra containers added to the worker's Fargate task definition. They share
+   * the task's network namespace — so the worker reaches them on `localhost` —
+   * and the task's lifecycle, starting and stopping with it. Typical uses: a
+   * Postgres/Redis the test suite hits on localhost, a headless
+   * Playwright/Selenium server, or a Stripe/LocalStack mock.
+   *
+   * Each entry is passed to `taskDefinition.addContainer()` with two defaults
+   * the construct fills in when you omit them (your explicit value always wins):
+   *
+   *  - `essential: false` — a crashing sidecar does NOT stop the run. Set
+   *    `essential: true` for a dependency the worker cannot run without (e.g. a
+   *    database), so the task fails fast if it can't start. The worker container
+   *    is always `essential: true`; run status is derived from the worker's exit
+   *    code, never a sidecar's, regardless of `essential`.
+   *  - `logging` — routed to the worker's CloudWatch log group with the
+   *    sidecar's `containerName` as the stream prefix, so sidecar output is
+   *    captured alongside the worker by default.
+   *
+   * `memoryMiB` sizes the whole task; sidecars share that ceiling unless you set
+   * a per-container `memoryLimitMiB`. The container name `"horde-worker"` is
+   * reserved for the worker and rejected at synth time.
+   *
+   * @default — none; a single-container task definition.
+   */
+  readonly sidecars?: ContainerDefinitionOptions[];
 }

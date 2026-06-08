@@ -389,6 +389,43 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(input.ExpressionAttributeValues?.[":ca"]).toEqual({ NULL: true });
   });
 
+  it("reads the worker container's exit code regardless of array order (sidecars)", async () => {
+    // With sidecars in the task def, the ECS event's `containers` array order
+    // is not guaranteed. A sidecar that exits non-zero must NOT be read as the
+    // run's status — the handler must find the container named "horde-worker".
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-sc" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    const r = await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/sc",
+        containers: [
+          { exitCode: 137, name: "postgres" }, // sidecar killed when task stops
+          { exitCode: 0, name: "horde-worker" }, // worker succeeded
+        ],
+      }),
+      ctx,
+      () => {},
+    );
+
+    expect(r).toEqual({ updated: true, runId: "run-sc", status: "success", exitCode: 0 });
+  });
+
+  it("falls back to the first container when none is named horde-worker (legacy single-container events)", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-legacy" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    const r = await handler(
+      event({ lastStatus: "STOPPED", taskArn: "arn:task/legacy", containers: [{ exitCode: 0 }] }),
+      ctx,
+      () => {},
+    );
+    expect(r).toEqual({ updated: true, runId: "run-legacy", status: "success", exitCode: 0 });
+  });
+
   it("queries the by-instance GSI with the task ARN as instance_id", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-q" } }] });
     ddbMock.on(UpdateItemCommand).resolves({});

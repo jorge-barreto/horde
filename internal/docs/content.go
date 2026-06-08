@@ -1055,6 +1055,29 @@ Same surface as 'horde bootstrap' (CloudFormation flavor):
     CliUserManagedPolicyArn — attach to the IAM principals that
     will run the CLI
 
+Sidecar containers
+------------------
+
+The 'sidecars' prop adds extra containers to the worker task definition —
+a test database, a headless browser, a mock API. They share the task's
+network namespace (reachable on localhost) and its lifecycle.
+
+    sidecars: [
+      {
+        containerName: "postgres",
+        image: ecs.ContainerImage.fromRegistry("postgres:16"),
+        environment: { POSTGRES_PASSWORD: "dev" },
+      },
+    ]
+
+Each entry is a CDK ContainerDefinitionOptions. The construct defaults
+'essential' to false (a crashing sidecar won't stop the run; set true for a
+hard dependency) and routes logging to the worker log group. Run status is
+always the worker container's exit code, never a sidecar's. 'memoryMiB' is
+the task ceiling shared across containers; set per-container 'memoryLimitMiB'
+to cap a sidecar. CDK-only — 'horde bootstrap' and '--provider docker' do
+not provision sidecars.
+
 Config defaults
 ---------------
 

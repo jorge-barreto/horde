@@ -111,6 +111,8 @@ const topicQuickstart = `Quick Start
 
 Other useful commands:
 
+    horde launch ... --env KEY=VALUE  # set a per-launch env var (repeatable;
+                                      # see 'horde docs config')
     horde kill <run-id>      # stop a running run
     horde retry <run-id>     # restart — orc picks up where it left off
     horde retry <run-id> -- --resume  # pass extra flags through to orc

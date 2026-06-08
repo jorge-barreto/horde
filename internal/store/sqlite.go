@@ -20,6 +20,15 @@ type SQLiteStore struct {
 
 var _ Store = (*SQLiteStore)(nil)
 
+// runColumns is the canonical column list for every runs SELECT, in the order
+// scanRun expects. Defined once so the column set can grow without drifting
+// across the several queries that share scanRun.
+const runColumns = `id, repo, ticket, branch, workflow, provider,
+	instance_id, metadata, labels, status, exit_code, launched_by,
+	started_at, completed_at, timeout_at, total_cost_usd,
+	input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns,
+	enqueued_at, priority`
+
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("creating store directory: %w", err)
@@ -64,7 +73,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		output_tokens         INTEGER,
 		cache_creation_tokens INTEGER,
 		cache_read_tokens     INTEGER,
-		turns                 INTEGER
+		turns                 INTEGER,
+		enqueued_at    TEXT,
+		priority       TEXT NOT NULL DEFAULT ''
 	);`
 
 	if _, err := db.Exec(ddl); err != nil {
@@ -119,6 +130,8 @@ func ensureColumns(db *sql.DB) error {
 		{"cache_creation_tokens", "INTEGER"},
 		{"cache_read_tokens", "INTEGER"},
 		{"turns", "INTEGER"},
+		{"enqueued_at", "TEXT"},
+		{"priority", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, col := range additive {
 		if existing[col.name] {
@@ -174,13 +187,20 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		turns = &run.Tokens.Turns
 	}
 
+	var enqueuedAt *string
+	if !run.EnqueuedAt.IsZero() {
+		enqueuedAtStr := run.EnqueuedAt.UTC().Format(time.RFC3339)
+		enqueuedAt = &enqueuedAtStr
+	}
+
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO runs (
 			id, repo, ticket, branch, workflow, provider,
 			instance_id, metadata, labels, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd,
-			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns,
+			enqueued_at, priority
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID,
 		run.Repo,
 		run.Ticket,
@@ -202,6 +222,8 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		cacheCreationTokens,
 		cacheReadTokens,
 		turns,
+		enqueuedAt,
+		string(run.Priority),
 	)
 	if err != nil {
 		return fmt.Errorf("inserting run: %w", err)
@@ -211,10 +233,7 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 
 func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, labels, status, exit_code, launched_by,
-			started_at, completed_at, timeout_at, total_cost_usd,
-			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns
+		`SELECT `+runColumns+`
 		FROM runs WHERE id = ?`, id)
 
 	run, err := s.scanRun(row)
@@ -228,7 +247,7 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 }
 
 // scanRun scans a single row from the runs table into a *Run.
-// The row must contain all 21 columns in the standard SELECT order.
+// The row must contain the runColumns set in that exact order.
 func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	var run Run
 	var metadataStr sql.NullString
@@ -240,6 +259,8 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 	var timeoutAt string
 	var totalCostUSD sql.NullFloat64
 	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, turns sql.NullInt64
+	var enqueuedAt sql.NullString
+	var priority string
 
 	if err := scanner.Scan(
 		&run.ID,
@@ -263,11 +284,14 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 		&cacheCreationTokens,
 		&cacheReadTokens,
 		&turns,
+		&enqueuedAt,
+		&priority,
 	); err != nil {
 		return nil, fmt.Errorf("scanning run: %w", err)
 	}
 
 	run.Status = Status(status)
+	run.Priority = Priority(priority)
 
 	if exitCode.Valid {
 		v := int(exitCode.Int64)
@@ -295,6 +319,14 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 
 	if totalCostUSD.Valid {
 		run.TotalCostUSD = &totalCostUSD.Float64
+	}
+
+	if enqueuedAt.Valid {
+		t, parseErr := time.Parse(time.RFC3339, enqueuedAt.String)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing enqueued_at: %w", parseErr)
+		}
+		run.EnqueuedAt = t
 	}
 
 	if inputTokens.Valid || outputTokens.Valid || cacheCreationTokens.Valid || cacheReadTokens.Valid || turns.Valid {
@@ -374,6 +406,10 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 		setClauses = append(setClauses, "timeout_at = ?")
 		args = append(args, update.TimeoutAt.UTC().Format(time.RFC3339))
 	}
+	if update.Priority != nil {
+		setClauses = append(setClauses, "priority = ?")
+		args = append(args, string(*update.Priority))
+	}
 
 	if len(setClauses) == 0 {
 		var exists bool
@@ -406,10 +442,7 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 }
 
 func (s *SQLiteStore) ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error) {
-	query := `SELECT id, repo, ticket, branch, workflow, provider,
-		instance_id, metadata, labels, status, exit_code, launched_by,
-		started_at, completed_at, timeout_at, total_cost_usd,
-		input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns
+	query := `SELECT ` + runColumns + `
 		FROM runs WHERE repo = ?`
 	args := []any{repo}
 
@@ -446,10 +479,7 @@ func (s *SQLiteStore) ListByRepo(ctx context.Context, repo string, activeOnly bo
 // than pushing every predicate into SQL — the production query optimization
 // lives in the DynamoDB store's server-side FilterExpression.
 func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]*Run, error) {
-	query := `SELECT id, repo, ticket, branch, workflow, provider,
-		instance_id, metadata, labels, status, exit_code, launched_by,
-		started_at, completed_at, timeout_at, total_cost_usd,
-		input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns
+	query := `SELECT ` + runColumns + `
 		FROM runs WHERE repo = ?`
 	args := []any{filter.Repo}
 
@@ -487,10 +517,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]*Run, e
 
 func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, labels, status, exit_code, launched_by,
-			started_at, completed_at, timeout_at, total_cost_usd,
-			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns
+		`SELECT `+runColumns+`
 		FROM runs WHERE repo = ? AND ticket = ? AND status IN (?, ?)
 		ORDER BY started_at DESC`,
 		repo, ticket, string(StatusPending), string(StatusRunning))
@@ -526,10 +553,7 @@ func (s *SQLiteStore) CountActive(ctx context.Context) (int, error) {
 
 func (s *SQLiteStore) ListActive(ctx context.Context) ([]*Run, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, labels, status, exit_code, launched_by,
-			started_at, completed_at, timeout_at, total_cost_usd,
-			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns
+		`SELECT `+runColumns+`
 		FROM runs WHERE status IN (?, ?)
 		ORDER BY started_at DESC`,
 		string(StatusPending), string(StatusRunning))

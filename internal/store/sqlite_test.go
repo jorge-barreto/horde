@@ -195,6 +195,7 @@ func TestNewSQLiteStore_CorrectColumns(t *testing.T) {
 		"instance_id", "metadata", "labels", "status", "exit_code", "launched_by",
 		"started_at", "completed_at", "timeout_at", "total_cost_usd",
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "turns",
+		"enqueued_at", "priority",
 	}
 
 	if len(cols) != len(want) {
@@ -1183,5 +1184,37 @@ func TestSQLiteStore_CountActive_CrossRepo(t *testing.T) {
 	}
 	if count != 2 {
 		t.Errorf("CountActive = %d, want 2 (one from each repo)", count)
+	}
+}
+
+func TestSQLiteEnqueuedFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	enq := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	run := &Run{
+		ID: "q1", Repo: "r", Ticket: "T-1", Provider: "aws-ecs",
+		Status: StatusQueued, Priority: PriorityHigh, EnqueuedAt: enq,
+		LaunchedBy: "me",
+		StartedAt:  time.Time{}, // queued runs have no start time yet
+		TimeoutAt:  enq,         // non-zero to satisfy NOT NULL timeout_at
+	}
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetRun(ctx, "q1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Priority != PriorityHigh {
+		t.Errorf("priority = %q, want high", got.Priority)
+	}
+	if !got.EnqueuedAt.Equal(enq) {
+		t.Errorf("enqueued_at = %v, want %v", got.EnqueuedAt, enq)
 	}
 }

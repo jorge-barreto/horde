@@ -107,6 +107,59 @@ func TestLaunchExtraSecretInjected(t *testing.T) {
 	// host name is not part of the secret-isolation guarantee.
 }
 
+// TestLaunchPerLaunchEnvInjectedAndOverrides verifies the issue #22 feature on
+// docker: a brand-new --env key reaches the container, and a --env value for a
+// key that also exists in .env overrides the .env value (docker: later -e wins
+// over --env-file).
+func TestLaunchPerLaunchEnvInjectedAndOverrides(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	h := newHarness(t)
+
+	// .env sets PROMPT_VARIANT=from-env; the launch overrides it. NEW_FLAG is
+	// not in .env or any config — it should appear purely from --env.
+	envContent := "CLAUDE_CODE_OAUTH_TOKEN=test-token\n" +
+		"GIT_TOKEN=test-token\n" +
+		"PROMPT_VARIANT=from-env\n"
+	if err := os.WriteFile(filepath.Join(h.workDir, ".env"), []byte(envContent), 0o644); err != nil {
+		t.Fatalf("writing .env: %v", err)
+	}
+
+	runID := h.launchWith("TEST-perlaunch-env", "env-dump", "",
+		[]string{"--env", "PROMPT_VARIANT=from-launch", "--env", "NEW_FLAG=on"},
+		1*time.Minute)
+	h.WaitForOrc(runID, 1*time.Minute)
+
+	envDumpPath := filepath.Join(h.WorkspaceDir(runID), ".orc", "artifacts", "TEST-perlaunch-env", "env-dump.txt")
+	deadline := time.Now().Add(15 * time.Second)
+	var dump string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(envDumpPath)
+		if err == nil {
+			dump = string(data)
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if dump == "" {
+		t.Fatalf("env-dump.txt not produced at %s", envDumpPath)
+	}
+
+	// New key injected purely via --env.
+	if !strings.Contains(dump, "NEW_FLAG=on") {
+		t.Errorf("env dump missing NEW_FLAG=on; dump:\n%s", dump)
+	}
+	// Override: --env beats the .env value of the same key.
+	if !strings.Contains(dump, "PROMPT_VARIANT=from-launch") {
+		t.Errorf("env dump missing overridden PROMPT_VARIANT=from-launch; dump:\n%s", dump)
+	}
+	if strings.Contains(dump, "PROMPT_VARIANT=from-env") {
+		t.Errorf("env dump still shows un-overridden PROMPT_VARIANT=from-env; dump:\n%s", dump)
+	}
+}
+
 // TestLaunchSecretMissingFromEnvFails asserts that horde refuses to launch
 // when .horde/config.yaml declares a docker secret whose env: source is
 // not present in .env.

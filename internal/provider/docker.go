@@ -164,6 +164,19 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 			args = append(args, "-e", containerName)
 		}
 	}
+	// Per-launch env vars (horde launch --env KEY=VALUE). Appended AFTER
+	// --env-file so docker's later-wins semantics let them override a
+	// project secret of the same key. Sorted for deterministic argv.
+	if len(opts.ExtraEnv) > 0 {
+		keys := make([]string, 0, len(opts.ExtraEnv))
+		for k := range opts.ExtraEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			args = append(args, "-e", k+"="+opts.ExtraEnv[k])
+		}
+	}
 	for _, mount := range allMounts {
 		args = append(args, "-v", mount)
 	}

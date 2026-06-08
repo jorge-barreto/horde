@@ -111,6 +111,8 @@ const topicQuickstart = `Quick Start
 
 Other useful commands:
 
+    horde launch ... --env KEY=VALUE  # set a per-launch env var (repeatable;
+                                      # see 'horde docs config')
     horde kill <run-id>      # stop a running run
     horde retry <run-id>     # restart — orc picks up where it left off
     horde retry <run-id> -- --resume  # pass extra flags through to orc
@@ -207,6 +209,40 @@ secrets (map, optional):
           STRIPE_API_KEY:
             env: STRIPE_API_KEY
             aws-secret: prepdesk/stripe-api-key
+
+Per-launch env vars (--env)
+---------------------------
+
+    Everything above is project-level: every run for a repo gets the same
+    set. For values that vary per launch — a feature flag, an experiment
+    variant, an orchestrator's run ID — pass --env KEY=VALUE on the launch.
+    The flag is repeatable:
+
+        horde launch PROJ-1 --workflow build \
+          --env PROMPT_VARIANT=v3 --env DEBUG=1
+
+    Keys must be valid env-var names ([A-Za-z_][A-Za-z0-9_]*). VALUE may be
+    empty (--env FLAG=) and may itself contain '='. On a duplicate key the
+    last --env wins. The horde-managed control vars (REPO_URL, TICKET,
+    BRANCH, WORKFLOW, RUN_ID, ARTIFACTS_BUCKET, ORC_EXTRA_ARGS) are reserved
+    and rejected.
+
+    Override of project secrets:
+
+        docker — a per-launch --env value overrides a project secret (or
+                 any .env value) of the same key. Use it to point one run at
+                 a staging key without editing .env.
+
+        ECS    — a declared secret of the same name takes precedence: the
+                 secret lives on the task definition and AWS wins over the
+                 RunTask environment override. horde injects the --env value
+                 anyway and prints a warning that it will not take effect.
+                 Overriding a non-secret key, and setting brand-new keys,
+                 work the same on both providers.
+
+    --env applies to 'horde launch' only. Per-launch values are not stored
+    on the run record, so 'horde retry' does not carry them forward — pass
+    --env again on a fresh launch if a resumed run needs them.
 
 File Location
 -------------

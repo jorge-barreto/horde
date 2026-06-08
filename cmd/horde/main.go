@@ -69,9 +69,11 @@ func main() {
 func setOutputs(app *cli.Command, w io.Writer) {
 	app.Writer = w
 	app.ErrWriter = w
+	// Recurse into nested command groups (e.g. `queue list`): urfave defaults
+	// each command's Writer to os.Stdout independently at setup if nil, so a
+	// nested subcommand would otherwise bypass w.
 	for _, sub := range app.Commands {
-		sub.Writer = w
-		sub.ErrWriter = w
+		setOutputs(sub, w)
 	}
 }
 

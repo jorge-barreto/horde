@@ -157,6 +157,7 @@ horde launch --provider docker --workflow implement-ticket PROJ-123
 horde launch --provider docker --workflow implement-ticket PROJ-123 --branch feature/xyz
 horde launch --provider docker --workflow bugfix PROJ-123 --timeout 30m
 horde launch --provider docker --workflow implement-ticket PROJ-123 --env PROMPT_VARIANT=v3 --env DEBUG=1
+horde launch --workflow implement-ticket PROJ-123 --label epic=KS-100 --label variant=v3
 
 # Monitor
 horde status <run-id>
@@ -165,6 +166,12 @@ horde list                        # active runs
 horde list --all                  # include success/failed/killed/timed_out/rate_limited
 horde status <run-id> --json      # machine-readable JSON output
 horde list --all --json           # JSON output for scripting
+
+# Filter the list (AND-combined, repo-scoped)
+horde list --label epic=KS-100              # runs tagged epic=KS-100
+horde list --status running --status pending # by status (repeatable)
+horde list --workflow qa-pr --since 24h      # qa-pr runs in the last 24h
+horde list --all --label epic=KS-100 --json  # cohort + summary{count,total_cost_usd}
 
 # Results
 horde results <run-id>

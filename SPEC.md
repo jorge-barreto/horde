@@ -85,12 +85,13 @@ The status Lambda:
 ## CLI Commands
 
 ```
-horde launch --workflow=<name> [--branch=<branch>] [--timeout=<duration>] [--force] [--env=<KEY=VALUE>]... <ticket>
+horde launch --workflow=<name> [--branch=<branch>] [--timeout=<duration>] [--force] [--env=<KEY=VALUE>]... [--label=<k=v>]... <ticket>
 horde status <run-id>
 horde logs <run-id> [--follow]
 horde kill <run-id>
 horde results <run-id>
-horde list [--all]                              # active runs for current repo; --all includes completed/failed
+horde list [--all] [--label=<k=v>...] [--status=<s>...] [--workflow=<name>] [--ticket=<id>] [--since=<when>] [--until=<when>]
+                                                # active runs for current repo; --all includes completed/failed; filters are AND-combined
 horde health                                    # v0.3
 horde sweep                                     # v0.3
 horde retry <run-id>                            # re-launch with same params; preserves --workflow/--branch
@@ -137,6 +138,42 @@ horde:
 - Updates the run to `running` with the instance ID (container ID or task ARN)
 - Prints the run ID
 - The container entrypoint: clone repo → `orc run <ticket> --auto --no-color`
+
+### 1a. Run Labels and List Filtering
+
+**Labels** are user-supplied `key=value` tags attached at launch with
+`horde launch --label k=v` (repeatable). They answer questions about the
+*dispatch* — which epic a run belongs to, which prompt variant it used, who
+fired it — that the run's work-oriented fields (`ticket`, `workflow`, `branch`)
+can't. Labels live in a dedicated `Run.Labels` map, kept strictly separate from
+the provider-internal `metadata` map so user keys can never collide with
+reserved provider keys (`cluster_arn`, `log_group`, …). They are set once at
+launch (not mutable via update) and carry across `horde retry` (same run
+record). Keys are validated (`[A-Za-z0-9_.-]`, ≤64 chars); values are free-form
+(≤256 chars).
+
+**Filtering.** `horde list` is repo-scoped and accepts AND-combined filters:
+`--label k=v` (repeatable; every pair must match), `--status` (repeatable; also
+widens the listing to terminal runs the way `--all` does), `--workflow`,
+`--ticket`, and `--since`/`--until` (RFC3339 timestamp or a duration-ago like
+`1h`/`7d`). Filtering goes through the store's `ListRuns(RunFilter)`:
+
+- **DynamoDB** (production, often many thousands of rows/repo) pushes the
+  predicates into a server-side `FilterExpression` over the existing `by-repo`
+  GSI, with the `started_at` range in the key condition — fast and small over
+  the wire, no new index.
+- **SQLite** (local testing) fetches the repo's rows and applies the same
+  predicate in Go via a shared `matchesFilter` helper, so semantics are
+  identical across stores.
+
+Status is applied *after* lazy `Finalize()` runs, so a run that completes during
+the call is classified correctly.
+
+**Cohort cost.** `horde list --json` includes a `summary` block —
+`{ "count": N, "total_cost_usd": X }` — aggregating the filtered result set, so
+a label cohort's spend (e.g. `--label epic=KS-100`) is readable without
+client-side summing. The human table prints the same as a trailing
+`N runs, $X total` line.
 
 ### 2. Monitor
 
@@ -469,6 +506,7 @@ Lean schema for local testing. Not shared, not the production path.
 | provider | TEXT | docker |
 | instance_id | TEXT | Container ID |
 | metadata | TEXT | JSON-encoded map[string]string — provider-specific data (NULL if none) |
+| labels | TEXT | JSON-encoded map[string]string — user labels from `--label` (NULL if none). Added by an idempotent ALTER-if-missing migration on store open. |
 | status | TEXT | pending, running, success, failed, killed, timed_out, rate_limited |
 | exit_code | INTEGER | orc exit code (NULL while running) |
 | launched_by | TEXT | Local git user name (from `git config user.name`) |
@@ -506,6 +544,7 @@ This is the production store — shared across the team. Every developer with AW
 | timeout_at | S | RFC3339 — when this run should be killed |
 | total_cost_usd | N | Total cost from run-result.json (null if unavailable) |
 | metadata | M | Nested map of provider-specific fields (ECS: cluster_arn, log_group, log_stream_prefix, artifacts_bucket, artifacts_uri). Provider data is isolated here so the top-level schema stays provider-agnostic. |
+| labels | M | Nested map of user labels from `horde launch --label k=v` (absent if none). Kept separate from `metadata` so user keys never collide with reserved provider keys. Set at launch; `horde list` filters on it via a server-side `FilterExpression` over the `by-repo` GSI. |
 | ttl | N | Unix epoch for DynamoDB TTL (v0.3) |
 
 Pay-per-request billing — essentially free at low-to-moderate volume.
@@ -785,8 +824,8 @@ What makes teams love the tool.
 - **CloudWatch alarms**: CDK construct creates default alarms for: failure rate > threshold, runs stuck in pending, active runs approaching maxConcurrent.
 - **Structured logging from horde CLI**: JSON log lines with `run_id`, `ticket`, `event`, `timestamp` for aggregation and cross-run search.
 - **Graceful shutdown on kill**: `horde kill` sends SIGTERM with configurable grace period (default 30s) before SIGKILL. Gives orc time to write `run-result.json`. Entrypoint traps SIGTERM for cleanup.
-- **Run tagging**: `horde launch --label key=value` for custom metadata. Stored in DynamoDB. Filterable in `horde list --label key=value`.
-- **Reporting**: `horde stats` shows aggregate metrics: total runs, success rate, total cost, average duration. Filterable by date range, ticket, launched_by.
+- **Run tagging** ✅ *implemented*: `horde launch --label key=value` (repeatable) stamps user labels on a run, stored in `Run.Labels` (own column/attribute, separate from provider `metadata`). `horde list` filters by `--label` (AND, exact match) plus first-class `--status`/`--workflow`/`--ticket`/`--since`/`--until`, and `list --json` carries a `summary{count,total_cost_usd}` cohort rollup. See "Run Labels and List Filtering" above.
+- **Reporting**: `horde stats` shows aggregate metrics: total runs, success rate, total cost, average duration. Filterable by date range, ticket, launched_by. (The `list --json` summary covers the cost-per-label-cohort slice today; `horde stats` remains future for the richer rollups.)
 
 ### v0.5 — Scale and integration
 

@@ -158,6 +158,9 @@ func runPush(ctx context.Context, cmd *cli.Command, deps pushDeps) error {
 	if w == nil {
 		w = os.Stdout
 	}
+	if cmd.Bool("json") {
+		return writeJSONTo(w, pushV1(target, digest))
+	}
 	fmt.Fprintf(w, "Pushed %s\n", target)
 	if digest != "" {
 		fmt.Fprintf(w, "Digest: %s\n", digest)
@@ -222,4 +225,3 @@ func parsePushDigest(out []byte) string {
 	}
 	return ""
 }
-

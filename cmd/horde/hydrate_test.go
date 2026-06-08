@@ -68,6 +68,34 @@ func TestHydrateSummary(t *testing.T) {
 	}
 }
 
+func TestHydrateToV1(t *testing.T) {
+	t.Parallel()
+	outcomes := []hydrateOutcome{
+		{RunID: "a", Status: hydrateStatusHydrated},
+		{RunID: "b", Status: hydrateStatusSkipped},
+		{RunID: "c", Status: hydrateStatusFailed, Err: errors.New("boom")},
+	}
+	v := hydrateToV1(outcomes)
+	if v.Status != "error" {
+		t.Errorf("Status = %q, want error (a failure exists)", v.Status)
+	}
+	if v.Hydrated != 1 || v.Skipped != 1 || v.Failed != 1 {
+		t.Errorf("counts = %d/%d/%d, want 1/1/1", v.Hydrated, v.Skipped, v.Failed)
+	}
+	if len(v.Runs) != 3 {
+		t.Fatalf("len(Runs) = %d, want 3", len(v.Runs))
+	}
+	if v.Runs[2].Status != "failed" || v.Runs[2].Reason != "boom" {
+		t.Errorf("failed run = %+v, want status=failed reason=boom", v.Runs[2])
+	}
+
+	// No failures → status "ok".
+	ok := hydrateToV1([]hydrateOutcome{{RunID: "a", Status: hydrateStatusHydrated}})
+	if ok.Status != "ok" {
+		t.Errorf("Status = %q, want ok", ok.Status)
+	}
+}
+
 func TestHydrateHasFailure(t *testing.T) {
 	t.Parallel()
 	if hydrateHasFailure([]hydrateOutcome{{Status: hydrateStatusHydrated}, {Status: hydrateStatusSkipped}}) {

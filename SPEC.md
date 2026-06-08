@@ -105,7 +105,17 @@ Global flags:
 - `--profile` — AWS named profile (passed through to AWS SDK) (v0.2)
 - `--json` — Machine-readable JSON output (v0.2)
 
-`--json` applies to: `status`, `results`, `list`, `health`. Output schemas are stable per major version.
+`--json` applies to: `launch`, `retry`, `status`, `results`, `list`, `kill`, `clean`, `hydrate`, `push`. Output schemas are stable per major version.
+
+When `--json` is set, stdout carries exactly one JSON object and nothing else. On a real error any command emits `{"status":"error","reason":"<message>"}` to stdout and exits non-zero, while the human-readable `error: <message>` line still goes to stderr.
+
+`horde launch --json` emits a stable status enum so programmatic callers don't grep stderr wording:
+- `launched` — run started (`run_id` set); exit 0
+- `duplicate` — an active run already exists for the ticket (`existing_run_id` set); exit 0
+- `capped` — at the concurrency limit, caller should retry later (`reason` set); exit 0
+- `error` — a real failure; exit 1
+
+Exit codes under `--json` are binary: 0 for any protocol-level outcome (`launched`/`duplicate`/`capped`) and 1 only for true errors — the `status` field carries the distinction. Without `--json`, `duplicate` and `capped` keep their human-oriented behavior (a stderr message and exit 1).
 
 horde doesn't understand tickets, waves, or beads. `horde launch` runs `orc run -w <workflow> <ticket> --auto --no-color` on an ephemeral instance. The workflow is always passed explicitly — `--workflow` is a required flag — so audit and artifact paths are predictable (`.orc/audit/<workflow>/<ticket>/`). orc's workflow decides whether the ticket is an epic, whether to loop, etc.
 
@@ -740,7 +750,7 @@ The minimum viable team product. A team can deploy this and start swarming ticke
 - EventBridge → Lambda status sync (ECS task state → DynamoDB)
 - `maxConcurrent` enforcement (error on breach, configurable via CDK prop, default 5)
 - `--profile` flag for AWS credential selection
-- `--json` flag on `status`, `results`, `list`
+- `--json` flag on `launch`, `retry`, `status`, `results`, `list`, `kill`, `clean`, `hydrate`, `push` (stable status enum + error envelope)
 - `launched_by` field (IAM identity via `sts:GetCallerIdentity`)
 - `timeout_at` field, enforced by Fargate `stopTimeout` and status Lambda
 - IAM managed policy for CLI users (CDK output)
@@ -783,7 +793,7 @@ What makes teams love the tool.
 - **Multi-repo support**: SSM path parameterized per repo (e.g., `/horde/config/<repo-name>`). CDK construct supports multiple task definitions with different images. `horde list --repo` filter.
 - **CI/CD integration**: GitHub Action that runs `horde launch` on ticket label events. Example workflow provided in docs.
 - **Batch launch**: `horde swarm <ticket1> <ticket2> ...` launches multiple tickets. Returns a swarm ID grouping the runs. `horde kill --swarm <swarm-id>` kills all runs in a group.
-- **Concurrency queuing**: when at capacity, `horde launch --wait` queues the run and launches when a slot opens. SQS-backed queue, processed by the status Lambda on task completion.
+- **Concurrency queuing**: when at capacity, launches are written to a durable SQS-backed backlog and started as slots open (processed by the status Lambda on task completion). The submit side is a future `--enqueue`-style verb, not a client-blocking flag — a process that blocks waiting for a slot doesn't survive the caller dying. (A client-side `--wait` flag was considered and declined; programmatic callers use `horde launch --json` and handle `status: "capped"` themselves.)
 - **REST API**: Optional API Gateway + Lambda exposing `list`, `status`, `results` endpoints for dashboards and bots. Read-only.
 - **Budget controls**: configurable weekly/monthly spend threshold. horde estimates Fargate cost (duration × CPU/memory price) + orc API cost (from run-result.json). Warns or blocks launches when approaching threshold.
 - **Branch trust verification**: configurable allowlist of branches/refs. Rejects launches against unreviewed branches. Off by default.

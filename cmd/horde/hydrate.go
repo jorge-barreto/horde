@@ -75,6 +75,32 @@ func hydrateWriteFailures(w io.Writer, outs []hydrateOutcome) {
 	}
 }
 
+// hydrateToV1 builds the JSON contract for `horde hydrate --json`, exposing
+// per-run outcomes alongside the aggregate counts. Status is "error" if any
+// run failed, matching the non-zero exit in that case.
+func hydrateToV1(outs []hydrateOutcome) HydrateV1 {
+	v := HydrateV1{Status: "ok", Runs: make([]HydrateRunV1, 0, len(outs))}
+	for _, o := range outs {
+		r := HydrateRunV1{RunID: o.RunID, Status: string(o.Status)}
+		if o.Err != nil {
+			r.Reason = o.Err.Error()
+		}
+		v.Runs = append(v.Runs, r)
+		switch o.Status {
+		case hydrateStatusHydrated:
+			v.Hydrated++
+		case hydrateStatusSkipped:
+			v.Skipped++
+		case hydrateStatusFailed:
+			v.Failed++
+		}
+	}
+	if v.Failed > 0 {
+		v.Status = "error"
+	}
+	return v
+}
+
 func hydrateCmd() *cli.Command {
 	return hydrateCmdWith(defaultFactoryDeps())
 }
@@ -124,6 +150,18 @@ successful runs are still materialized.`,
 			outcomes := make([]hydrateOutcome, 0, len(runIDs))
 			for _, runID := range runIDs {
 				outcomes = append(outcomes, hydrateOne(ctx, deps, provFlag, profile, runID, into))
+			}
+
+			if cmd.Bool("json") {
+				if err := writeJSONTo(cmd.Writer, hydrateToV1(outcomes)); err != nil {
+					return err
+				}
+				if hydrateHasFailure(outcomes) {
+					// Exit 1 without a second error envelope: the JSON above
+					// already carries status:"error".
+					return emittedExit{1}
+				}
+				return nil
 			}
 
 			if hydrateHasFailure(outcomes) {

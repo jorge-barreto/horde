@@ -62,6 +62,27 @@ Expected contents:
 
 horde reads this file after a run completes to populate cost and duration data in its run history.
 
+### costs.json
+
+Written to the audit directory and updated **incrementally** — flushed after each phase completes, and on interrupt — alongside `run-result.json` and `timing.json`. horde reads this file for per-run token telemetry. It is preferred over `run-result.json` as the token source because it carries token totals on every orc version and is updated live during a run (so a still-running run can report tokens before it finishes).
+
+Path: `<audit-dir>/costs.json`
+
+Token fields horde reads:
+```json
+{
+  "phases": [
+    { "name": "plan", "turns": 1 }
+  ],
+  "total_input_tokens": 54791,
+  "total_output_tokens": 87915,
+  "total_cache_creation_input_tokens": 529692,
+  "total_cache_read_input_tokens": 8934181
+}
+```
+
+horde sums per-phase `turns` into a run total (orc has no run-total `turns`). The same `total_*` token fields are expected to appear in `run-result.json` in a future orc release (tracked upstream); horde reads `costs.json` first and falls back to `run-result.json`'s token fields. Both files are written atomically (write-temp-then-rename), so horde never reads a half-written file.
+
 ## Environment Variables
 
 orc needs exactly two environment variables from the worker environment:

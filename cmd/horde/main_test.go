@@ -5368,6 +5368,45 @@ func TestHydrate_JSON_FailureSingleEnvelope(t *testing.T) {
 	}
 }
 
+func TestHydrate_JSON_MissingInto_EmitsEnvelope(t *testing.T) {
+	// Regression: --into must NOT be a urfave Required flag, or omitting it
+	// under --json dumps help to stdout instead of an ErrorV1 envelope (the
+	// same hole that was fixed for launch's --workflow).
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "hydrate", "somerunid"})
+	if runErr == nil {
+		t.Fatal("expected error when --into is omitted")
+	}
+	var v ErrorV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("stdout is not a JSON envelope (help leaked?): %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "error" || !strings.Contains(v.Reason, "--into") {
+		t.Errorf("envelope = %+v, want status=error mentioning --into", v)
+	}
+	_ = env
+}
+
+func TestHydrate_HumanMissingInto_Errors(t *testing.T) {
+	// Without --json, omitting --into still errors (no behavior regression
+	// from dropping Required:true).
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "hydrate", "somerunid"})
+	if err == nil {
+		t.Fatal("expected error when --into is omitted")
+	}
+	if !strings.Contains(err.Error(), "--into is required") {
+		t.Errorf("error %q does not mention --into is required", err.Error())
+	}
+	_ = env
+}
+
 func TestStatus_JSON_ErrorEnvelope(t *testing.T) {
 	// The JSON error envelope is produced by the shared root ExitErrHandler,
 	// so exercise it through a non-launch command (status on a missing run)

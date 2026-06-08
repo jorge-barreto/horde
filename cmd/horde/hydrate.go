@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/urfave/cli/v3"
@@ -129,16 +130,22 @@ run-id failed (missing, still running, transport error, etc.); the
 successful runs are still materialized.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "into",
-				Usage:    "Destination directory (will be created)",
-				Required: true,
+				// Not Required: validated in the Action below. A urfave Required
+				// flag fails before the Action and prints help to stdout without
+				// routing through the root ExitErrHandler, which would break the
+				// --json contract (stdout must carry only a JSON object).
+				Name:  "into",
+				Usage: "Destination directory (will be created)",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			into := cmd.String("into")
+			into := strings.TrimSpace(cmd.String("into"))
 			runIDs := cmd.Args().Slice()
 			if len(runIDs) == 0 {
 				return fmt.Errorf("missing required argument: one or more <run-id>")
+			}
+			if into == "" {
+				return fmt.Errorf("--into is required (destination directory)")
 			}
 			if err := os.MkdirAll(into, 0o755); err != nil {
 				return fmt.Errorf("creating --into directory: %w", err)

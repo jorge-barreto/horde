@@ -186,12 +186,18 @@ func fullResultsToV1(run *store.Run, result *fullRunResult) ResultsV1 {
 	return v
 }
 
-// parseOrcDuration converts orc's human duration strings from run-result.json
-// into seconds. orc emits space-separated compound values like "12m 34s",
-// "1h 2m 3s", or a bare "45s". We collapse the spaces so time.ParseDuration
-// accepts them, and return ok=false for anything we can't confidently parse —
-// callers then omit the numeric field rather than emit a wrong value. horde's
-// own logic never depends on this; the string remains the source of truth.
+// parseOrcDuration is a best-effort bridge: orc serializes durations in
+// run-result.json as human strings ("12m 34s", "1h 2m 3s", "45s") rather than
+// a number, so to expose numeric *_seconds we collapse the spaces and try
+// time.ParseDuration. It returns ok=false for anything it can't confidently
+// parse, so callers omit the numeric field rather than emit a wrong value.
+// horde's own logic never depends on this — the string stays the source of
+// truth.
+//
+// This whole function is a stopgap. The real fix is orc emitting a numeric
+// duration in run-result.json (jorge-barreto/orc#3), after which the parser
+// and the best-effort path should be deleted in favor of reading the number
+// directly.
 func parseOrcDuration(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {

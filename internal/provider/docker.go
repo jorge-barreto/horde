@@ -684,6 +684,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			run.ExitCode = &exitCode
 			run.CompletedAt = &now
 			run.TotalCostUSD = cost
+			run.Tokens = ReadTokenUsage(homeDir, run)
 			return nil
 		}
 
@@ -711,6 +712,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 			run.ExitCode = exitCode
 			run.CompletedAt = &now
 			run.TotalCostUSD = cost
+			run.Tokens = ReadTokenUsage(homeDir, run)
 			return nil
 		}
 
@@ -759,6 +761,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		run.ExitCode = exitCode
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
+		run.Tokens = ReadTokenUsage(homeDir, run)
 
 	case StateUnknown:
 		var cost *float64
@@ -811,6 +814,7 @@ func (p *DockerProvider) Finalize(ctx context.Context, run *store.Run, homeDir s
 		run.ExitCode = exitCode
 		run.CompletedAt = &now
 		run.TotalCostUSD = cost
+		run.Tokens = ReadTokenUsage(homeDir, run)
 	}
 
 	return nil

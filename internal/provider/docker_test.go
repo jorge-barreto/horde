@@ -1494,6 +1494,19 @@ func TestDockerProvider_Finalize_RunningWithMarkerAndCost(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"total_cost_usd":%v}`, cost)), 0o644); err != nil {
 		t.Fatalf("writing run-result.json: %v", err)
 	}
+	costs := `{
+		"phases": [
+			{"name": "plan", "turns": 1},
+			{"name": "implement", "turns": 4}
+		],
+		"total_input_tokens": 54791,
+		"total_output_tokens": 87915,
+		"total_cache_creation_input_tokens": 529692,
+		"total_cache_read_input_tokens": 8934181
+	}`
+	if err := os.WriteFile(filepath.Join(resultDir, "costs.json"), []byte(costs), 0o644); err != nil {
+		t.Fatalf("writing costs.json: %v", err)
+	}
 
 	run := &store.Run{
 		ID:         "r5",
@@ -1510,6 +1523,14 @@ func TestDockerProvider_Finalize_RunningWithMarkerAndCost(t *testing.T) {
 	}
 	if *run.TotalCostUSD != cost {
 		t.Errorf("TotalCostUSD = %v, want %v", *run.TotalCostUSD, cost)
+	}
+	if run.Tokens == nil {
+		t.Fatal("Finalize: run.Tokens is nil, want populated from costs.json")
+	}
+	if run.Tokens.InputTokens != 54791 || run.Tokens.OutputTokens != 87915 ||
+		run.Tokens.CacheCreationTokens != 529692 || run.Tokens.CacheReadTokens != 8934181 ||
+		run.Tokens.Turns != 5 {
+		t.Errorf("Finalize: run.Tokens = %+v", *run.Tokens)
 	}
 }
 

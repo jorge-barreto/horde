@@ -84,9 +84,12 @@ var topics = []Topic{
 const topicQuickstart = `Quick Start
 ===========
 
-1. Install horde:
+1. Install horde (no Go toolchain required):
 
-    make install
+    curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
+
+   Or 'brew install jorge-barreto/tap/horde', or 'make install' from source.
+   See 'horde docs install' for all methods and how to update.
 
 2. Create a .env file in your project root:
 

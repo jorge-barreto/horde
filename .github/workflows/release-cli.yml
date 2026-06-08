@@ -27,8 +27,13 @@ jobs:
 
       - uses: goreleaser/goreleaser-action@v6
         with:
-          version: "~> v2"
-          args: release --clean
+          # pinned (not floating ~> v2) so a future v2 that removes brews: can't break releases silently
+          version: "2.12.7"
+          # --skip=validate: OSS GoReleaser only parses a leading-"v" tag as semver, so it
+          # rejects our cli-v0.1.0 tag ("invalid semantic version") in the validate phase.
+          # The .goreleaser.yaml templates strip the cli-v prefix for version stamping and
+          # asset names; skipping validate lets the rest of the pipeline run on the cli-v tag.
+          args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}

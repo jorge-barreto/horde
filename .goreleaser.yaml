@@ -5,9 +5,20 @@ version: 2
 
 project_name: horde
 
+# The CLI is tagged cli-v<semver> (cdk-v* tags belong to the npm package).
+# GoReleaser (OSS) only auto-strips a leading "v", so for a cli-v0.1.0 tag
+# {{ .Version }} would resolve to "cli-v0.1.0" — mis-stamping main.version and
+# producing horde_cli-v0.1.0_* asset names. The Pro-only monorepo.tag_prefix
+# would handle this, but it is NOT in the OSS schema (goreleaser check rejects
+# it). Instead we strip the prefix with a template, {{ trimprefix .Version
+# "cli-v" }}, everywhere the version is baked in (ldflags, archive name,
+# release name) — yielding a clean 0.1.0 in the binary and asset names.
+# OSS validate still rejects cli-v0.1.0 as non-semver, so the release workflow
+# runs goreleaser with --skip=validate (see .github/workflows/release-cli.yml).
+
 before:
   hooks:
-    - go mod tidy
+    - go mod download
 
 builds:
   - id: horde
@@ -19,14 +30,14 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
-      - -X main.version={{ .Version }}
+      - -X main.version={{ trimprefix .Version "cli-v" }}
       - -X main.commit={{ .ShortCommit }}
       - -X main.buildDate={{ .Date }}
 
 archives:
   - id: horde
     formats: [tar.gz]
-    name_template: "horde_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: 'horde_{{ trimprefix .Version "cli-v" }}_{{ .Os }}_{{ .Arch }}'
 
 checksum:
   name_template: "checksums.txt"
@@ -35,7 +46,7 @@ release:
   github:
     owner: jorge-barreto
     name: horde
-  name_template: "horde {{ .Tag }}"
+  name_template: 'horde {{ trimprefix .Version "cli-v" }}'
 
 changelog:
   use: github

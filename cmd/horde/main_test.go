@@ -204,6 +204,72 @@ func TestLaunch_WithFlags(t *testing.T) {
 	}
 }
 
+func TestLaunch_WithLabels(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	origStdout := os.Stdout
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = pw
+	defer func() { os.Stdout = origStdout }()
+
+	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch",
+		"--workflow", "implement-ticket",
+		"--label", "epic=KS-100",
+		"--label", "variant=v3",
+		"TICKET-LBL"})
+
+	pw.Close()
+	os.Stdout = origStdout
+	io.ReadAll(pr)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st.Close()
+
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	if err != nil {
+		t.Fatalf("listing runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	r := runs[0]
+	if r.Labels["epic"] != "KS-100" {
+		t.Errorf("Labels[epic] = %q, want %q", r.Labels["epic"], "KS-100")
+	}
+	if r.Labels["variant"] != "v3" {
+		t.Errorf("Labels[variant] = %q, want %q", r.Labels["variant"], "v3")
+	}
+}
+
+func TestLaunch_InvalidLabel(t *testing.T) {
+	setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch",
+		"--workflow", "implement-ticket",
+		"--label", "no-equals-sign",
+		"TICKET-BAD"})
+
+	if err == nil {
+		t.Fatal("expected error for malformed label, got nil")
+	}
+	if !strings.Contains(err.Error(), "key=value") {
+		t.Errorf("error %q does not mention key=value form", err.Error())
+	}
+}
+
 func TestLaunch_TimeoutAt_Regression(t *testing.T) {
 	t.Parallel()
 

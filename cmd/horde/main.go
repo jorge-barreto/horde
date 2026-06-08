@@ -179,6 +179,10 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Aliases: []string{"e"},
 				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see 'horde docs config' for the ECS caveat). Applies to launch only; 'horde retry' does not carry it forward.",
 			},
+			&cli.StringSliceFlag{
+				Name:  "label",
+				Usage: "Attach a key=value label to the run (repeatable); filterable via `horde list --label`",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -194,6 +198,11 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			jsonOut := cmd.Bool("json")
 
 			extraEnv, err := parseEnvFlags(cmd.StringSlice("env"))
+			if err != nil {
+				return err
+			}
+
+			labels, err := parseLabels(cmd.StringSlice("label"))
 			if err != nil {
 				return err
 			}
@@ -312,6 +321,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Workflow:   workflow,
 				Provider:   provName,
 				Status:     store.StatusPending,
+				Labels:     labels,
 				LaunchedBy: launchedBy,
 				StartedAt:  now,
 				TimeoutAt:  now.Add(timeout),

@@ -156,6 +156,7 @@ All commands require a provider. For local Docker mode, pass `--provider docker`
 horde launch --provider docker --workflow implement-ticket PROJ-123
 horde launch --provider docker --workflow implement-ticket PROJ-123 --branch feature/xyz
 horde launch --provider docker --workflow bugfix PROJ-123 --timeout 30m
+horde launch --provider docker --workflow implement-ticket PROJ-123 --env PROMPT_VARIANT=v3 --env DEBUG=1
 
 # Monitor
 horde status <run-id>

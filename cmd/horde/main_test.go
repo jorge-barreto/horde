@@ -5490,3 +5490,127 @@ func TestResults_JSON_DurationSeconds(t *testing.T) {
 		t.Errorf("Phases[1].Duration = %q, want bogus (string preserved)", v.Phases[1].Duration)
 	}
 }
+
+func TestParseEnvFlags(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		raw     []string
+		want    map[string]string
+		wantErr bool
+	}{
+		{"nil", nil, map[string]string{}, false},
+		{"empty", []string{}, map[string]string{}, false},
+		{"single", []string{"FOO=bar"}, map[string]string{"FOO": "bar"}, false},
+		{"multiple", []string{"FOO=bar", "BAZ=qux"}, map[string]string{"FOO": "bar", "BAZ": "qux"}, false},
+		{"empty value allowed", []string{"FOO="}, map[string]string{"FOO": ""}, false},
+		{"value with equals", []string{"DSN=a=b=c"}, map[string]string{"DSN": "a=b=c"}, false},
+		{"leading underscore key", []string{"_X=1"}, map[string]string{"_X": "1"}, false},
+		{"duplicate last wins", []string{"FOO=a", "FOO=b"}, map[string]string{"FOO": "b"}, false},
+		{"missing equals", []string{"FOO"}, nil, true},
+		{"empty key", []string{"=bar"}, nil, true},
+		{"key starts with digit", []string{"1FOO=bar"}, nil, true},
+		{"key with dash", []string{"FOO-BAR=baz"}, nil, true},
+		{"key with space", []string{"FOO BAR=baz"}, nil, true},
+		{"reserved REPO_URL", []string{"REPO_URL=x"}, nil, true},
+		{"reserved TICKET", []string{"TICKET=x"}, nil, true},
+		{"reserved BRANCH", []string{"BRANCH=x"}, nil, true},
+		{"reserved WORKFLOW", []string{"WORKFLOW=x"}, nil, true},
+		{"reserved RUN_ID", []string{"RUN_ID=x"}, nil, true},
+		{"reserved ARTIFACTS_BUCKET", []string{"ARTIFACTS_BUCKET=x"}, nil, true},
+		{"reserved ORC_EXTRA_ARGS", []string{"ORC_EXTRA_ARGS=x"}, nil, true},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseEnvFlags(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseEnvFlags(%v) = %v, want error", tc.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseEnvFlags(%v) unexpected error: %v", tc.raw, err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("parseEnvFlags(%v) = %v, want %v", tc.raw, got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Errorf("parseEnvFlags(%v)[%q] = %q, want %q", tc.raw, k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestSecretCollisionsOnECS(t *testing.T) {
+	t.Parallel()
+	// spec keyed by container env-var name; canonicals are always present in a
+	// real merged spec, plus a declared extra here.
+	spec := config.SecretSpec{
+		"CLAUDE_CODE_OAUTH_TOKEN": {},
+		"GIT_TOKEN":               {},
+		"STRIPE_API_KEY":          {},
+	}
+	tests := []struct {
+		name     string
+		provName string
+		extraEnv map[string]string
+		want     []string
+	}{
+		{
+			name:     "ecs collision with declared secret",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"STRIPE_API_KEY": "sk_test"},
+			want:     []string{"STRIPE_API_KEY"},
+		},
+		{
+			name:     "ecs collision with canonical secret",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"GIT_TOKEN": "x"},
+			want:     []string{"GIT_TOKEN"},
+		},
+		{
+			name:     "ecs non-secret key does not warn",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"PROMPT_VARIANT": "v3"},
+			want:     nil,
+		},
+		{
+			name:     "ecs multiple collisions sorted",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{"STRIPE_API_KEY": "x", "GIT_TOKEN": "y", "NEW": "z"},
+			want:     []string{"GIT_TOKEN", "STRIPE_API_KEY"},
+		},
+		{
+			name:     "docker never warns even on collision",
+			provName: config.ProviderDocker,
+			extraEnv: map[string]string{"STRIPE_API_KEY": "x", "GIT_TOKEN": "y"},
+			want:     nil,
+		},
+		{
+			name:     "ecs no extra env",
+			provName: config.ProviderECS,
+			extraEnv: map[string]string{},
+			want:     nil,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := secretCollisionsOnECS(tc.provName, spec, tc.extraEnv)
+			if len(got) != len(tc.want) {
+				t.Fatalf("secretCollisionsOnECS = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("secretCollisionsOnECS[%d] = %q, want %q (full: %v)", i, got[i], tc.want[i], got)
+				}
+			}
+		})
+	}
+}

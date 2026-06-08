@@ -22,13 +22,13 @@ var topics = []Topic{
 	{
 		Name:    "providers",
 		Title:   "Providers",
-		Summary: "Docker (v0.1) and planned AWS ECS (v0.2)",
+		Summary: "Docker (local) and AWS ECS (Fargate), including recoverable runs",
 		Content: topicProviders,
 	},
 	{
 		Name:    "retry",
 		Title:   "Retrying and Inspecting Runs",
-		Summary: "Retry failed runs, shell access, container cleanup",
+		Summary: "Retry recoverable runs (Docker in place, ECS from S3), shell access, cleanup",
 		Content: topicRetry,
 	},
 	{
@@ -113,10 +113,12 @@ const topicQuickstart = `Quick Start
 6. List all runs for the current repo:
 
     horde list            # active runs (pending/running)
-    horde list --all      # include completed, failed, killed
+    horde list --all      # include terminal runs (success/failed/killed/timed_out/rate_limited)
 
 Other useful commands:
 
+    horde launch ... --env KEY=VALUE  # set a per-launch env var (repeatable;
+                                      # see 'horde docs config')
     horde kill <run-id>      # stop a running run
     horde retry <run-id>     # restart — orc picks up where it left off
     horde retry <run-id> -- --resume  # pass extra flags through to orc
@@ -213,6 +215,40 @@ secrets (map, optional):
           STRIPE_API_KEY:
             env: STRIPE_API_KEY
             aws-secret: prepdesk/stripe-api-key
+
+Per-launch env vars (--env)
+---------------------------
+
+    Everything above is project-level: every run for a repo gets the same
+    set. For values that vary per launch — a feature flag, an experiment
+    variant, an orchestrator's run ID — pass --env KEY=VALUE on the launch.
+    The flag is repeatable:
+
+        horde launch PROJ-1 --workflow build \
+          --env PROMPT_VARIANT=v3 --env DEBUG=1
+
+    Keys must be valid env-var names ([A-Za-z_][A-Za-z0-9_]*). VALUE may be
+    empty (--env FLAG=) and may itself contain '='. On a duplicate key the
+    last --env wins. The horde-managed control vars (REPO_URL, TICKET,
+    BRANCH, WORKFLOW, RUN_ID, ARTIFACTS_BUCKET, ORC_EXTRA_ARGS) are reserved
+    and rejected.
+
+    Override of project secrets:
+
+        docker — a per-launch --env value overrides a project secret (or
+                 any .env value) of the same key. Use it to point one run at
+                 a staging key without editing .env.
+
+        ECS    — a declared secret of the same name takes precedence: the
+                 secret lives on the task definition and AWS wins over the
+                 RunTask environment override. horde injects the --env value
+                 anyway and prints a warning that it will not take effect.
+                 Overriding a non-secret key, and setting brand-new keys,
+                 work the same on both providers.
+
+    --env applies to 'horde launch' only. Per-launch values are not stored
+    on the run record, so 'horde retry' does not carry them forward — pass
+    --env again on a fresh launch if a resumed run needs them.
 
 File Location
 -------------
@@ -341,52 +377,102 @@ the container (preserving it for retry).
 Logs are available via 'docker logs' while the container exists. Saved
 container logs are also available in the results directory.
 
-AWS ECS Provider (planned — v0.2)
----------------------------------
+AWS ECS Provider (v0.2)
+-----------------------
 
-The ECS provider will run horde-worker as an ECS Fargate task.
+The ECS provider runs horde-worker as an ECS Fargate task. It is
+selected automatically when an AWS stack is deployed (horde discovers it
+via SSM), or explicitly with --provider aws-ecs.
 
+    horde launch --workflow implement-ticket PROJ-123                  # auto-detected via SSM
     horde launch --workflow implement-ticket PROJ-123 --provider aws-ecs
 
-Planned features:
+What it uses:
     - ECS RunTask for launching (no Lambda indirection)
     - DynamoDB for shared team run history
     - SSM Parameter Store for infrastructure config discovery
     - CloudWatch for log streaming
-    - S3 for artifact storage
-    - EventBridge + Lambda for status sync (accurate even if CLI disconnects)
+    - S3 for artifact storage and recoverable-run persistence
+    - EventBridge + status Lambda for status sync (accurate even if the
+      CLI disconnects); it also records the ECS stop_code / stop_reason
+      into the run's metadata
     - Secrets Manager for token injection
+
+Stand up the stack with 'horde bootstrap' (CloudFormation) or the
+@horde.io/cdk construct — see 'horde docs bootstrap' and 'horde docs cdk'.
+
+Recoverable runs
+----------------
+
+Both providers support 'horde retry' on runs that ended in a recoverable
+state (failed, killed, timed_out, rate_limited): orc resumes from where
+it left off. Docker reuses the on-host workspace in place; ECS restores
+the agent session and working tree from S3, since Fargate has no
+persistent filesystem. See 'horde docs retry' for the full lifecycle.
 `
 
 const topicRetry = `Retrying and Inspecting Runs
 =============================
 
-Every run's workspace is mounted to the host at ~/.horde/workspaces/<run-id>/.
-If a container vanishes (crash, reboot, OOM), the workspace persists and
-retry or shell access still works by launching a new container.
+A run that ends in a recoverable state can be relaunched with the same
+run ID, and orc picks up where it left off. On Docker the preserved
+on-host workspace is reused in place; on ECS the worker restores the
+agent session and working tree it synced to S3 before the task was
+reaped (see "Recoverable Runs", below).
+
+Recoverable statuses
+--------------------
+
+orc's exit code maps to a terminal status:
+
+    exit 0    success         done; not retryable
+    exit 2    timed_out       hit an orc phase timeout
+    exit 4    rate_limited    hit the Anthropic cost/rate limit
+    other     failed          any other non-zero exit
+
+Two more terminal statuses come from horde itself rather than orc:
+
+    killed                    stopped via 'horde kill' or an ECS StopTask
+                              / spot interruption
+
+'horde retry' accepts failed, killed, timed_out, and rate_limited.
+Successful runs cannot be retried. timed_out and rate_limited are
+distinct from failed precisely so a caller (or a future auto-resume
+loop) can tell a recoverable interruption apart from a genuine failure;
+all four are treated identically by retry, list filters, and
+IsTerminal().
 
 Retry
 -----
 
     horde retry <run-id> [-- <orc-args>...]
 
-Launches a new container against the preserved workspace and sessions
-dir. If the old container is still alive, it is stopped first. orc sees
-its audit state and picks up from the failed phase automatically; the
-agent's Claude session is restored from ~/.horde/workspaces/<run-id>-sessions/
-so orc --resume can reattach to the in-flight conversation.
+Relaunches against the same run ID. If the old worker is still alive, it
+is stopped first. orc sees its audit state and picks up from the
+interrupted phase automatically. The same run ID is reused and the
+timeout is reset.
 
-The same run ID is reused. The timeout is reset.
+By default --resume is passed to orc so it reattaches to the in-flight
+agent session. Pass explicit orc args after -- to override:
 
-    horde retry abc123
-    horde retry abc123 -- --resume
+    horde retry abc123                  # implicit --resume
+    horde retry abc123 -- --resume      # explicit, same effect
     horde retry abc123 -- --retry implement
 
 Extra orc flags after -- are passed through to orc unchanged. horde does
 not validate them.
 
-The run must be in failed or killed status. Successful runs cannot be
-retried.
+How the session and working tree survive depends on the provider:
+
+  - Docker: the workspace and sessions dir live on the host
+    (~/.horde/workspaces/<run-id>/ and -sessions/) and are remounted
+    into the fresh container in place.
+  - ECS: Fargate has no persistent filesystem, so the worker syncs both
+    ~/.claude (the agent session) and the full /workspace (committed +
+    uncommitted changes + .git) to S3 when the task terminates, and
+    restores both on the next launch with the same run ID — using the
+    task role's existing S3 access, no git push or repo write. See
+    "Recoverable Runs (ECS)" below.
 
 Shell
 -----
@@ -418,8 +504,8 @@ retry and shell access. Use --purge to free disk space when you no
 longer need the workspace. Running and pending runs cannot be cleaned.
 --purge also removes the matching sessions dir.
 
-Workspace Persistence
----------------------
+Workspace Persistence (Docker)
+------------------------------
 
 Each run's workspace lives at ~/.horde/workspaces/<run-id>/ on the host,
 mounted into the container at /workspace. Agent session state lives
@@ -435,6 +521,34 @@ You can also access the workspace directly from the host:
 
     ls ~/.horde/workspaces/<run-id>/
     cd ~/.horde/workspaces/<run-id>/ && git log
+
+Recoverable Runs (ECS)
+----------------------
+
+A Fargate task has no host filesystem to mount, so the ECS worker
+reproduces the Docker persistence guarantee through S3. It is the analog
+of the Docker provider's on-host workspace, not a separate feature.
+
+On terminate (orc exit, 'horde kill', ECS StopTask, or a spot
+interruption), the worker:
+
+    1. Catches SIGTERM. orc runs backgrounded so the signal reaches it;
+       orc saves its interrupted agent session before anything uploads.
+       orc's true exit code is preserved across the signal.
+    2. Syncs ~/.claude (the agent session) and the full /workspace
+       (committed + uncommitted changes + .git) to S3 under the run's
+       prefix. Uses the task role's S3 access — no git push, no repo
+       write perms.
+
+On the next 'horde retry' for that run ID, a fresh task restores both
+before re-entering orc, so the agent resumes the same conversation
+against the same working tree. This replaced an earlier git-ref snapshot
+approach, which needed repo push perms and captured only committed work.
+
+The status Lambda also records the ECS stop_code / stop_reason into the
+run's metadata map. A spot interruption surfaces as
+stop_code == "TerminationNotice" — the signal a future auto-resume
+follow-up keys off.
 
 Container Lifecycle
 -------------------
@@ -767,9 +881,10 @@ const topicECSIntegration = `ECS Integration Tests
 
 The ECS integration suite (test/integration/ecs_*_test.go) runs every
 horde feature end-to-end against a real CloudFormation stack: launch,
-status, logs, kill, list, hydrate, retry semantics, concurrent runs,
-and timeout/finalize reconciliation. Each test drives a full Fargate
-task lifecycle and verifies the status Lambda updates DynamoDB.
+status, logs, kill, list, hydrate, retry with session + workspace
+restore from S3, ECS stop-reason capture, concurrent runs, and
+timeout/finalize reconciliation. Each test drives a full Fargate task
+lifecycle and verifies the status Lambda updates DynamoDB.
 
 Prerequisites
 
@@ -837,14 +952,22 @@ Fargate tasks at once. All ECS tests call t.Parallel(), so the 17-test
 suite finishes in ~2 minutes wall-clock. Lowering max_concurrent also
 requires rebuilding the template and redeploying.
 
+Recoverable-run coverage
+
+'horde retry' on ECS and agent-session persistence across retries are
+covered end-to-end (this is what #35 added):
+
+- TestECSResumeRestoresSession launches a run, kills it mid-agent-phase,
+  asserts the session (~/.claude) and full /workspace land in S3, runs
+  'horde retry', and confirms orc reattaches the restored session and
+  the run reaches success. The resume-marker.yaml workflow is
+  self-verifying — success on resume is only reachable if the session
+  survived the kill.
+- TestECSStopReasonRecorded asserts the status Lambda records the ECS
+  stop_code / stop_reason into the run's DynamoDB metadata.
+
 What's NOT tested end-to-end
 
-- 'horde retry' on ECS: the current implementation requires a local
-  workspace dir that ECS doesn't have. Tracked as a design decision
-  rather than a bug (see horde-lbx.8 note).
-- Agent session persistence across retries: Docker uses a host-mounted
-  directory; ECS has no equivalent without S3 round-trips. Tracked as
-  a design conversation (see horde-lbx.13 note).
 - 'horde logs --follow' in the integration suite. The CLI implementation
   exists and works manually; an automated streaming-mode test is future
   work.

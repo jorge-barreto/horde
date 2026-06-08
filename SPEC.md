@@ -85,7 +85,7 @@ The status Lambda:
 ## CLI Commands
 
 ```
-horde launch --workflow=<name> [--branch=<branch>] [--timeout=<duration>] [--force] <ticket>
+horde launch --workflow=<name> [--branch=<branch>] [--timeout=<duration>] [--force] [--env=<KEY=VALUE>]... <ticket>
 horde status <run-id>
 horde logs <run-id> [--follow]
 horde kill <run-id>

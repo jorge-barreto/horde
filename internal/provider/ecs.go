@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -147,6 +148,10 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 	// is set at deploy time by the bootstrap CF template / @horde.io/cdk
 	// construct. RunTask cannot add secrets per launch — only environment
 	// overrides — so opts.SecretEnvRemap is intentionally ignored on ECS.
+	// Per-launch opts.ExtraEnv IS passed (as environment overrides below),
+	// but for the same reason it cannot override a task-definition secret of
+	// the same name: AWS gives the secret precedence. main.go warns the user
+	// when an --env key collides with a declared secret on ECS.
 	// RUN_ID flows into the ECS tag and the S3 session/snapshot key prefixes
 	// the worker builds, so validate it before it leaves the CLI — even
 	// though retry reuses an already-validated stored ID, this guards any
@@ -171,6 +176,22 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 			Name:  aws.String("ORC_EXTRA_ARGS"),
 			Value: aws.String(strings.Join(opts.OrcArgs, " ")),
 		})
+	}
+	// Per-launch env vars (horde launch --env KEY=VALUE), as environment
+	// overrides. Sorted for deterministic ordering. See the secret-precedence
+	// caveat in the function-level comment above.
+	if len(opts.ExtraEnv) > 0 {
+		keys := make([]string, 0, len(opts.ExtraEnv))
+		for k := range opts.ExtraEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			env = append(env, ecstypes.KeyValuePair{
+				Name:  aws.String(k),
+				Value: aws.String(opts.ExtraEnv[k]),
+			})
+		}
 	}
 
 	input := &ecs.RunTaskInput{

@@ -56,6 +56,14 @@ type LaunchOpts struct {
 	// host-name) and the two canonical secrets are already covered by
 	// --env-file and need not appear here.
 	SecretEnvRemap map[string]string
+
+	// ExtraEnv holds per-launch env vars (horde launch --env KEY=VALUE).
+	// Injected into the container alongside the project's standard set. On
+	// docker they override --env-file values of the same key (later -e wins).
+	// On ECS they cannot override a task-definition secret of the same name —
+	// AWS gives the secret precedence — so main.go warns on that collision.
+	// (issue #22)
+	ExtraEnv map[string]string
 }
 
 // ValidateRunID rejects empty run IDs and IDs that would enable path

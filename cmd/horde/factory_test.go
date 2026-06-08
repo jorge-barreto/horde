@@ -28,6 +28,9 @@ func (s *stubStore) UpdateRun(_ context.Context, _ string, _ *store.RunUpdate) e
 func (s *stubStore) ListByRepo(_ context.Context, _ string, _ bool) ([]*store.Run, error) {
 	return nil, nil
 }
+func (s *stubStore) ListRuns(_ context.Context, _ store.RunFilter) ([]*store.Run, error) {
+	return nil, nil
+}
 func (s *stubStore) FindActiveByTicket(_ context.Context, _ string, _ string) ([]*store.Run, error) {
 	return nil, nil
 }

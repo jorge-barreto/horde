@@ -179,6 +179,10 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Aliases: []string{"e"},
 				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see 'horde docs config' for the ECS caveat). Applies to launch only; 'horde retry' does not carry it forward.",
 			},
+			&cli.StringSliceFlag{
+				Name:  "label",
+				Usage: "Attach a key=value label to the run (repeatable); filterable via `horde list --label`",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -194,6 +198,11 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			jsonOut := cmd.Bool("json")
 
 			extraEnv, err := parseEnvFlags(cmd.StringSlice("env"))
+			if err != nil {
+				return err
+			}
+
+			labels, err := parseLabels(cmd.StringSlice("label"))
 			if err != nil {
 				return err
 			}
@@ -312,6 +321,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Workflow:   workflow,
 				Provider:   provName,
 				Status:     store.StatusPending,
+				Labels:     labels,
 				LaunchedBy: launchedBy,
 				StartedAt:  now,
 				TimeoutAt:  now.Add(timeout),
@@ -813,15 +823,69 @@ func listCmd() *cli.Command {
 		Usage: "List runs for the current repo",
 		Description: `Lists runs scoped to the current repo (inferred from git remote).
 By default shows only active runs (pending/running). Use --all to
-include terminal runs (success, failed, killed, timed_out, rate_limited).`,
+include terminal runs (success, failed, killed, timed_out, rate_limited).
+
+Filters (AND-combined, all scoped to the current repo):
+  --label key=value   only runs carrying this label (repeatable; all must match)
+  --status <status>   only runs in this status (repeatable); implies --all's breadth
+  --workflow <name>   only runs of this workflow
+  --ticket <id>       only runs for this ticket
+  --since <when>      only runs started at/after <when>
+  --until <when>      only runs started at/before <when>
+
+<when> is an RFC3339 timestamp (2026-04-01 or 2026-04-01T12:00:00Z) or a
+duration-ago (1h, 30m, 7d).`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "all",
 				Usage: "Include terminal runs (success/failed/killed/timed_out/rate_limited)",
 			},
+			&cli.StringSliceFlag{
+				Name:  "label",
+				Usage: "Only runs carrying this key=value label (repeatable; AND-combined)",
+			},
+			&cli.StringSliceFlag{
+				Name:  "status",
+				Usage: "Only runs in this status (repeatable); implies --all's breadth",
+			},
+			&cli.StringFlag{
+				Name:  "workflow",
+				Usage: "Only runs of this workflow",
+			},
+			&cli.StringFlag{
+				Name:  "ticket",
+				Usage: "Only runs for this ticket",
+			},
+			&cli.StringFlag{
+				Name:  "since",
+				Usage: "Only runs started at/after this time (RFC3339 or duration-ago like 1h, 7d)",
+			},
+			&cli.StringFlag{
+				Name:  "until",
+				Usage: "Only runs started at/before this time (RFC3339 or duration-ago like 1h, 7d)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			all := cmd.Bool("all")
+
+			labels, err := parseLabels(cmd.StringSlice("label"))
+			if err != nil {
+				return err
+			}
+
+			statuses, err := parseStatuses(cmd.StringSlice("status"))
+			if err != nil {
+				return err
+			}
+
+			since, err := parseWhen(cmd.String("since"))
+			if err != nil {
+				return fmt.Errorf("--since: %w", err)
+			}
+			until, err := parseWhen(cmd.String("until"))
+			if err != nil {
+				return fmt.Errorf("--until: %w", err)
+			}
 
 			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStoreWith(ctx, cmd.String("provider"), cmd.String("profile"), defaultFactoryDeps())
 			if err != nil {
@@ -844,7 +908,18 @@ include terminal runs (success, failed, killed, timed_out, rate_limited).`,
 				return err
 			}
 
-			runs, err := st.ListByRepo(ctx, repo, !all)
+			// Fetch with the non-status filters. Status is applied AFTER
+			// finalize, because finalizeAndSync can flip a run's status
+			// (running → terminal) during this call — filtering on the stored
+			// status first would drop runs that just completed.
+			runs, err := st.ListRuns(ctx, store.RunFilter{
+				Repo:     repo,
+				Workflow: cmd.String("workflow"),
+				Ticket:   cmd.String("ticket"),
+				Labels:   labels,
+				Since:    since,
+				Until:    until,
+			})
 			if err != nil {
 				return fmt.Errorf("listing runs: %w", err)
 			}
@@ -861,33 +936,64 @@ include terminal runs (success, failed, killed, timed_out, rate_limited).`,
 				}
 			}
 
-			if !all {
-				filtered := runs[:0]
-				for _, run := range runs {
-					if run.Status == store.StatusPending || run.Status == store.StatusRunning {
-						filtered = append(filtered, run)
-					}
-				}
-				runs = filtered
-			}
+			// Resolve the effective status filter:
+			//   - explicit --status wins (and spans terminal runs too)
+			//   - else --all = no status filter
+			//   - else default to active-only (pending/running)
+			runs = applyStatusFilter(runs, statuses, all)
 
 			if cmd.Bool("json") {
 				return writeJSONTo(cmd.Writer, listToV1(runs))
 			}
 
 			if len(runs) == 0 {
-				if all {
+				filtered := len(statuses) > 0 || cmd.String("workflow") != "" || cmd.String("ticket") != "" || len(labels) > 0 || since != nil || until != nil
+				switch {
+				case filtered:
+					fmt.Println("No matching runs for this repo.")
+				case all:
 					fmt.Println("No runs found for this repo.")
-				} else {
+				default:
 					fmt.Println("No active runs for this repo.")
 				}
 				return nil
 			}
 
 			printRunTable(runs)
+			printRunSummary(runs)
 			return nil
 		},
 	}
+}
+
+// applyStatusFilter narrows runs by the effective status dimension. An explicit
+// status set takes precedence and spans all statuses (including terminal). With
+// no status set, --all returns everything and the default keeps only active
+// (pending/running) runs.
+func applyStatusFilter(runs []*store.Run, statuses []store.Status, all bool) []*store.Run {
+	if len(statuses) > 0 {
+		want := make(map[store.Status]bool, len(statuses))
+		for _, s := range statuses {
+			want[s] = true
+		}
+		filtered := runs[:0]
+		for _, run := range runs {
+			if want[run.Status] {
+				filtered = append(filtered, run)
+			}
+		}
+		return filtered
+	}
+	if all {
+		return runs
+	}
+	filtered := runs[:0]
+	for _, run := range runs {
+		if run.Status == store.StatusPending || run.Status == store.StatusRunning {
+			filtered = append(filtered, run)
+		}
+	}
+	return filtered
 }
 
 func cleanCmd() *cli.Command {
@@ -1327,6 +1433,23 @@ func printRunTable(runs []*store.Run) {
 	w.Flush()
 }
 
+// printRunSummary prints a one-line cohort rollup under the run table: the
+// number of runs shown and their total known cost. This is the human-readable
+// face of the ListV1.summary aggregate used by `--json`.
+func printRunSummary(runs []*store.Run) {
+	var total float64
+	for _, run := range runs {
+		if run.TotalCostUSD != nil {
+			total += *run.TotalCostUSD
+		}
+	}
+	noun := "runs"
+	if len(runs) == 1 {
+		noun = "run"
+	}
+	fmt.Printf("\n%d %s, $%.2f total\n", len(runs), noun, total)
+}
+
 func printRunStatus(run *store.Run) {
 	branch := run.Branch
 	if branch == "" {
@@ -1365,12 +1488,30 @@ func printRunStatus(run *store.Run) {
 		fmt.Printf("Cost:        -\n")
 	}
 	fmt.Printf("Launched by: %s\n", run.LaunchedBy)
+	if len(run.Labels) > 0 {
+		fmt.Printf("Labels:      %s\n", formatLabels(run.Labels))
+	}
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		wsDir := provider.WorkspacePath(homeDir, run.ID)
 		if _, err := os.Stat(wsDir); err == nil {
 			fmt.Printf("Workspace:   %s\n", wsDir)
 		}
 	}
+}
+
+// formatLabels renders a label map as "k=v, k2=v2" with keys sorted for stable,
+// deterministic output.
+func formatLabels(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + labels[k]
+	}
+	return strings.Join(parts, ", ")
 }
 
 func printFullResults(run *store.Run, result *fullRunResult) {

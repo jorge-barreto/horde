@@ -52,6 +52,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		provider       TEXT NOT NULL,
 		instance_id    TEXT NOT NULL DEFAULT '',
 		metadata       TEXT,
+		labels         TEXT,
 		status         TEXT NOT NULL,
 		exit_code      INTEGER,
 		launched_by    TEXT NOT NULL,
@@ -66,7 +67,58 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("creating store schema: %w", err)
 	}
 
+	if err := ensureColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return &SQLiteStore{db: db}, nil
+}
+
+// ensureColumns brings an existing on-disk schema up to date with columns added
+// after the original CREATE TABLE. SQLite has no migration framework here; this
+// is an idempotent ALTER-if-missing so pre-existing ~/.horde/horde.db files
+// (created before a column was added) keep working. Each entry is additive and
+// safe to run on every open.
+func ensureColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(runs)")
+	if err != nil {
+		return fmt.Errorf("inspecting store schema: %w", err)
+	}
+	defer rows.Close()
+
+	existing := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notNull    int
+			dflt       sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &primaryKey); err != nil {
+			return fmt.Errorf("inspecting store schema: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspecting store schema: %w", err)
+	}
+
+	// name -> "ALTER TABLE runs ADD COLUMN" type. Additive only.
+	additive := []struct{ name, ddl string }{
+		{"labels", "TEXT"},
+	}
+	for _, col := range additive {
+		if existing[col.name] {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf("ALTER TABLE runs ADD COLUMN %s %s", col.name, col.ddl)); err != nil {
+			return fmt.Errorf("adding %q column: %w", col.name, err)
+		}
+	}
+	return nil
 }
 
 func (s *SQLiteStore) Close() error {
@@ -87,6 +139,16 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		metadataStr = &str
 	}
 
+	var labelsStr *string
+	if run.Labels != nil {
+		b, err := json.Marshal(run.Labels)
+		if err != nil {
+			return fmt.Errorf("marshaling run labels: %w", err)
+		}
+		str := string(b)
+		labelsStr = &str
+	}
+
 	var completedAt *string
 	if run.CompletedAt != nil {
 		completedAtStr := run.CompletedAt.UTC().Format(time.RFC3339)
@@ -96,9 +158,9 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO runs (
 			id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, status, exit_code, launched_by,
+			instance_id, metadata, labels, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID,
 		run.Repo,
 		run.Ticket,
@@ -107,6 +169,7 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		run.Provider,
 		run.InstanceID,
 		metadataStr,
+		labelsStr,
 		string(run.Status),
 		run.ExitCode,
 		run.LaunchedBy,
@@ -124,7 +187,7 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, status, exit_code, launched_by,
+			instance_id, metadata, labels, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd
 		FROM runs WHERE id = ?`, id)
 
@@ -139,10 +202,11 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (*Run, error) {
 }
 
 // scanRun scans a single row from the runs table into a *Run.
-// The row must contain all 15 columns in the standard SELECT order.
+// The row must contain all 16 columns in the standard SELECT order.
 func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	var run Run
 	var metadataStr sql.NullString
+	var labelsStr sql.NullString
 	var status string
 	var exitCode sql.NullInt64
 	var startedAt string
@@ -159,6 +223,7 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 		&run.Provider,
 		&run.InstanceID,
 		&metadataStr,
+		&labelsStr,
 		&status,
 		&exitCode,
 		&run.LaunchedBy,
@@ -203,6 +268,12 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 	if metadataStr.Valid {
 		if err := json.Unmarshal([]byte(metadataStr.String), &run.Metadata); err != nil {
 			return nil, fmt.Errorf("unmarshaling run metadata: %w", err)
+		}
+	}
+
+	if labelsStr.Valid {
+		if err := json.Unmarshal([]byte(labelsStr.String), &run.Labels); err != nil {
+			return nil, fmt.Errorf("unmarshaling run labels: %w", err)
 		}
 	}
 
@@ -278,7 +349,7 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 
 func (s *SQLiteStore) ListByRepo(ctx context.Context, repo string, activeOnly bool) ([]*Run, error) {
 	query := `SELECT id, repo, ticket, branch, workflow, provider,
-		instance_id, metadata, status, exit_code, launched_by,
+		instance_id, metadata, labels, status, exit_code, launched_by,
 		started_at, completed_at, timeout_at, total_cost_usd
 		FROM runs WHERE repo = ?`
 	args := []any{repo}
@@ -309,10 +380,55 @@ func (s *SQLiteStore) ListByRepo(ctx context.Context, repo string, activeOnly bo
 	return runs, nil
 }
 
+// ListRuns fetches the repo-scoped rows (applying the started_at range in SQL,
+// since it maps cleanly to indexed comparisons) and applies the remaining
+// status/workflow/ticket/label predicates via the shared matchesFilter helper.
+// SQLite is the local-testing store, so this is intentionally simple rather
+// than pushing every predicate into SQL — the production query optimization
+// lives in the DynamoDB store's server-side FilterExpression.
+func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]*Run, error) {
+	query := `SELECT id, repo, ticket, branch, workflow, provider,
+		instance_id, metadata, labels, status, exit_code, launched_by,
+		started_at, completed_at, timeout_at, total_cost_usd
+		FROM runs WHERE repo = ?`
+	args := []any{filter.Repo}
+
+	if filter.Since != nil {
+		query += " AND started_at >= ?"
+		args = append(args, filter.Since.UTC().Format(time.RFC3339))
+	}
+	if filter.Until != nil {
+		query += " AND started_at <= ?"
+		args = append(args, filter.Until.UTC().Format(time.RFC3339))
+	}
+	query += " ORDER BY started_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing runs: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]*Run, 0)
+	for rows.Next() {
+		run, err := s.scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("listing runs: %w", err)
+		}
+		if matchesFilter(run, filter) {
+			runs = append(runs, run)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing runs: %w", err)
+	}
+	return runs, nil
+}
+
 func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, status, exit_code, launched_by,
+			instance_id, metadata, labels, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd
 		FROM runs WHERE repo = ? AND ticket = ? AND status IN (?, ?)
 		ORDER BY started_at DESC`,
@@ -350,7 +466,7 @@ func (s *SQLiteStore) CountActive(ctx context.Context) (int, error) {
 func (s *SQLiteStore) ListActive(ctx context.Context) ([]*Run, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, repo, ticket, branch, workflow, provider,
-			instance_id, metadata, status, exit_code, launched_by,
+			instance_id, metadata, labels, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd
 		FROM runs WHERE status IN (?, ?)
 		ORDER BY started_at DESC`,

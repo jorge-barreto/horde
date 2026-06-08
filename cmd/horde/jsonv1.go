@@ -38,22 +38,32 @@ func errorEnvelopeV1(err error) ErrorV1 {
 }
 
 type StatusV1 struct {
-	ID           string   `json:"id"`
-	Ticket       string   `json:"ticket"`
-	Workflow     string   `json:"workflow,omitempty"`
-	Branch       string   `json:"branch"`
-	Status       string   `json:"status"`
-	InstanceID   string   `json:"instance_id,omitempty"`
-	ExitCode     *int     `json:"exit_code,omitempty"`
-	DurationSecs float64  `json:"duration_seconds"`
-	TotalCostUSD *float64 `json:"total_cost_usd,omitempty"`
-	LaunchedBy   string   `json:"launched_by"`
-	StartedAt    string   `json:"started_at"`
-	CompletedAt  string   `json:"completed_at,omitempty"`
+	ID           string            `json:"id"`
+	Ticket       string            `json:"ticket"`
+	Workflow     string            `json:"workflow,omitempty"`
+	Branch       string            `json:"branch"`
+	Status       string            `json:"status"`
+	InstanceID   string            `json:"instance_id,omitempty"`
+	ExitCode     *int              `json:"exit_code,omitempty"`
+	DurationSecs float64           `json:"duration_seconds"`
+	TotalCostUSD *float64          `json:"total_cost_usd,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	LaunchedBy   string            `json:"launched_by"`
+	StartedAt    string            `json:"started_at"`
+	CompletedAt  string            `json:"completed_at,omitempty"`
 }
 
 type ListV1 struct {
-	Runs []ListRunV1 `json:"runs"`
+	Runs    []ListRunV1 `json:"runs"`
+	Summary ListSummary `json:"summary"`
+}
+
+// ListSummary aggregates the filtered result set so a label cohort's spend is
+// readable without client-side summing. Always present (even for an empty
+// result) so the shape is stable.
+type ListSummary struct {
+	Count        int     `json:"count"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
 }
 
 // ListRunV1 is the per-run subset of StatusV1: it carries every field
@@ -62,18 +72,19 @@ type ListV1 struct {
 // or timestamps. DurationSecs is non-pointer because horde always knows the
 // wall-clock duration of a run it recorded.
 type ListRunV1 struct {
-	ID           string   `json:"id"`
-	Ticket       string   `json:"ticket"`
-	Workflow     string   `json:"workflow,omitempty"`
-	Branch       string   `json:"branch"`
-	Status       string   `json:"status"`
-	InstanceID   string   `json:"instance_id,omitempty"`
-	ExitCode     *int     `json:"exit_code,omitempty"`
-	DurationSecs float64  `json:"duration_seconds"`
-	TotalCostUSD *float64 `json:"total_cost_usd,omitempty"`
-	LaunchedBy   string   `json:"launched_by"`
-	StartedAt    string   `json:"started_at"`
-	CompletedAt  string   `json:"completed_at,omitempty"`
+	ID           string            `json:"id"`
+	Ticket       string            `json:"ticket"`
+	Workflow     string            `json:"workflow,omitempty"`
+	Branch       string            `json:"branch"`
+	Status       string            `json:"status"`
+	InstanceID   string            `json:"instance_id,omitempty"`
+	ExitCode     *int              `json:"exit_code,omitempty"`
+	DurationSecs float64           `json:"duration_seconds"`
+	TotalCostUSD *float64          `json:"total_cost_usd,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	LaunchedBy   string            `json:"launched_by"`
+	StartedAt    string            `json:"started_at"`
+	CompletedAt  string            `json:"completed_at,omitempty"`
 }
 
 type ResultsV1 struct {
@@ -120,6 +131,7 @@ func statusToV1(run *store.Run) StatusV1 {
 		ExitCode:     run.ExitCode,
 		DurationSecs: d.Seconds(),
 		TotalCostUSD: run.TotalCostUSD,
+		Labels:       run.Labels,
 		LaunchedBy:   run.LaunchedBy,
 		StartedAt:    run.StartedAt.Format(time.RFC3339),
 	}
@@ -131,6 +143,7 @@ func statusToV1(run *store.Run) StatusV1 {
 
 func listToV1(runs []*store.Run) ListV1 {
 	items := make([]ListRunV1, len(runs))
+	var totalCost float64
 	for i, run := range runs {
 		// Derive from statusToV1 so list and status never drift on field
 		// values or timestamp formatting.
@@ -145,12 +158,22 @@ func listToV1(runs []*store.Run) ListV1 {
 			ExitCode:     s.ExitCode,
 			DurationSecs: s.DurationSecs,
 			TotalCostUSD: s.TotalCostUSD,
+			Labels:       s.Labels,
 			LaunchedBy:   s.LaunchedBy,
 			StartedAt:    s.StartedAt,
 			CompletedAt:  s.CompletedAt,
 		}
+		if run.TotalCostUSD != nil {
+			totalCost += *run.TotalCostUSD
+		}
 	}
-	return ListV1{Runs: items}
+	return ListV1{
+		Runs: items,
+		Summary: ListSummary{
+			Count:        len(runs),
+			TotalCostUSD: totalCost,
+		},
+	}
 }
 
 func fullResultsToV1(run *store.Run, result *fullRunResult) ResultsV1 {

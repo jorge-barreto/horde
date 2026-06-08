@@ -67,6 +67,12 @@ var topics = []Topic{
 		Summary: "Provision AWS infrastructure from your existing CDK app",
 		Content: topicCDK,
 	},
+	{
+		Name:    "labels",
+		Title:   "Run Labels and List Filtering",
+		Summary: "Tag runs with --label and filter/aggregate horde list",
+		Content: topicLabels,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -114,6 +120,15 @@ const topicQuickstart = `Quick Start
 
     horde list            # active runs (pending/running)
     horde list --all      # include terminal runs (success/failed/killed/timed_out/rate_limited)
+
+   Tag runs at launch and filter the list by those tags (and by status,
+   workflow, ticket, or time):
+
+    horde launch --workflow implement-ticket PROJ-123 --label epic=KS-100
+    horde list --label epic=KS-100 --all
+    horde list --status running --workflow qa-pr --since 24h
+
+   See 'horde docs labels' for the full filtering and cohort-cost story.
 
 Other useful commands:
 
@@ -1110,4 +1125,76 @@ Backend selection via HORDE_E2E_ECS_BACKEND:
 Cost: this stack runs its own NAT Gateway (~$32/mo idle) since it can't
 share infrastructure with the bootstrap CF stack. Always tear down when
 you're done.
+`
+
+const topicLabels = `Run Labels and List Filtering
+=============================
+
+Labels are key=value tags you attach to a run at launch. They describe the
+*dispatch* — which epic a run belongs to, which prompt variant it used, who
+fired it — things the run's work fields (ticket, workflow, branch) don't
+capture. They are separate from horde's internal provider metadata, so your
+keys never collide with reserved ones.
+
+Setting labels
+--------------
+
+    horde launch --workflow implement-ticket PROJ-123 \
+      --label epic=KS-100 --label variant=v3
+
+  - --label is repeatable; pass it once per tag.
+  - Split on the first '=', so values may contain '=' (e.g. note=a=b).
+  - Keys: letters, digits, and . _ - only, up to 64 chars.
+  - Values: any text, up to 256 chars.
+  - Labels are set once at launch. 'horde retry' keeps the original run's
+    labels (it reuses the same run record).
+
+Filtering the list
+------------------
+
+'horde list' is scoped to the current repo and accepts these filters, all
+AND-combined (a run must match every one you pass):
+
+    --label key=value   only runs carrying this label (repeatable)
+    --status <status>    pending | running | success | failed | killed |
+                         timed_out | rate_limited (repeatable). Passing
+                         --status also includes terminal runs, like --all.
+    --workflow <name>    only runs of this workflow
+    --ticket <id>        only runs for this ticket
+    --since <when>       only runs started at/after <when>
+    --until <when>       only runs started at/before <when>
+
+<when> is an RFC3339 timestamp (2026-04-01 or 2026-04-01T12:00:00Z) or a
+duration-ago: 30m, 1h, 7d.
+
+Examples:
+
+    horde list --label epic=KS-100 --all
+    horde list --status running --status pending
+    horde list --workflow qa-pr --since 24h
+    horde list --label epic=KS-100 --label variant=v3 --all
+
+Reading labels back
+-------------------
+
+'horde status <run-id>' shows a Labels: line when a run has labels.
+'horde list --json' and 'horde status --json' include a "labels" object on
+each run (omitted when empty).
+
+Cohort cost
+-----------
+
+'horde list --json' includes a "summary" object aggregating the filtered
+result set:
+
+    {
+      "runs": [ ... ],
+      "summary": { "count": 12, "total_cost_usd": 4.82 }
+    }
+
+So a label cohort's spend is one command away — no client-side summing:
+
+    horde list --all --label epic=KS-100 --json | jq .summary
+
+The human table prints the same as a trailing "12 runs, $4.82 total" line.
 `

@@ -80,14 +80,14 @@ func (s Status) IsTerminal() bool {
 }
 
 type Run struct {
-	ID           string
-	Repo         string
-	Ticket       string
-	Branch       string
-	Workflow     string
-	Provider     string
-	InstanceID   string
-	Metadata     map[string]string
+	ID         string
+	Repo       string
+	Ticket     string
+	Branch     string
+	Workflow   string
+	Provider   string
+	InstanceID string
+	Metadata   map[string]string
 	// Labels are user-supplied key/value tags set once at launch (via
 	// `horde launch --label k=v`) and queried via `horde list` filters. They
 	// are deliberately separate from Metadata: Metadata holds provider-internal

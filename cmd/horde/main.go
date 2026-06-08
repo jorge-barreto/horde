@@ -24,6 +24,7 @@ import (
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/docs"
+	"github.com/jorge-barreto/horde/internal/event"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/runid"
 	"github.com/jorge-barreto/horde/internal/store"
@@ -413,6 +414,17 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Metadata:   result.Metadata,
 			}); err != nil {
 				return fmt.Errorf("updating run status: %w", err)
+			}
+
+			// Emit run.started (best-effort: a failed emit warns, never fails
+			// the launch). On ECS this PutEvents to the bus; on docker it is a
+			// no-op. Reflect the running transition on the in-memory run so the
+			// event Detail carries status/instance_id.
+			run.Status = store.StatusRunning
+			run.InstanceID = result.InstanceID
+			run.Metadata = result.Metadata
+			if err := newEmitter(awsCfg, hordeCfg).Emit(ctx, event.TypeRunStarted, event.DetailFromRun(run)); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: emitting run.started: %v\n", err)
 			}
 
 			if jsonOut {
@@ -1698,6 +1710,16 @@ func newResolver(cmd *cli.Command) *config.Resolver {
 		SSMOverride:    cmd.String("ssm-path"),
 		Dir:            cwd,
 	}
+}
+
+// newEmitter returns an EventBridge emitter when the deployment configures a
+// bus (ECS), else a no-op (docker, or pre-bus deployments). Emission is always
+// best-effort at the call site — a nil/zero config never blocks a command.
+func newEmitter(awsCfg *aws.Config, hordeCfg *config.HordeConfig) event.Emitter {
+	if awsCfg != nil && hordeCfg != nil && hordeCfg.EventBusName != "" {
+		return event.NewEventBridgeEmitter(*awsCfg, hordeCfg.EventBusName)
+	}
+	return event.NopEmitter{}
 }
 
 // initProviderAndStore creates the Provider and Store based on the --provider flag.

@@ -36,7 +36,10 @@ func (s *stubStore) FindActiveByTicket(_ context.Context, _, _, _ string) ([]*st
 }
 func (s *stubStore) CountActive(_ context.Context) (int, error)         { return 0, nil }
 func (s *stubStore) ListActive(_ context.Context) ([]*store.Run, error) { return nil, nil }
-func (s *stubStore) Close() error                                       { return nil }
+func (s *stubStore) ClaimNextQueued(_ context.Context, _ string) (*store.Run, error) {
+	return nil, nil
+}
+func (s *stubStore) Close() error { return nil }
 
 type fakeSSMClient struct {
 	output *ssm.GetParameterOutput

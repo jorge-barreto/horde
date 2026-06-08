@@ -147,7 +147,7 @@ kill some runs before launching more.`,
 			&cli.StringSliceFlag{
 				Name:    "env",
 				Aliases: []string{"e"},
-				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see `horde docs config` for the ECS caveat). Applies to launch only — `horde retry` does not carry it forward.",
+				Usage:   "Set a per-launch env var (KEY=VALUE); repeatable. Overrides project secrets of the same key on docker (see 'horde docs config' for the ECS caveat). Applies to launch only; 'horde retry' does not carry it forward.",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {

@@ -154,14 +154,22 @@ func newerVersionNote(ctx context.Context) string {
 	return fmt.Sprintf("A newer horde is available: %s (run 'horde update').", latest)
 }
 
+// versionString is the shared version descriptor: "<version> (<commit>, built <date>)".
+// urfave/cli renders the --version flag as "horde version " + versionString(); the
+// `version` subcommand prints "horde version " + versionString() itself. Single
+// source so the two can never drift.
+func versionString() string {
+	return fmt.Sprintf("%s (%s, built %s)", version, commit, buildDate)
+}
+
 func versionCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "version",
 		Usage: "Print the horde version (and note any available update)",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			fmt.Printf("horde version %s (%s, built %s)\n", version, commit, buildDate)
+			fmt.Fprintf(cmd.Writer, "horde version %s\n", versionString())
 			if note := newerVersionNote(ctx); note != "" {
-				fmt.Println(note)
+				fmt.Fprintln(cmd.Writer, note)
 			}
 			return nil
 		},

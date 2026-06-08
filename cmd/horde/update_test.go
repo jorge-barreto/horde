@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +58,32 @@ func TestNewerVersionNoteRespectsCIGuard(t *testing.T) {
 	t.Setenv("CI", "1")
 	if note := newerVersionNote(context.Background()); note != "" {
 		t.Errorf("expected no note under CI guard, got %q", note)
+	}
+}
+
+// TestVersionSubcommandMatchesFlag pins the `version` subcommand's version line
+// to exactly what the --version flag would print. urfave renders the flag as
+// "horde version " + the Version field (which is versionString()), so the two
+// share one source and can never drift.
+func TestVersionSubcommandMatchesFlag(t *testing.T) {
+	origV, origC, origD := version, commit, buildDate
+	t.Cleanup(func() { version, commit, buildDate = origV, origC, origD })
+	// Guard the network note off so we only compare the version line.
+	t.Setenv("HORDE_NO_UPDATE_CHECK", "1")
+
+	version, commit, buildDate = "v9.9.9", "deadbee", "2026-01-02T03:04:05Z"
+
+	// The flag renders as "horde version " + Version field.
+	flagLine := "horde version " + versionString()
+
+	app := newApp()
+	var buf bytes.Buffer
+	setOutputs(app, &buf)
+	if err := app.Run(context.Background(), []string{"horde", "version"}); err != nil {
+		t.Fatalf("running version subcommand: %v", err)
+	}
+	got := strings.TrimRight(buf.String(), "\n")
+	if got != flagLine {
+		t.Fatalf("version subcommand line mismatch:\n  subcmd: %q\n  flag:   %q", got, flagLine)
 	}
 }

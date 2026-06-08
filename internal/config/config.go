@@ -54,8 +54,46 @@ func NormalizeRepoURL(rawURL string) (string, error) {
 	return normalized, nil
 }
 
+// CanonicalRepo normalizes a raw git remote URL to "host/path" via
+// NormalizeRepoURL, then strips a trailing ".git" suffix and lowercases the
+// result. This produces a stable bucket key that is identical regardless of
+// the launch surface: dev clones (".../repo.git"), CI checkouts (".../repo"),
+// SSH vs HTTPS, and mixed-case hosts all collapse to one value.
+//
+// Only a trailing ".git" is stripped, so a repo legitimately named "dotgit"
+// (path ".../dotgit") is preserved. Input already in "host/path" form (e.g. a
+// --repo override) is accepted as-is.
+func CanonicalRepo(rawURL string) (string, error) {
+	normalized, err := NormalizeRepoURL(rawURL)
+	if err != nil {
+		// Accept input already in "host/path" form (e.g. a --repo override
+		// supplied as "github.com/org/repo"). NormalizeRepoURL only handles
+		// inputs with a scheme or scp-style "git@host:" prefix. Trim a trailing
+		// slash first so it collapses with the scheme path (which already does)
+		// — otherwise "github.com/org/repo/" would key differently.
+		trimmed := strings.TrimSuffix(strings.TrimSpace(rawURL), "/")
+		if !IsAlreadyNormalized(trimmed) {
+			return "", err
+		}
+		normalized = trimmed
+	}
+	normalized = strings.TrimSuffix(normalized, ".git")
+	return strings.ToLower(normalized), nil
+}
+
+// IsAlreadyNormalized reports whether s looks like the "host/path" output of
+// NormalizeRepoURL (no scheme, no scp-style userinfo, at least one "/", and a
+// non-empty host segment).
+func IsAlreadyNormalized(s string) bool {
+	if strings.Contains(s, "://") || strings.Contains(s, "@") {
+		return false
+	}
+	slash := strings.Index(s, "/")
+	return slash > 0 && slash < len(s)-1
+}
+
 // RepoURL runs "git remote get-url origin" in the given directory
-// and normalizes the result via NormalizeRepoURL.
+// and canonicalizes the result via CanonicalRepo.
 func RepoURL(dir string) (string, error) {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
 	cmd.Dir = dir
@@ -75,7 +113,7 @@ func RepoURL(dir string) (string, error) {
 		return "", fmt.Errorf("running git: %w", err)
 	}
 	raw := strings.TrimSpace(string(out))
-	return NormalizeRepoURL(raw)
+	return CanonicalRepo(raw)
 }
 
 // LaunchedBy returns the current user's identity for run records.

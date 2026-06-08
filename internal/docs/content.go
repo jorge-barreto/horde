@@ -279,6 +279,42 @@ Per-launch env vars (--env)
     on the run record, so 'horde retry' does not carry them forward — pass
     --env again on a fresh launch if a resumed run needs them.
 
+Discovery overrides (running without a checkout)
+------------------------------------------------
+
+    By default horde discovers identity and config from the working
+    directory: the repo URL from 'git remote get-url origin', and config
+    from .horde/config.yaml. Programmatic callers without a checkout
+    (a Lambda, a CI runner outside the repo, a webhook handler) can
+    override each step. Precedence is flag > env var > discovery > error:
+
+        --repo / HORDE_REPO_URL        Canonical repo identifier. Skips git
+                                       discovery entirely. Accepts a full URL
+                                       (https://github.com/org/repo.git,
+                                       git@github.com:org/repo) or a bare
+                                       host/path (github.com/org/repo). It is
+                                       canonicalized the same way as a git
+                                       remote, so a trailing .git, the scheme,
+                                       and case do not change the bucket key.
+
+        --config / HORDE_CONFIG_PATH   Path to the project config — either a
+                                       .horde/config.yaml file directly, or a
+                                       directory containing .horde/config.yaml.
+                                       The .env file (docker secret source) and
+                                       relative mount host-paths resolve against
+                                       this location's directory (the file's
+                                       parent, or the directory itself).
+
+        --ssm-path / HORDE_SSM_PATH    SSM parameter path for the aws-ecs
+                                       config. Overrides the slug-derived
+                                       default (/horde/<slug>/config).
+
+    With --repo (or HORDE_REPO_URL) set, 'horde launch' never touches git or
+    the filesystem for identity and will not error "not a git repository"
+    from an empty directory. On aws-ecs the canonical repo still comes from
+    the deployment's SSM config (the 'repo' field) regardless of --repo, so
+    all run history for a deployment shares one bucket.
+
 File Location
 -------------
 

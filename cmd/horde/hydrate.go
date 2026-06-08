@@ -154,9 +154,15 @@ successful runs are still materialized.`,
 			profile := cmd.String("profile")
 			provFlag := cmd.String("provider")
 
+			// Layer the flag/env-aware resolver onto the (possibly stubbed)
+			// deps so --ssm-path / --repo / HORDE_* are honored when hydrating
+			// an ECS run. deps is frozen at command-registration time, before
+			// cmd exists, so the resolver can only be built here.
+			runDeps := deps.withResolver(newResolver(cmd))
+
 			outcomes := make([]hydrateOutcome, 0, len(runIDs))
 			for _, runID := range runIDs {
-				outcomes = append(outcomes, hydrateOne(ctx, deps, provFlag, profile, runID, into))
+				outcomes = append(outcomes, hydrateOne(ctx, runDeps, provFlag, profile, runID, into))
 			}
 
 			if cmd.Bool("json") {

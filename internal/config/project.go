@@ -18,7 +18,12 @@ type ProjectConfig struct {
 // LoadProjectConfig reads .horde/config.yaml from dir.
 // Returns an empty config (not an error) if the file doesn't exist.
 func LoadProjectConfig(dir string) (*ProjectConfig, error) {
-	path := filepath.Join(dir, ".horde", "config.yaml")
+	return loadProjectConfigFile(filepath.Join(dir, ".horde", "config.yaml"))
+}
+
+// loadProjectConfigFile reads a project config from an explicit file path.
+// Returns an empty config (not an error) if the file doesn't exist.
+func loadProjectConfigFile(path string) (*ProjectConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

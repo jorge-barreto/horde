@@ -6,7 +6,7 @@ orc is a deterministic agent orchestrator that runs workflows locally. horde is 
 
 horde is project-agnostic: any repo with an `.orc/` directory is deployable. The workflow config IS the deployment spec.
 
-Git is a hard requirement — horde clones a repo to run orc against it. Running horde outside a git repository is an error. All commands are scoped to the current repo (inferred from `git remote get-url origin`).
+A repo identity is required — horde clones a repo to run orc against it, and all commands are scoped to the current repo. By default that identity is inferred from `git remote get-url origin`, so horde is normally run from inside a checkout; running outside one then is an error. Programmatic callers without a checkout can supply the identity (and config) explicitly via `--repo`/`HORDE_REPO_URL`, `--config`/`HORDE_CONFIG_PATH`, and `--ssm-path`/`HORDE_SSM_PATH` (precedence flag > env > discovery > error), in which case no git remote is needed. The repo identity is canonicalized (trailing `.git`, scheme, and case normalized) so one logical repo maps to one bucket of run history.
 
 ## Design Principles
 

@@ -255,6 +255,19 @@ All local data lives under `~/.horde/`:
   workerfiles/              # synced Docker build context
 ```
 
+## Releasing
+
+horde ships two independently-versioned artifacts on **distinct git tag prefixes**:
+
+| Artifact | Tag | How to cut a release |
+|----------|-----|----------------------|
+| `horde` CLI (Go binary) | `vX.Y.Z` | Push a plain semver tag: `git tag -a v0.5.0 -m "..." && git push origin v0.5.0`. GoReleaser builds the binaries, GitHub Release, checksums, and the Homebrew formula. |
+| `@horde.io/cdk` (npm) | `cdk-vX.Y.Z` | Bump `version` in `cdk/package.json` and merge to `main` — `tag-on-bump.yml` auto-pushes the `cdk-v<version>` tag, which publishes to npm. (npm reads the version from `package.json`; the tag is just the trigger.) |
+
+The two prefixes never collide (`v*` vs `cdk-v*`), so a CLI release can't trigger an npm publish or vice versa — a contract guarded by `cmd/horde/release_wiring_test.go`. The CLI tag must be plain semver (no `cli-v` prefix) so GoReleaser strips the leading `v` correctly. The pre-split tags `v0.2.0`–`v0.3.0` were old CDK releases; CLI versioning continues the `v*` line from `v0.4.0`.
+
+Requires repo secrets `RELEASE_TAG_PAT` (push the auto-tag) and `HOMEBREW_TAP_PAT` (push the formula to `jorge-barreto/homebrew-tap`).
+
 ## License
 
 MIT

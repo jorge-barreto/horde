@@ -553,9 +553,9 @@ func statusCmd() *cli.Command {
 		Name:      "status",
 		Usage:     "Show status of a run",
 		ArgsUsage: "<run-id>",
-		Description: `Shows run detail: ID, ticket, status, exit code, duration, cost, and
-who launched it. For running containers, reads live cost from the
-container. Also detects completed or timed-out runs and triggers
+		Description: `Shows run detail: ID, ticket, status, exit code, duration, cost,
+token usage, and who launched it. For running containers, reads live cost
+and token counts from the container. Also detects completed or timed-out runs and triggers
 result collection.`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
@@ -763,7 +763,7 @@ func resultsCmd() *cli.Command {
 		Usage:     "Show results of a run",
 		ArgsUsage: "<run-id>",
 		Description: `Displays the run's result summary from run-result.json: overall status,
-total cost, total duration, and a per-phase breakdown. Reports partial
+total cost, total duration, token usage, and a per-phase breakdown. Reports partial
 information if the result file is missing (e.g., orc crashed early).`,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			runID := cmd.Args().First()
@@ -1532,6 +1532,9 @@ func printRunStatus(run *store.Run) {
 	} else {
 		fmt.Printf("Cost:        -\n")
 	}
+	if run.Tokens != nil {
+		fmt.Printf("Tokens:      %s\n", formatTokens(run.Tokens))
+	}
 	fmt.Printf("Launched by: %s\n", run.LaunchedBy)
 	if len(run.Labels) > 0 {
 		fmt.Printf("Labels:      %s\n", formatLabels(run.Labels))
@@ -1542,6 +1545,16 @@ func printRunStatus(run *store.Run) {
 			fmt.Printf("Workspace:   %s\n", wsDir)
 		}
 	}
+}
+
+// formatTokens renders token usage as a compact one-line summary for the human
+// status/results output, e.g. "in 54791, out 87915, cache 9463873 (529692 write
+// / 8934181 read), 12 turns".
+func formatTokens(t *store.TokenUsage) string {
+	return fmt.Sprintf("in %d, out %d, cache %d (%d write / %d read), %d turns",
+		t.InputTokens, t.OutputTokens,
+		t.CacheCreationTokens+t.CacheReadTokens, t.CacheCreationTokens, t.CacheReadTokens,
+		t.Turns)
 }
 
 // formatLabels renders a label map as "k=v, k2=v2" with keys sorted for stable,
@@ -1568,6 +1581,9 @@ func printFullResults(run *store.Run, result *fullRunResult) {
 	fmt.Printf("Status:         %s\n", run.Status)
 	if result.TotalCostUSD != nil {
 		fmt.Printf("Total Cost:     $%.2f\n", *result.TotalCostUSD)
+	}
+	if run.Tokens != nil {
+		fmt.Printf("Total Tokens:   %s\n", formatTokens(run.Tokens))
 	}
 	fmt.Printf("Total Duration: %s\n", result.TotalDuration)
 

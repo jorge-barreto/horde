@@ -128,10 +128,13 @@ Example `horde status --json` output:
   "status": "running",
   "instance_id": "arn:aws:ecs:us-east-1:123456789012:task/horde-acme-widgets/abc123",
   "duration_seconds": 42.7,
+  "tokens": { "input": 54791, "output": 87915, "cache_creation": 529692, "cache_read": 8934181, "turns": 12 },
   "launched_by": "you@example.com",
   "started_at": "2026-04-20T14:02:17Z"
 }
 ```
+
+The `tokens` object (also on `horde list --json` per-run and `horde results --json`) reports per-run token usage; it is omitted when horde has no token data yet. `horde list --json` sums it into `summary.tokens`, so an orchestrator can derive a token burn rate over any window from one query. Docker reports tokens live during a run; ECS reports them at finalize.
 
 ### Programmatic launches (`--json`)
 
@@ -190,7 +193,7 @@ horde list --all --json           # JSON output for scripting
 horde list --label epic=KS-100              # runs tagged epic=KS-100
 horde list --status running --status pending # by status (repeatable)
 horde list --workflow qa-pr --since 24h      # qa-pr runs in the last 24h
-horde list --all --label epic=KS-100 --json  # cohort + summary{count,total_cost_usd}
+horde list --all --label epic=KS-100 --json  # cohort + summary{count,total_cost_usd,tokens}
 
 # Results
 horde results <run-id>

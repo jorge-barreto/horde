@@ -27,6 +27,23 @@ import (
 // Must match the name set by the @horde.io/cdk construct.
 const containerName = "horde-worker"
 
+// workerContainer returns the worker container from an ECS task's container
+// list, identified by name so a sidecar (#7) is never mistaken for the worker
+// when the response order varies. Falls back to the first container for legacy
+// single-container tasks whose response omits the name. Returns nil for an
+// empty list.
+func workerContainer(containers []ecstypes.Container) *ecstypes.Container {
+	for i := range containers {
+		if containers[i].Name != nil && *containers[i].Name == containerName {
+			return &containers[i]
+		}
+	}
+	if len(containers) > 0 {
+		return &containers[0]
+	}
+	return nil
+}
+
 // maxConsecutiveDescribeFailures is the number of consecutive DescribeTasks
 // errors tolerated in follow mode before stopping the log poll loop.
 const maxConsecutiveDescribeFailures = 5
@@ -307,8 +324,13 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 		status.FinishedAt = task.StoppedAt
 	}
 
-	if len(task.Containers) > 0 && task.Containers[0].ExitCode != nil {
-		exitCode := int(*task.Containers[0].ExitCode)
+	// Status is the WORKER container's exit code, not the task's. With sidecars
+	// in the task def the container order is not guaranteed, so find the worker
+	// by name; fall back to the first container for legacy single-container
+	// tasks whose response omits the name. Mirrors the status Lambdas
+	// (cdk/src/status-lambda/index.ts and the bootstrap template's Python port).
+	if worker := workerContainer(task.Containers); worker != nil && worker.ExitCode != nil {
+		exitCode := int(*worker.ExitCode)
 		status.ExitCode = &exitCode
 	}
 

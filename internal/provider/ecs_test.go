@@ -686,6 +686,67 @@ func TestECSProvider_Status_StoppedNonZeroExit(t *testing.T) {
 	}
 }
 
+// TestECSProvider_Status_SidecarExitIgnored guards the lazy-reconciliation
+// path against sidecar containers (#7). The ECS DescribeTasks container order
+// is not guaranteed, so Status must read the WORKER container's exit code by
+// name, not containers[0] — otherwise Finalize() would record a sidecar's
+// exit (e.g. 137 when a non-essential sidecar is killed) as the run status,
+// the same corruption the status Lambdas were fixed to avoid.
+func TestECSProvider_Status_SidecarExitIgnored(t *testing.T) {
+	t.Parallel()
+	sidecarExit := int32(137) // killed when the essential worker exited
+	workerExit := int32(0)
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{
+					LastStatus: aws.String("STOPPED"),
+					Containers: []ecstypes.Container{
+						{Name: aws.String("postgres"), ExitCode: &sidecarExit},
+						{Name: aws.String(containerName), ExitCode: &workerExit},
+					},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %v, want 0 (the worker's exit, not the sidecar's 137)", result.ExitCode)
+	}
+}
+
+// TestECSProvider_Status_NoWorkerNameFallback confirms the fallback for legacy
+// single-container tasks whose event omits the container name: read the first
+// container, preserving the pre-sidecar behavior.
+func TestECSProvider_Status_NoWorkerNameFallback(t *testing.T) {
+	t.Parallel()
+	exitCode := int32(0)
+	fake := &fakeECSClient{
+		describeTasksOutput: &ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
+				{
+					LastStatus: aws.String("STOPPED"),
+					Containers: []ecstypes.Container{
+						{ExitCode: &exitCode}, // no Name
+					},
+				},
+			},
+		},
+	}
+	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+	result, err := p.Status(context.Background(), "task-arn")
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %v, want 0 (fallback to first container)", result.ExitCode)
+	}
+}
+
 func TestECSProvider_Status_Provisioning(t *testing.T) {
 	t.Parallel()
 	fake := &fakeECSClient{

@@ -1,0 +1,24 @@
+name: horde-test
+ticket-pattern: 'TEST-[\w-]+'
+# Probes a Postgres sidecar on localhost:5432 to prove sidecar support (#7):
+# the worker shares the task's network namespace and reaches the sidecar on
+# localhost. Uses bash's /dev/tcp so no postgres client is needed in the image.
+# Retries because the sidecar may still be starting. Exits 0 on reach, 1 if the
+# sidecar never comes up within the window.
+phases:
+  - name: run
+    type: script
+    run: |
+      set -u
+      for i in $(seq 1 30); do
+        if (exec 3<>/dev/tcp/localhost/5432) 2>/dev/null; then
+          exec 3>&- 2>/dev/null || true
+          echo "postgres-probe: reached localhost:5432 on attempt $i"
+          exit 0
+        fi
+        echo "postgres-probe: attempt $i — localhost:5432 not ready, retrying"
+        sleep 2
+      done
+      echo "postgres-probe: localhost:5432 never became reachable" >&2
+      exit 1
+    timeout: 3

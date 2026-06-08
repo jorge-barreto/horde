@@ -312,7 +312,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				return err
 			}
 
-			active, err := st.FindActiveByTicket(ctx, repo, ticket)
+			active, err := st.FindActiveByTicket(ctx, repo, ticket, workflow)
 			if err != nil {
 				return fmt.Errorf("checking active runs: %w", err)
 			}

@@ -523,6 +523,7 @@ func TestLaunch_DuplicateTicket_NoForce(t *testing.T) {
 		ID:         "existingrunid",
 		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
+		Workflow:   "test-flow",
 		Status:     store.StatusRunning,
 		Provider:   "docker",
 		LaunchedBy: "someone",
@@ -571,6 +572,7 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 		ID:         "existingrunid",
 		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
+		Workflow:   "test-flow",
 		Status:     store.StatusRunning,
 		Provider:   "docker",
 		LaunchedBy: "someone",
@@ -5285,7 +5287,8 @@ func TestLaunch_JSON_Duplicate(t *testing.T) {
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
 		ID: "existingrunid", Repo: "github.com/test/repo", Ticket: "TICKET-1",
-		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
+		Workflow: "implement-ticket",
+		Status:   store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
 		StartedAt: now, TimeoutAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("pre-creating run: %v", err)
@@ -5408,7 +5411,8 @@ func TestLaunch_HumanDuplicate_StillExits1(t *testing.T) {
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
 		ID: "existingrunid", Repo: "github.com/test/repo", Ticket: "TICKET-1",
-		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
+		Workflow: "implement-ticket",
+		Status:   store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
 		StartedAt: now, TimeoutAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("pre-creating run: %v", err)

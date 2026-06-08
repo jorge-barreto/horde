@@ -1191,7 +1191,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			}
 		}
 
-		results, err := s.FindActiveByTicket(ctx, repo, ticket)
+		results, err := s.FindActiveByTicket(ctx, repo, ticket, "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1217,7 +1217,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Fatalf("CreateRun: %v", err)
 		}
 
-		results, err := s.FindActiveByTicket(ctx, repo, ticket)
+		results, err := s.FindActiveByTicket(ctx, repo, ticket, "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1239,7 +1239,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Fatalf("CreateRun: %v", err)
 		}
 
-		results, err := s.FindActiveByTicket(ctx, "github.com/org/repo", ticket)
+		results, err := s.FindActiveByTicket(ctx, "github.com/org/repo", ticket, "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1636,7 +1636,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		check("ListRuns", listRuns)
 
-		byTicket, err := s.FindActiveByTicket(ctx, repo, "TOK-1")
+		byTicket, err := s.FindActiveByTicket(ctx, repo, "TOK-1", "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}

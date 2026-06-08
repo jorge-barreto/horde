@@ -222,7 +222,12 @@ type Store interface {
 	// by started_at descending (newest first). It is the general-purpose query
 	// behind `horde list`; ListByRepo is the active-only/all special case.
 	ListRuns(ctx context.Context, filter RunFilter) ([]*Run, error)
-	FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
+	// FindActiveByTicket returns active runs for the given repo + ticket +
+	// workflow. "Active" here means a slot is, or is about to be, consumed:
+	// pending, running, OR queued. Scope includes workflow because the same
+	// ticket under a different workflow is a legitimately different run (#20),
+	// so duplicate-launch protection must not collide across workflows.
+	FindActiveByTicket(ctx context.Context, repo, ticket, workflow string) ([]*Run, error)
 	CountActive(ctx context.Context) (int, error)
 	// ListActive returns all runs in pending or running status across every
 	// repo, sorted by started_at descending (newest first). The pending /

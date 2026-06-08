@@ -515,12 +515,12 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter RunFilter) ([]*Run, e
 	return runs, nil
 }
 
-func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
+func (s *SQLiteStore) FindActiveByTicket(ctx context.Context, repo, ticket, workflow string) ([]*Run, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+runColumns+`
-		FROM runs WHERE repo = ? AND ticket = ? AND status IN (?, ?)
+		FROM runs WHERE repo = ? AND ticket = ? AND workflow = ? AND status IN (?, ?, ?)
 		ORDER BY started_at DESC`,
-		repo, ticket, string(StatusPending), string(StatusRunning))
+		repo, ticket, workflow, string(StatusPending), string(StatusRunning), string(StatusQueued))
 	if err != nil {
 		return nil, fmt.Errorf("finding active runs by ticket: %w", err)
 	}

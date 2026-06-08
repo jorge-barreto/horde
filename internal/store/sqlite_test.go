@@ -1016,7 +1016,7 @@ func TestSQLiteStore_FindActiveByTicket_Match(t *testing.T) {
 		}
 	}
 
-	results, err := s.FindActiveByTicket(ctx, repo, ticket)
+	results, err := s.FindActiveByTicket(ctx, repo, ticket, "default")
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestSQLiteStore_FindActiveByTicket_NoMatch(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := s.FindActiveByTicket(ctx, run.Repo, run.Ticket)
+	results, err := s.FindActiveByTicket(ctx, run.Repo, run.Ticket, "default")
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
@@ -1075,7 +1075,7 @@ func TestSQLiteStore_FindActiveByTicket_RepoMismatch(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := s.FindActiveByTicket(ctx, "github.com/org/repo.git", "PROJ-42")
+	results, err := s.FindActiveByTicket(ctx, "github.com/org/repo.git", "PROJ-42", "default")
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
@@ -1216,5 +1216,32 @@ func TestSQLiteEnqueuedFieldsRoundTrip(t *testing.T) {
 	}
 	if !got.EnqueuedAt.Equal(enq) {
 		t.Errorf("enqueued_at = %v, want %v", got.EnqueuedAt, enq)
+	}
+}
+
+func TestFindActiveByTicketWorkflowScoped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().Truncate(time.Second)
+	for _, r := range []*Run{
+		{ID: "a", Repo: "r", Ticket: "T-1", Workflow: "plan", Provider: "aws-ecs", Status: StatusRunning, LaunchedBy: "me", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "b", Repo: "r", Ticket: "T-1", Workflow: "impl", Provider: "aws-ecs", Status: StatusRunning, LaunchedBy: "me", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+	} {
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.FindActiveByTicket(ctx, "r", "T-1", "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "a" {
+		t.Fatalf("want only run a (workflow plan), got %+v", got)
 	}
 }

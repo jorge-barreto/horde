@@ -1387,7 +1387,7 @@ func TestDynamoStore_FindActiveByTicket_Success(t *testing.T) {
 		},
 	}
 	store := newTestDynamoStore(mock, "runs-table")
-	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1", "ci")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1397,14 +1397,24 @@ func TestDynamoStore_FindActiveByTicket_Success(t *testing.T) {
 	if capturedInput == nil {
 		t.Fatal("queryFunc was not called")
 	}
+	if capturedInput.ExpressionAttributeNames["#wf"] != AttrWorkflow {
+		t.Errorf("ExpressionAttributeNames[#wf] = %q, want %q", capturedInput.ExpressionAttributeNames["#wf"], AttrWorkflow)
+	}
+	if wfVal, ok := capturedInput.ExpressionAttributeValues[":wf"].(*types.AttributeValueMemberS); !ok || wfVal.Value != "ci" {
+		t.Errorf("ExpressionAttributeValues[:wf] = %v, want S{ci}", capturedInput.ExpressionAttributeValues[":wf"])
+	}
+	if qVal, ok := capturedInput.ExpressionAttributeValues[":queued"].(*types.AttributeValueMemberS); !ok || qVal.Value != "queued" {
+		t.Errorf("ExpressionAttributeValues[:queued] = %v, want S{queued}", capturedInput.ExpressionAttributeValues[":queued"])
+	}
 	if *capturedInput.IndexName != GSIByTicket {
 		t.Errorf("IndexName = %q, want %q", *capturedInput.IndexName, GSIByTicket)
 	}
 	if *capturedInput.KeyConditionExpression != "#ticket = :ticket" {
 		t.Errorf("KeyConditionExpression = %q, want %q", *capturedInput.KeyConditionExpression, "#ticket = :ticket")
 	}
-	if *capturedInput.FilterExpression != "#repo = :repo AND #st IN (:pending, :running)" {
-		t.Errorf("FilterExpression = %q, want %q", *capturedInput.FilterExpression, "#repo = :repo AND #st IN (:pending, :running)")
+	wantFilter := "#repo = :repo AND #wf = :wf AND #st IN (:pending, :running, :queued)"
+	if *capturedInput.FilterExpression != wantFilter {
+		t.Errorf("FilterExpression = %q, want %q", *capturedInput.FilterExpression, wantFilter)
 	}
 	if *capturedInput.ScanIndexForward != false {
 		t.Errorf("ScanIndexForward = %v, want false", *capturedInput.ScanIndexForward)
@@ -1447,7 +1457,7 @@ func TestDynamoStore_FindActiveByTicket_EmptyResult(t *testing.T) {
 		},
 	}
 	store := newTestDynamoStore(mock, "runs-table")
-	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1467,7 +1477,7 @@ func TestDynamoStore_FindActiveByTicket_QueryError(t *testing.T) {
 		},
 	}
 	store := newTestDynamoStore(mock, "runs-table")
-	_, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	_, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1", "default")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1489,7 +1499,7 @@ func TestDynamoStore_FindActiveByTicket_ParseError(t *testing.T) {
 		},
 	}
 	store := newTestDynamoStore(mock, "runs-table")
-	_, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	_, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1", "default")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1524,7 +1534,7 @@ func TestDynamoStore_FindActiveByTicket_Pagination(t *testing.T) {
 		},
 	}
 	store := newTestDynamoStore(mock, "runs-table")
-	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1")
+	runs, err := store.FindActiveByTicket(context.Background(), "github.com/org/repo", "PROJ-1", "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -594,22 +594,28 @@ func (s *DynamoStore) ListByRepo(ctx context.Context, repo string, activeOnly bo
 	return runs, nil
 }
 
-func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
+func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo, ticket, workflow string) ([]*Run, error) {
+	// "workflow" is a DynamoDB reserved word; alias it. Active = a slot is or is
+	// about to be consumed: pending, running, OR queued (a queued run for the
+	// same (ticket, workflow) must block a duplicate enqueue).
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(s.tableName),
 		IndexName:              aws.String(GSIByTicket),
 		KeyConditionExpression: aws.String("#ticket = :ticket"),
-		FilterExpression:       aws.String("#repo = :repo AND #st IN (:pending, :running)"),
+		FilterExpression:       aws.String("#repo = :repo AND #wf = :wf AND #st IN (:pending, :running, :queued)"),
 		ExpressionAttributeNames: map[string]string{
 			"#ticket": AttrTicket,
 			"#repo":   AttrRepo,
+			"#wf":     AttrWorkflow,
 			"#st":     AttrStatus,
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":ticket":  &types.AttributeValueMemberS{Value: ticket},
 			":repo":    &types.AttributeValueMemberS{Value: repo},
+			":wf":      &types.AttributeValueMemberS{Value: workflow},
 			":pending": &types.AttributeValueMemberS{Value: string(StatusPending)},
 			":running": &types.AttributeValueMemberS{Value: string(StatusRunning)},
+			":queued":  &types.AttributeValueMemberS{Value: string(StatusQueued)},
 		},
 		ScanIndexForward: aws.Bool(false),
 	}

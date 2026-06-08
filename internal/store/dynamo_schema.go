@@ -23,6 +23,12 @@ const (
 	AttrCompletedAt  = "completed_at"
 	AttrTimeoutAt    = "timeout_at"
 	AttrTotalCostUSD = "total_cost_usd"
+
+	AttrInputTokens         = "input_tokens"
+	AttrOutputTokens        = "output_tokens"
+	AttrCacheCreationTokens = "cache_creation_tokens"
+	AttrCacheReadTokens     = "cache_read_tokens"
+	AttrTurns               = "turns"
 )
 
 // GSI name constants.

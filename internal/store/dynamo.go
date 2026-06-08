@@ -72,6 +72,13 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 	if run.TotalCostUSD != nil {
 		item[AttrTotalCostUSD] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(*run.TotalCostUSD, 'f', -1, 64)}
 	}
+	if run.Tokens != nil {
+		item[AttrInputTokens] = &types.AttributeValueMemberN{Value: strconv.Itoa(run.Tokens.InputTokens)}
+		item[AttrOutputTokens] = &types.AttributeValueMemberN{Value: strconv.Itoa(run.Tokens.OutputTokens)}
+		item[AttrCacheCreationTokens] = &types.AttributeValueMemberN{Value: strconv.Itoa(run.Tokens.CacheCreationTokens)}
+		item[AttrCacheReadTokens] = &types.AttributeValueMemberN{Value: strconv.Itoa(run.Tokens.CacheReadTokens)}
+		item[AttrTurns] = &types.AttributeValueMemberN{Value: strconv.Itoa(run.Tokens.Turns)}
+	}
 	if run.Metadata != nil {
 		metaMap := make(map[string]types.AttributeValue, len(run.Metadata))
 		for k, v := range run.Metadata {
@@ -218,6 +225,49 @@ func parseRun(item map[string]types.AttributeValue) (*Run, error) {
 		run.TotalCostUSD = &v
 	}
 
+	// Token counts: all five attributes are written together (or not at all)
+	// by CreateRun/UpdateRun, but parse each defensively. Presence of ANY of
+	// them yields a non-nil Tokens; a missing individual attribute reads as 0.
+	parseTokenAttr := func(name string) (int, bool, error) {
+		av, ok := item[name]
+		if !ok {
+			return 0, false, nil
+		}
+		nv, ok := av.(*types.AttributeValueMemberN)
+		if !ok {
+			return 0, false, fmt.Errorf("parsing run %q: invalid %q attribute", id, name)
+		}
+		v, err := strconv.Atoi(nv.Value)
+		if err != nil {
+			return 0, false, fmt.Errorf("parsing run %q: parsing %s: %w", id, name, err)
+		}
+		return v, true, nil
+	}
+	var tokens TokenUsage
+	var anyToken bool
+	for _, ta := range []struct {
+		name string
+		dst  *int
+	}{
+		{AttrInputTokens, &tokens.InputTokens},
+		{AttrOutputTokens, &tokens.OutputTokens},
+		{AttrCacheCreationTokens, &tokens.CacheCreationTokens},
+		{AttrCacheReadTokens, &tokens.CacheReadTokens},
+		{AttrTurns, &tokens.Turns},
+	} {
+		v, present, err := parseTokenAttr(ta.name)
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			anyToken = true
+			*ta.dst = v
+		}
+	}
+	if anyToken {
+		run.Tokens = &tokens
+	}
+
 	if av, ok := item[AttrMetadata]; ok {
 		mv, ok := av.(*types.AttributeValueMemberM)
 		if !ok {
@@ -306,6 +356,20 @@ func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 	if update.TotalCostUSD != nil {
 		setClauses = append(setClauses, "total_cost_usd = :cost")
 		exprAttrValues[":cost"] = &types.AttributeValueMemberN{Value: strconv.FormatFloat(*update.TotalCostUSD, 'f', -1, 64)}
+	}
+	if update.Tokens != nil {
+		setClauses = append(setClauses,
+			"input_tokens = :it",
+			"output_tokens = :ot",
+			"cache_creation_tokens = :cct",
+			"cache_read_tokens = :crt",
+			"turns = :tn",
+		)
+		exprAttrValues[":it"] = &types.AttributeValueMemberN{Value: strconv.Itoa(update.Tokens.InputTokens)}
+		exprAttrValues[":ot"] = &types.AttributeValueMemberN{Value: strconv.Itoa(update.Tokens.OutputTokens)}
+		exprAttrValues[":cct"] = &types.AttributeValueMemberN{Value: strconv.Itoa(update.Tokens.CacheCreationTokens)}
+		exprAttrValues[":crt"] = &types.AttributeValueMemberN{Value: strconv.Itoa(update.Tokens.CacheReadTokens)}
+		exprAttrValues[":tn"] = &types.AttributeValueMemberN{Value: strconv.Itoa(update.Tokens.Turns)}
 	}
 	if update.TimeoutAt != nil {
 		setClauses = append(setClauses, "timeout_at = :ta")

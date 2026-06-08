@@ -83,6 +83,14 @@ func (l *logReadCloser) Close() error {
 }
 
 func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResult, error) {
+	// RUN_ID is used to build the per-run workspace/sessions paths below;
+	// validate before any filepath.Join so it can't escape the workspace
+	// root. (Matches the ECS provider's guard.)
+	if opts.RunID != "" {
+		if err := ValidateRunID(opts.RunID); err != nil {
+			return nil, err
+		}
+	}
 	// Create persistent workspace and sessions directories and prepend them
 	// to mounts. Both dirs are per-run and persist across retries so orc can
 	// resume the workspace tree AND the agent's session history from
@@ -383,9 +391,19 @@ func (p *DockerProvider) ReadFile(ctx context.Context, opts ReadFileOpts) ([]byt
 }
 
 func mapExitCode(code int) store.Status {
+	// orc exit-code contract (ORC_CONTRACT_EXPECTATIONS.md):
+	//   0 success / 1 phase-failure / 2 phase-timeout / 3 setup-error
+	//   4 cost-limit / 5 signal (SIGINT/TERM/HUP) / 6 resume-failure
+	// Timeout (2) and cost/rate-limit (4) are terminal-but-recoverable: the
+	// run's sunk work is worth resuming once the transient condition clears,
+	// so they map to distinct statuses rather than the generic failure.
 	switch code {
 	case 0:
 		return store.StatusSuccess
+	case 2:
+		return store.StatusTimedOut
+	case 4:
+		return store.StatusRateLimited
 	case 5:
 		return store.StatusKilled
 	default:

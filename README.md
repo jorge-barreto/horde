@@ -138,7 +138,7 @@ horde launch --provider docker --workflow bugfix PROJ-123 --timeout 30m
 horde status <run-id>
 horde logs <run-id> --follow
 horde list                        # active runs
-horde list --all                  # include completed/failed/killed
+horde list --all                  # include success/failed/killed/timed_out/rate_limited
 horde status <run-id> --json      # machine-readable JSON output
 horde list --all --json           # JSON output for scripting
 
@@ -147,7 +147,7 @@ horde results <run-id>
 
 # Stop, retry, inspect
 horde kill <run-id>
-horde retry <run-id>              # restart container — orc picks up where it left off
+horde retry <run-id>              # resume a failed/killed/timed_out/rate_limited run; orc picks up where it left off
 horde shell <run-id>              # interactive shell into the container
 horde clean [run-id]              # remove stopped containers
 
@@ -157,6 +157,8 @@ horde docs <topic>                # read a topic
 ```
 
 The first `horde launch` builds the worker Docker image automatically. Subsequent launches reuse the cached image unless the Dockerfile changes.
+
+`horde retry` resumes a run that ended in a recoverable state — `failed`, `killed`, `timed_out` (orc phase timeout), or `rate_limited` (Anthropic limit). On Docker the preserved local workspace is reused in place. On ECS a fresh Fargate task launches with the same run ID and restores what the worker synced to S3 before the task was reaped: the agent session (`~/.claude`), the full working tree (`/workspace`, including committed and uncommitted changes), and the artifacts/audit — so orc resumes where it left off.
 
 ## Worker Image
 

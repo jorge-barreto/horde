@@ -5,11 +5,16 @@
  * run-result.json in S3 (best-effort), and idempotently updates the
  * runs table row keyed by the task ARN in the `by-instance` GSI.
  *
- * Port of the Python lambda in .horde/cloudformation.yaml with one
- * intentional deviation: exit_code 5 maps to "killed" (matching
- * internal/provider/docker.go::resolveStoppedExitCode and the bead 5fh.13
- * specification), while the Python source only distinguishes 0 vs non-zero.
- * The TypeScript port is authoritative going forward.
+ * It also records the ECS stop reason (detail.stopCode / detail.stoppedReason)
+ * into the run's `metadata` map, so callers — and the planned spot
+ * auto-resume — can tell WHY a task stopped (e.g. stopCode "TerminationNotice"
+ * for a Fargate spot interruption) without re-deriving it from logs.
+ *
+ * The Python lambda in internal/bootstrap/templates/stack.yaml.tmpl is a
+ * transliteration of this handler and MUST be kept in lockstep — exit-code
+ * mapping (0=success, 2=timed_out, 4=rate_limited, 5=killed, else failed),
+ * the metadata stop-reason capture, and the terminal-state idempotency
+ * guard. The TypeScript port is authoritative going forward.
  */
 import type { EventBridgeEvent, Handler } from "aws-lambda";
 import {
@@ -40,6 +45,11 @@ interface EcsTaskStateChange {
   readonly taskArn?: string;
   readonly lastStatus?: string;
   readonly stoppedAt?: string;
+  // stopCode is the ECS-level reason the task stopped, e.g.
+  // "TerminationNotice" (spot interruption), "EssentialContainerExited",
+  // "TaskFailedToStart", "UserInitiated". stoppedReason is free text.
+  readonly stopCode?: string;
+  readonly stoppedReason?: string;
   readonly containers?: readonly EcsContainer[];
   readonly clusterArn?: string;
 }
@@ -97,10 +107,24 @@ async function fetchTotalCost(runId: string): Promise<number | null> {
   }
 }
 
-function mapStatus(exitCode: number | null): "success" | "failed" | "killed" {
-  if (exitCode === 0) return "success";
-  if (exitCode === 5) return "killed";
-  return "failed";
+type TerminalStatus = "success" | "failed" | "killed" | "timed_out" | "rate_limited";
+
+// Mirrors internal/provider/docker.go::mapExitCode. orc exit codes:
+// 0 success / 2 phase-timeout / 4 cost-or-rate-limit / 5 signal(killed) / else failed.
+// timed_out and rate_limited are terminal-but-recoverable.
+function mapStatus(exitCode: number | null): TerminalStatus {
+  switch (exitCode) {
+    case 0:
+      return "success";
+    case 2:
+      return "timed_out";
+    case 4:
+      return "rate_limited";
+    case 5:
+      return "killed";
+    default:
+      return "failed";
+  }
 }
 
 export const handler: Handler<
@@ -144,6 +168,8 @@ export const handler: Handler<
     ":success": { S: "success" },
     ":failed": { S: "failed" },
     ":killed": { S: "killed" },
+    ":timed_out": { S: "timed_out" },
+    ":rate_limited": { S: "rate_limited" },
   };
   const setExprs: string[] = ["#s = :s", "#ca = :ca"];
   if (exitCode !== null) {
@@ -157,6 +183,49 @@ export const handler: Handler<
     setExprs.push("#tc = :tc");
   }
 
+  // Record the ECS stop reason FIRST and unconditionally. It is diagnostic,
+  // idempotent metadata that must land even when the status is already
+  // terminal — e.g. `horde kill` sets `killed` synchronously, so the status
+  // update below is skipped by the terminal guard, but we still want the
+  // stop_code/stop_reason recorded (and the spot follow-up keys off it).
+  // Done as two writes: seed `metadata` with if_not_exists, then the nested
+  // keys — they can't share one expression (DynamoDB "document paths overlap").
+  if (detail.stopCode || detail.stoppedReason) {
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: RUNS_TABLE,
+        Key: { id: { S: runId } },
+        UpdateExpression: "SET #m = if_not_exists(#m, :emptymap)",
+        ExpressionAttributeNames: { "#m": "metadata" },
+        ExpressionAttributeValues: { ":emptymap": { M: {} } },
+      }),
+    );
+    const metaNames: Record<string, string> = { "#m": "metadata" };
+    const metaValues: Record<string, AttributeValue> = {};
+    const metaSets: string[] = [];
+    if (detail.stopCode) {
+      metaNames["#sc"] = "stop_code";
+      metaValues[":sc"] = { S: detail.stopCode };
+      metaSets.push("#m.#sc = :sc");
+    }
+    if (detail.stoppedReason) {
+      metaNames["#sr"] = "stop_reason";
+      metaValues[":sr"] = { S: detail.stoppedReason };
+      metaSets.push("#m.#sr = :sr");
+    }
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: RUNS_TABLE,
+        Key: { id: { S: runId } },
+        UpdateExpression: "SET " + metaSets.join(", "),
+        ExpressionAttributeNames: metaNames,
+        ExpressionAttributeValues: metaValues,
+      }),
+    );
+  }
+
+  // Status update, guarded so a duplicate/late event can't overwrite a
+  // run that already reached a terminal state.
   try {
     await ddb.send(
       new UpdateItemCommand({
@@ -164,14 +233,14 @@ export const handler: Handler<
         Key: { id: { S: runId } },
         UpdateExpression: "SET " + setExprs.join(", "),
         ConditionExpression:
-          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed))",
+          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited))",
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
       }),
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
-      console.log("status-lambda: skip, already terminal", { runId });
+      console.log("status-lambda: status already terminal (stop reason still recorded)", { runId });
       return { skipped: "already terminal", runId };
     }
     throw err;

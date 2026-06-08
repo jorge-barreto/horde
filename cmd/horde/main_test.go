@@ -1141,9 +1141,10 @@ esac
 }
 
 // TestStatus_LazyCompletion_NonZeroExit covers horde-15m: the stopped-case
-// mapExitCode paths (non-zero → failed, 5 → killed) were only exercised as
-// pure unit tests on mapExitCode, never end-to-end through Finalize + store
-// update. Drive a full status command for each and verify the store.
+// mapExitCode paths were only exercised as pure unit tests on mapExitCode,
+// never end-to-end through Finalize + store update. Drive a full status
+// command for each and verify the store. Includes the recoverable statuses
+// (orc exit 2 → timed_out, 4 → rate_limited) added for #35.
 func TestStatus_LazyCompletion_NonZeroExit(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1152,7 +1153,8 @@ func TestStatus_LazyCompletion_NonZeroExit(t *testing.T) {
 		wantOut    string
 	}{
 		{"exit 1 maps to failed", 1, store.StatusFailed, "failed"},
-		{"exit 2 maps to failed", 2, store.StatusFailed, "failed"},
+		{"exit 2 maps to timed_out", 2, store.StatusTimedOut, "timed_out"},
+		{"exit 4 maps to rate_limited", 4, store.StatusRateLimited, "rate_limited"},
 		{"exit 5 maps to killed", 5, store.StatusKilled, "killed"},
 	}
 	for _, tc := range cases {
@@ -4694,16 +4696,97 @@ esac
 	}
 	st.Close()
 
-	// Create workspace dir with .git (retryCmd checks this at line 348)
+	// Deliberately do NOT create a local workspace dir. An aws-ecs run has no
+	// on-host workspace; the Docker-only .git guard must be skipped for it.
 	workspaceDir := filepath.Join(tmpHome, ".horde", "workspaces", runID)
-	os.MkdirAll(filepath.Join(workspaceDir, ".git"), 0o755)
 
 	ctx := context.Background()
 	err = newApp().Run(ctx, []string{"horde", "--provider", "docker", "retry", runID})
 	// The retry may succeed or fail for unrelated reasons (e.g. container launch),
-	// but it must NOT fail because of a missing .env file.
+	// but it must NOT fail because of a missing .env file...
 	if err != nil && strings.Contains(err.Error(), ".env") {
 		t.Errorf("got .env-related error for aws-ecs retry: %v", err)
+	}
+	// ...nor because the local workspace is missing — that guard is Docker-only.
+	if err != nil && strings.Contains(err.Error(), "workspace for run") {
+		t.Errorf("aws-ecs retry hit the Docker-only workspace guard: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(workspaceDir, ".git")); statErr == nil {
+		t.Fatal("test bug: workspace .git should not exist for this aws-ecs case")
+	}
+}
+
+// TestRetry_Docker_MissingWorkspaceFails is the positive counterpart to the
+// ECS test above: for a docker-provider run the local-workspace .git guard
+// MUST still fire when the workspace is gone, so retry refuses rather than
+// silently relaunching against nothing. Guards against an inverted condition
+// or wrong provider constant in the Docker-gating added for #35.
+func TestRetry_Docker_MissingWorkspaceFails(t *testing.T) {
+	tmpHome := t.TempDir()
+	projectDir := filepath.Join(tmpHome, "project")
+	os.MkdirAll(projectDir, 0o755)
+
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = projectDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "remote", "add", "origin", "https://github.com/test/repo.git")
+	// docker provider validates .env, so provide one.
+	os.WriteFile(filepath.Join(projectDir, ".env"),
+		[]byte("CLAUDE_CODE_OAUTH_TOKEN=t\nGIT_TOKEN=t\n"), 0o644)
+
+	binDir := filepath.Join(tmpHome, "bin")
+	os.MkdirAll(binDir, 0o755)
+	// docker stub: inspect → stopped container; anything else → a container id.
+	os.WriteFile(filepath.Join(binDir, "docker"), []byte(`#!/bin/sh
+case "$1" in
+  inspect) echo '{"Running":false,"ExitCode":1,"StartedAt":"2025-01-01T00:00:00Z","FinishedAt":"2025-01-01T01:00:00Z"}';;
+  image) echo "2099-01-01T00:00:00Z";;
+  *) echo "abc123container";;
+esac
+`), 0o755)
+
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	oldDir, _ := os.Getwd()
+	os.Chdir(projectDir)
+	t.Cleanup(func() { os.Chdir(oldDir) })
+
+	dbPath := filepath.Join(tmpHome, ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-time.Hour)
+	runID := "dockrun12345"
+	if err := st.CreateRun(context.Background(), &store.Run{
+		ID:          runID,
+		Repo:        "github.com/test/repo.git",
+		Ticket:      "TICKET-1",
+		Provider:    "docker",
+		InstanceID:  "abc123",
+		Status:      store.StatusFailed,
+		LaunchedBy:  "testuser",
+		StartedAt:   now.Add(-2 * time.Hour),
+		CompletedAt: &completedAt,
+		TimeoutAt:   now.Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("pre-creating run: %v", err)
+	}
+	st.Close()
+
+	// No workspace dir is created — the Docker-only guard must fire.
+	err = newApp().Run(context.Background(), []string{"horde", "--provider", "docker", "retry", runID})
+	if err == nil {
+		t.Fatal("expected retry to fail for a docker run with no workspace, got nil")
+	}
+	if !strings.Contains(err.Error(), "workspace for run") {
+		t.Errorf("expected workspace-guard error, got: %v", err)
 	}
 }
 

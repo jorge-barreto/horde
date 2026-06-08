@@ -413,6 +413,32 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("CreateGetRun/RecoverableStatuses", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		// timed_out / rate_limited must round-trip through the store like any
+		// other status and classify as terminal. They are written by the
+		// status Lambda / Finalize for orc exit codes 2 and 4 respectively,
+		// and `horde retry` keys off IsTerminal to accept them.
+		for i, status := range []Status{StatusTimedOut, StatusRateLimited} {
+			if !status.IsTerminal() {
+				t.Errorf("%q must classify as terminal", status)
+			}
+			id := "rec" + string(rune('0'+i))
+			run := conformanceRun(id, "github.com/org/repo", "PROJ-1", status)
+			if err := s.CreateRun(ctx, run); err != nil {
+				t.Fatalf("CreateRun(%s): %v", status, err)
+			}
+			got, err := s.GetRun(ctx, id)
+			if err != nil {
+				t.Fatalf("GetRun(%s): %v", status, err)
+			}
+			if got.Status != status {
+				t.Errorf("Status: got %q, want %q", got.Status, status)
+			}
+		}
+	})
+
 	t.Run("UpdateRun/SingleField", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)

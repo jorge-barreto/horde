@@ -1815,9 +1815,12 @@ func TestMapExitCode(t *testing.T) {
 		want store.Status
 	}{
 		{0, store.StatusSuccess},
+		{2, store.StatusTimedOut},
+		{4, store.StatusRateLimited},
 		{5, store.StatusKilled},
 		{1, store.StatusFailed},
-		{2, store.StatusFailed},
+		{3, store.StatusFailed},
+		{6, store.StatusFailed},
 		{137, store.StatusFailed},
 	}
 	for _, tt := range tests {

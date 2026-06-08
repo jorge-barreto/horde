@@ -289,7 +289,7 @@ func TestECSProvider_Launch_RunTaskError(t *testing.T) {
 	t.Parallel()
 	fake := &fakeECSClient{runTaskErr: fmt.Errorf("AccessDeniedException: not authorized")}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Launch(context.Background(), LaunchOpts{})
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
@@ -306,7 +306,7 @@ func TestECSProvider_Launch_Failure(t *testing.T) {
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Launch(context.Background(), LaunchOpts{})
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
@@ -326,7 +326,7 @@ func TestECSProvider_Launch_FailureNilReason(t *testing.T) {
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Launch(context.Background(), LaunchOpts{})
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
@@ -405,7 +405,7 @@ func TestECSProvider_Launch_FailureIncludesArnAndDetail(t *testing.T) {
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Launch(context.Background(), LaunchOpts{})
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
@@ -423,7 +423,7 @@ func TestECSProvider_Launch_NoTasks(t *testing.T) {
 		runTaskOutput: &ecs.RunTaskOutput{Tasks: []ecstypes.Task{}},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Launch(context.Background(), LaunchOpts{})
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
@@ -440,7 +440,7 @@ func TestECSProvider_Launch_NilTaskArn(t *testing.T) {
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	_, err := p.Launch(context.Background(), LaunchOpts{})
+	_, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err == nil {
 		t.Fatal("Launch() error = nil, want non-nil")
 	}
@@ -458,27 +458,87 @@ func TestECSProvider_Launch_EmptyOpts(t *testing.T) {
 		},
 	}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	result, err := p.Launch(context.Background(), LaunchOpts{})
+	// RunID is now validated (it flows into S3 keys / tags), so a valid one
+	// is required; the other opts fields still pass through even when empty.
+	result, err := p.Launch(context.Background(), LaunchOpts{RunID: "abc123def456"})
 	if err != nil {
 		t.Fatalf("Launch() error = %v, want nil", err)
 	}
 	if result.InstanceID != taskARN {
 		t.Errorf("InstanceID = %q, want %q", result.InstanceID, taskARN)
 	}
-	// Provider does not validate opts — empty strings are passed through
 	in := fake.runTaskInput
 	envMap := make(map[string]string)
 	for _, kv := range in.Overrides.ContainerOverrides[0].Environment {
 		envMap[*kv.Name] = *kv.Value
 	}
-	for _, key := range []string{"REPO_URL", "TICKET", "BRANCH", "WORKFLOW", "RUN_ID"} {
+	for _, key := range []string{"REPO_URL", "TICKET", "BRANCH", "WORKFLOW"} {
 		if envMap[key] != "" {
 			t.Errorf("env[%s] = %q, want empty string", key, envMap[key])
 		}
 	}
+	if envMap["RUN_ID"] != "abc123def456" {
+		t.Errorf("env[RUN_ID] = %q, want %q", envMap["RUN_ID"], "abc123def456")
+	}
 	// ARTIFACTS_BUCKET comes from config, not opts
 	if envMap["ARTIFACTS_BUCKET"] != "my-horde-artifacts" {
 		t.Errorf("env[ARTIFACTS_BUCKET] = %q, want \"my-horde-artifacts\"", envMap["ARTIFACTS_BUCKET"])
+	}
+}
+
+// TestECSProvider_Launch_ForwardsOrcArgs verifies that opts.OrcArgs is
+// forwarded to the task as an ORC_EXTRA_ARGS env var (which the worker
+// entrypoint reads), so `horde retry` can pass --resume to orc on ECS.
+func TestECSProvider_Launch_ForwardsOrcArgs(t *testing.T) {
+	t.Parallel()
+	taskARN := "arn:aws:ecs:us-east-1:123456789012:task/horde/orcargs"
+	launch := func(opts LaunchOpts) map[string]string {
+		fake := &fakeECSClient{
+			runTaskOutput: &ecs.RunTaskOutput{
+				Tasks: []ecstypes.Task{{TaskArn: aws.String(taskARN)}},
+			},
+		}
+		p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+		if _, err := p.Launch(context.Background(), opts); err != nil {
+			t.Fatalf("Launch() error = %v", err)
+		}
+		envMap := make(map[string]string)
+		for _, kv := range fake.runTaskInput.Overrides.ContainerOverrides[0].Environment {
+			envMap[*kv.Name] = *kv.Value
+		}
+		return envMap
+	}
+
+	// With OrcArgs: joined and present.
+	env := launch(LaunchOpts{RunID: "abc123def456", OrcArgs: []string{"--resume", "--from", "plan"}})
+	if got := env["ORC_EXTRA_ARGS"]; got != "--resume --from plan" {
+		t.Errorf("ORC_EXTRA_ARGS = %q, want %q", got, "--resume --from plan")
+	}
+
+	// Without OrcArgs: the var must be absent (no blank injection).
+	env = launch(LaunchOpts{RunID: "abc123def456"})
+	if _, ok := env["ORC_EXTRA_ARGS"]; ok {
+		t.Errorf("ORC_EXTRA_ARGS present with empty OrcArgs, want absent")
+	}
+}
+
+// TestECSProvider_Launch_RejectsBadRunID verifies Launch validates RunID
+// before it reaches the task tag / S3 key prefixes.
+func TestECSProvider_Launch_RejectsBadRunID(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{"", "../escape", "a/b", `a\b`} {
+		fake := &fakeECSClient{
+			runTaskOutput: &ecs.RunTaskOutput{
+				Tasks: []ecstypes.Task{{TaskArn: aws.String("arn:task/x")}},
+			},
+		}
+		p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+		if _, err := p.Launch(context.Background(), LaunchOpts{RunID: bad}); err == nil {
+			t.Errorf("Launch(RunID=%q) error = nil, want non-nil", bad)
+		}
+		if fake.runTaskInput != nil {
+			t.Errorf("RunID=%q reached RunTask; validation should short-circuit", bad)
+		}
 	}
 }
 
@@ -2801,10 +2861,19 @@ func TestECSProvider_Integration_LaunchStopStatus(t *testing.T) {
 func TestECS_Finalize_TerminalStatusIsNoOp(t *testing.T) {
 	fake := &fakeECSClient{}
 	p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
-	for _, status := range []store.Status{store.StatusSuccess, store.StatusFailed, store.StatusKilled} {
+	// All terminal statuses — including the recoverable timed_out/rate_limited
+	// — must be no-ops so informational commands stay time-invariant after a
+	// task is reaped (#28: the store is the source of truth, never live ECS).
+	for _, status := range []store.Status{
+		store.StatusSuccess, store.StatusFailed, store.StatusKilled,
+		store.StatusTimedOut, store.StatusRateLimited,
+	} {
 		run := &store.Run{ID: "abc123", Status: status, TimeoutAt: time.Now().Add(-1 * time.Hour)}
 		if err := p.Finalize(context.Background(), run, ""); err != nil {
 			t.Fatalf("Finalize(%s) error = %v", status, err)
+		}
+		if run.Status != status {
+			t.Errorf("Finalize mutated terminal status %s -> %s", status, run.Status)
 		}
 	}
 	if len(fake.describeTasksInputs) != 0 {

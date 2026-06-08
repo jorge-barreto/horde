@@ -16,11 +16,13 @@ What horde expects from orc at the interface boundary. This document does NOT sp
 |------|---------|---------------|
 | 0 | Workflow completed successfully | `success` |
 | 1 | Phase failure (agent fail, script fail, gate denied, loop exhaustion, missing outputs) | `failed` |
-| 2 | Phase timed out | `failed` |
+| 2 | Phase timed out | `timed_out` |
 | 3 | Configuration or setup error | `failed` |
-| 4 | Cost limit exceeded (per-phase or per-run) | `failed` |
+| 4 | Cost limit exceeded (per-phase or per-run) | `rate_limited` |
 | 5 | Signal interrupt (SIGINT/SIGTERM/SIGHUP) | `killed` |
 | 6 | Resume failure (cannot recover interrupted session) | `failed` |
+
+`timed_out` and `rate_limited` are terminal but **recoverable** — distinct from `failed` so `horde retry` / `horde list` treat them as "resume-worthy" rather than broken. See `internal/provider/docker.go::mapExitCode`.
 
 ## Filesystem Contract
 

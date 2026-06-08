@@ -11,7 +11,14 @@ import * as cdk from "aws-cdk-lib";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
-import { HordeWorker } from "../src";
+// Import the BUILT construct (lib/), not the TS source (src/). The construct
+// stages its Lambda asset via `code.fromAsset(__dirname/status-lambda)`, and
+// the esbuild `bundle.js` (the handler entry) only exists under lib/. Importing
+// from ../src makes __dirname resolve to src/status-lambda under ts-node, which
+// has no bundle.js — the deployed Lambda then fails with "Cannot find module
+// 'bundle'". Run `npm run build` before the e2e bring-up. This also matches how
+// real consumers load the published package.
+import { HordeWorker } from "../lib";
 
 // SLUG must match `bootstrap.Slug("https://github.com/jorge-barreto/horde-cdke2e.git")`.
 // The Go test sets that fake remote so `horde push` resolves to this SSM path.
@@ -53,6 +60,10 @@ const gitSecret = new secretsmanager.Secret(stack, "GitToken", {
 
 const worker = new HordeWorker(stack, "Worker", {
   projectSlug: SLUG,
+  // Canonical repo for run records. The e2e harness sets each worker's git
+  // remote to the real horde repo (so the worker can clone + run horde's own
+  // .orc/workflows), so the canonical host/path form is this.
+  repo: "github.com/jorge-barreto/horde",
   ecrRepository: repo,
   workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
   secrets: {

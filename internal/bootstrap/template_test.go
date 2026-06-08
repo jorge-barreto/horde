@@ -555,11 +555,38 @@ func TestRender_StatusLambdaPython(t *testing.T) {
 		"by-instance",
 		"run-result.json",
 		"total_cost_usd",
-		`TERMINAL = {"success", "failed", "killed"}`,
+		`TERMINAL = {"success", "failed", "killed", "timed_out", "rate_limited"}`,
+		// Recoverable-status mapping must match the CDK/Go side.
+		`2: "timed_out"`,
+		`4: "rate_limited"`,
+		// Stop-reason capture: seed metadata in the first update, then the
+		// nested writes in a SECOND update (DynamoDB rejects referencing
+		// `metadata` and `metadata.x` in one expression).
+		`#m = if_not_exists(#m, :emptymap)`,
+		`#m.#sc = :sc`,
+		`#m.#sr = :sr`,
 	} {
 		if !strings.Contains(zipfile, sub) {
 			t.Errorf("ZipFile missing expected substring %q", sub)
 		}
+	}
+	// Three update_item calls: seed, nested stop-reason, status. The seed and
+	// nested writes can't share one expression (DynamoDB "document paths
+	// overlap").
+	if n := strings.Count(zipfile, "ddb.update_item("); n < 3 {
+		t.Errorf("expected at least 3 ddb.update_item calls (seed + nested + status), got %d", n)
+	}
+	// The stop-reason writes must precede the already-terminal early-return,
+	// so a synchronous `horde kill` (which sets killed first) still records
+	// the reason before the status update is skipped.
+	scIdx := strings.Index(zipfile, "#m.#sc = :sc")
+	terminalSkipIdx := strings.Index(zipfile, `existing in TERMINAL`)
+	if scIdx < 0 || terminalSkipIdx < 0 || scIdx > terminalSkipIdx {
+		t.Errorf("stop-reason write must precede the already-terminal skip (sc=%d, skip=%d)", scIdx, terminalSkipIdx)
+	}
+	seedIdx := strings.Index(zipfile, "#m = if_not_exists(#m, :emptymap)")
+	if seedIdx < 0 || scIdx < 0 || scIdx < seedIdx {
+		t.Errorf("metadata seed must precede the nested writes (seed=%d, sc=%d)", seedIdx, scIdx)
 	}
 }
 

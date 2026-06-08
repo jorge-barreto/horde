@@ -322,6 +322,10 @@ Resources:
           Image:
             Fn::Sub: "${EcrRepository.RepositoryUri}:latest"
           Essential: true
+          # Give the entrypoint time to forward SIGTERM to orc, let orc save
+          # its interrupted session, and push the snapshot ref + sync S3
+          # before ECS sends SIGKILL. Matches the CDK construct (120s).
+          StopTimeout: 120
           Environment: []
           Secrets:
             - Name: CLAUDE_CODE_OAUTH_TOKEN
@@ -624,7 +628,7 @@ Resources:
           ddb = boto3.client("dynamodb")
           s3 = boto3.client("s3")
 
-          TERMINAL = {"success", "failed", "killed"}
+          TERMINAL = {"success", "failed", "killed", "timed_out", "rate_limited"}
 
 
           def find_run_id(task_arn):
@@ -699,18 +703,62 @@ Resources:
               if not run_id:
                   return {"skipped": "task not managed by horde"}
 
-              existing = current_status(run_id)
-              if existing in TERMINAL:
-                  return {"skipped": "already terminal", "run_id": run_id, "status": existing}
-
               containers = detail.get("containers", [])
               exit_code = None
               if containers:
                   exit_code = containers[0].get("exitCode")
-              status = "success" if exit_code == 0 else "failed"
+              # Mirrors internal/provider/docker.go::mapExitCode and the CDK
+              # status lambda (cdk/src/status-lambda/index.ts): orc exit 2 ->
+              # timed_out, 4 -> rate_limited, 5 -> killed (recoverable), 0 ->
+              # success, else failed. KEEP IN LOCKSTEP with the TS port.
+              status = {0: "success", 2: "timed_out", 4: "rate_limited", 5: "killed"}.get(
+                  exit_code, "failed"
+              )
 
               stopped_at = detail.get("stoppedAt")  # ISO-8601 string
+              stop_code = detail.get("stopCode")
+              stopped_reason = detail.get("stoppedReason")
               cost = fetch_total_cost(run_id)
+
+              # Record the ECS stop reason FIRST and unconditionally. It is
+              # diagnostic, idempotent metadata that must land even when the
+              # status is already terminal — e.g. `horde kill` sets `killed`
+              # synchronously, so the guarded status update below is skipped,
+              # but we still want stop_code/stop_reason recorded. Two writes:
+              # seed `metadata` with if_not_exists, then the nested keys — they
+              # can't share one expression (DynamoDB "document paths overlap").
+              if stop_code or stopped_reason:
+                  ddb.update_item(
+                      TableName=RUNS_TABLE,
+                      Key={"id": {"S": run_id}},
+                      UpdateExpression="SET #m = if_not_exists(#m, :emptymap)",
+                      ExpressionAttributeNames={"#m": "metadata"},
+                      ExpressionAttributeValues={":emptymap": {"M": {}}},
+                  )
+                  meta_names = {"#m": "metadata"}
+                  meta_values = {}
+                  meta_sets = []
+                  if stop_code:
+                      meta_names["#sc"] = "stop_code"
+                      meta_values[":sc"] = {"S": str(stop_code)}
+                      meta_sets.append("#m.#sc = :sc")
+                  if stopped_reason:
+                      meta_names["#sr"] = "stop_reason"
+                      meta_values[":sr"] = {"S": str(stopped_reason)}
+                      meta_sets.append("#m.#sr = :sr")
+                  ddb.update_item(
+                      TableName=RUNS_TABLE,
+                      Key={"id": {"S": run_id}},
+                      UpdateExpression="SET " + ", ".join(meta_sets),
+                      ExpressionAttributeNames=meta_names,
+                      ExpressionAttributeValues=meta_values,
+                  )
+
+              # Status update — skip if the run is already terminal (e.g. a
+              # synchronous `horde kill` or a duplicate event got here first).
+              existing = current_status(run_id)
+              if existing in TERMINAL:
+                  return {"skipped": "already terminal", "run_id": run_id, "status": existing}
 
               names = {"#s": "status", "#ec": "exit_code", "#ca": "completed_at"}
               values = {

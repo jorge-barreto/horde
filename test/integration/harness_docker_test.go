@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const testImage = "horde-worker-test:latest"
@@ -25,7 +25,7 @@ type dockerDriver struct {
 func (d *dockerDriver) InstanceID(runID string) string {
 	d.t.Helper()
 	dbPath := filepath.Join(d.homeDir, ".horde", "horde.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return ""
 	}
@@ -56,7 +56,7 @@ func (d *dockerDriver) FetchContainerLogs(instanceID string) (string, error) {
 func (d *dockerDriver) StoreStatus(runID string) string {
 	d.t.Helper()
 	dbPath := filepath.Join(d.homeDir, ".horde", "horde.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		d.t.Fatalf("opening store: %v", err)
 	}
@@ -73,7 +73,7 @@ func (d *dockerDriver) StoreStatus(runID string) string {
 func (d *dockerDriver) StoreExitCode(runID string) *int {
 	d.t.Helper()
 	dbPath := filepath.Join(d.homeDir, ".horde", "horde.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		d.t.Fatalf("opening store: %v", err)
 	}

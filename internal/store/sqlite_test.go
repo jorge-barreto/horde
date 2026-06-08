@@ -21,7 +21,7 @@ func TestNewSQLiteStore_MigratesLegacyDB(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
 
 	// Create a DB with the pre-labels (15-column) schema.
-	legacy, err := sql.Open("sqlite3", dbPath)
+	legacy, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("opening legacy db: %v", err)
 	}

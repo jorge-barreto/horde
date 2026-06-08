@@ -4526,6 +4526,90 @@ func TestList_JSON_InvalidLabelFilter(t *testing.T) {
 	}
 }
 
+// TestList_SinceUntil_EndToEnd exercises the --since/--until wiring through the
+// real command (parseWhen → RunFilter → store), which the parseWhen unit tests
+// and store-layer range tests don't cover together.
+func TestList_SinceUntil_EndToEnd(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	ctx := context.Background()
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	done := now.Add(-time.Hour)
+	repo := "github.com/test/repo.git"
+	mk := func(id string, age time.Duration) *store.Run {
+		return &store.Run{
+			ID: id, Repo: repo, Ticket: id, Workflow: "w", Provider: "docker",
+			Status: store.StatusSuccess, LaunchedBy: "me",
+			StartedAt: now.Add(-age), CompletedAt: &done, TimeoutAt: now.Add(time.Hour),
+		}
+	}
+	// Runs started 3h, 30m, and 2m ago.
+	for _, r := range []*store.Run{mk("since000003h", 3*time.Hour), mk("since000030m", 30*time.Minute), mk("since0000002m", 2*time.Minute)} {
+		if err := st.CreateRun(ctx, r); err != nil {
+			t.Fatalf("CreateRun %s: %v", r.ID, err)
+		}
+	}
+	st.Close()
+
+	// --since 1h should return only the two within the last hour.
+	v := listJSON(t, "--all", "--since", "1h")
+	if got := listIDs(v); !reflect.DeepEqual(got, []string{"since0000002m", "since000030m"}) {
+		t.Errorf("--since 1h ids = %v, want [since0000002m since000030m]", got)
+	}
+
+	// Invalid --since must error (routes through the error path).
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	if err := app.Run(ctx, []string{"horde", "--provider", "docker", "list", "--since", "not-a-time"}); err == nil {
+		t.Error("expected error for invalid --since, got nil")
+	}
+}
+
+// TestList_Human_SummaryLine pins the human-readable cohort rollup line and the
+// filtered-to-zero empty message — neither is covered by the JSON-shape tests.
+// The human table writes to os.Stdout (not cmd.Writer), so capture via a pipe.
+func TestList_Human_SummaryLine(t *testing.T) {
+	env := setupLaunchEnv(t)
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	seedFilterRuns(t, dbPath)
+
+	capture := func(args ...string) string {
+		t.Helper()
+		origStdout := os.Stdout
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+		os.Stdout = pw
+		full := append([]string{"horde", "--provider", "docker", "list"}, args...)
+		runErr := newApp().Run(context.Background(), full)
+		pw.Close()
+		os.Stdout = origStdout
+		out, _ := io.ReadAll(pr)
+		if runErr != nil {
+			t.Fatalf("list %v: %v", args, runErr)
+		}
+		return string(out)
+	}
+
+	// epic=KS-100 cohort: 2 runs, $1.00 + $2.00 = $3.00.
+	out := capture("--all", "--label", "epic=KS-100")
+	if !strings.Contains(out, "2 runs, $3.00 total") {
+		t.Errorf("expected summary line '2 runs, $3.00 total', got:\n%s", out)
+	}
+
+	// A filter that matches nothing prints the filtered-empty message.
+	out = capture("--all", "--label", "epic=NOPE")
+	if !strings.Contains(out, "No matching runs for this repo.") {
+		t.Errorf("expected 'No matching runs for this repo.', got:\n%s", out)
+	}
+}
+
 func TestResults_JSON_CompletedWithResults(t *testing.T) {
 	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
 	ctx := context.Background()

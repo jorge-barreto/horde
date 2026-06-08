@@ -104,4 +104,30 @@ func TestParseWhen(t *testing.T) {
 			t.Error("expected error for invalid time, got nil")
 		}
 	})
+	// StartedAt is persisted at second precision in both stores, so a
+	// sub-second bound would be compared inconsistently (SQLite filters in Go
+	// at full precision; DynamoDB compares truncated RFC3339 strings). parseWhen
+	// must hand back a second-truncated bound so both stores agree.
+	t.Run("duration-ago truncated to second", func(t *testing.T) {
+		t.Parallel()
+		got, err := parseWhen("1h")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Nanosecond() != 0 {
+			t.Errorf("expected second-truncated time, got sub-second %v", got)
+		}
+	})
+	t.Run("negative duration rejected", func(t *testing.T) {
+		t.Parallel()
+		if _, err := parseWhen("-3d"); err == nil {
+			t.Error("expected error for negative duration-ago, got nil")
+		}
+	})
+	t.Run("absurd day count rejected", func(t *testing.T) {
+		t.Parallel()
+		if _, err := parseWhen("999999999999d"); err == nil {
+			t.Error("expected error for overflowing day count, got nil")
+		}
+	})
 }

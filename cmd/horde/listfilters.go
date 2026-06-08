@@ -63,14 +63,26 @@ func parseWhen(s string) (*time.Time, error) {
 	}
 
 	// Duration-ago. Translate a trailing "d" (days) into hours, then defer to
-	// time.ParseDuration for the rest (h/m/s).
+	// time.ParseDuration for the rest (h/m/s). The result is truncated to the
+	// second: StartedAt is persisted at second precision in both stores, so a
+	// sub-second bound would be compared inconsistently (SQLite filters in Go at
+	// full precision, DynamoDB compares truncated RFC3339 strings). Truncating
+	// here keeps both stores in agreement.
 	if d, err := parseDurationWithDays(s); err == nil {
-		t := time.Now().Add(-d).UTC()
+		if d < 0 {
+			return nil, fmt.Errorf("invalid duration %q: must not be negative", s)
+		}
+		t := time.Now().Add(-d).UTC().Truncate(time.Second)
 		return &t, nil
 	}
 
 	return nil, fmt.Errorf("invalid time %q: expected RFC3339 (2026-04-01 or 2026-04-01T12:00:00Z) or a duration-ago (1h, 30m, 7d)", s)
 }
+
+// maxDurationDays bounds the "d" suffix so the days→nanoseconds multiply can't
+// silently overflow int64 (which would wrap a huge value to a bogus near-now
+// bound). ~25,000 years of days is far beyond any real query window.
+const maxDurationDays = 10_000_000
 
 // parseDurationWithDays parses a Go duration that may use a "d" (day = 24h)
 // suffix on a leading integer, e.g. "7d", "7d12h". Plain Go durations ("1h30m")
@@ -80,6 +92,9 @@ func parseDurationWithDays(s string) (time.Duration, error) {
 		days, err := strconv.Atoi(s[:i])
 		if err != nil {
 			return 0, fmt.Errorf("invalid day count in %q", s)
+		}
+		if days < -maxDurationDays || days > maxDurationDays {
+			return 0, fmt.Errorf("day count in %q is out of range", s)
 		}
 		rest := s[i+1:]
 		dur := time.Duration(days) * 24 * time.Hour

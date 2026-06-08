@@ -1018,6 +1018,43 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	// Since/Until are documented inclusive. A run whose StartedAt equals a bound
+	// must be returned, and both stores must agree (SQLite filters in Go, DynamoDB
+	// via BETWEEN/>=/<=). This pins inclusivity so flipping >= to > can't slip by.
+	t.Run("ListRuns/TimeRangeBoundsInclusive", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		repo := "github.com/org/lr-bounds"
+		mk := func(id string, h int) *Run {
+			r := conformanceRun(id, repo, "PROJ-1", StatusSuccess)
+			r.StartedAt = time.Date(2026, 4, 15, h, 0, 0, 0, time.UTC)
+			r.TimeoutAt = r.StartedAt.Add(time.Hour)
+			return r
+		}
+		for _, r := range []*Run{mk("lr-lo", 9), mk("lr-mid", 10), mk("lr-hi", 11), mk("lr-out", 12)} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+		}
+		// Bounds land exactly on lr-lo (since) and lr-hi (until).
+		since := time.Date(2026, 4, 15, 9, 0, 0, 0, time.UTC)
+		until := time.Date(2026, 4, 15, 11, 0, 0, 0, time.UTC)
+		got, err := s.ListRuns(ctx, RunFilter{Repo: repo, Since: &since, Until: &until})
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		ids := map[string]bool{}
+		for _, r := range got {
+			ids[r.ID] = true
+		}
+		if len(got) != 3 || !ids["lr-lo"] || !ids["lr-mid"] || !ids["lr-hi"] {
+			t.Errorf("ids = %v, want lr-lo+lr-mid+lr-hi (bounds inclusive, lr-out excluded)", runIDs(got))
+		}
+		if ids["lr-out"] {
+			t.Error("lr-out (12:00, past until) should be excluded")
+		}
+	})
+
 	t.Run("ListRuns/CombinedFilters", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)

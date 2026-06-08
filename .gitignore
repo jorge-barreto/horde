@@ -9,6 +9,9 @@
 *.test
 *.out
 
+# GoReleaser build output
+dist/
+
 # SQLite
 *.db
 *.db-journal

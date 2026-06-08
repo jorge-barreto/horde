@@ -1,0 +1,62 @@
+# GoReleaser builds the horde CLI on a cli-v* tag: multi-OS/arch binaries, a
+# GitHub Release with checksums, and a Homebrew formula. Version metadata is
+# injected into the same main.* vars that `make build` sets.
+version: 2
+
+project_name: horde
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: horde
+    main: ./cmd/horde
+    binary: horde
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+
+archives:
+  - id: horde
+    formats: [tar.gz]
+    name_template: "horde_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: jorge-barreto
+    name: horde
+  name_template: "horde {{ .Tag }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - name: horde
+    repository:
+      owner: jorge-barreto
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_PAT }}"
+    homepage: "https://github.com/jorge-barreto/horde"
+    description: "Cloud launcher for orc workflows"
+    license: "MIT"
+    commit_author:
+      name: github-actions[bot]
+      email: github-actions[bot]@users.noreply.github.com
+    test: |
+      system "#{bin}/horde", "--version"

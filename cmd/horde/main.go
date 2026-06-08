@@ -144,7 +144,11 @@ if a run with the same ticket is already active.
 Concurrency: docker provider caps active runs at 100 (pending + running);
 aws-ecs uses the bootstrap stack's max_concurrent (default 20). Hitting
 the cap fails with "max concurrent runs reached (N/N)" — wait for or
-kill some runs before launching more.`,
+kill some runs before launching more.
+
+With --json, output is a single JSON object with a stable status field
+(launched/capped/duplicate/error); capped and duplicate then exit 0 (not 1)
+so a caller can branch on status. See 'horde docs json' for the contract.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "branch",

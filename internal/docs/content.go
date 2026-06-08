@@ -300,8 +300,10 @@ Discovery overrides (running without a checkout)
         --config / HORDE_CONFIG_PATH   Path to the project config — either a
                                        .horde/config.yaml file directly, or a
                                        directory containing .horde/config.yaml.
-                                       The .env file (docker secret source) is
-                                       looked up alongside it.
+                                       The .env file (docker secret source) and
+                                       relative mount host-paths resolve against
+                                       this location's directory (the file's
+                                       parent, or the directory itself).
 
         --ssm-path / HORDE_SSM_PATH    SSM parameter path for the aws-ecs
                                        config. Overrides the slug-derived

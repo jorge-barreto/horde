@@ -170,17 +170,22 @@ flag > env var > discovery > error:
 | SSM path (slug-derived) | `--ssm-path` | `HORDE_SSM_PATH` |
 
 ```bash
-# No git, no .horde/, only env vars — never errors "not a git repository":
-HORDE_REPO_URL=github.com/org/prepdesk \
+# No git, no .horde/, only env vars — never errors "not a git repository".
+# On aws-ecs the SSM path identifies the deployment; --repo is not needed
+# (the canonical repo comes from SSM):
 HORDE_SSM_PATH=/horde/prepdesk/config \
   horde launch PROJ-1 --workflow implement-ticket --provider aws-ecs --json
+
+# On docker, the repo override IS the bucket key for run history:
+HORDE_REPO_URL=github.com/org/prepdesk \
+  horde launch PROJ-1 --workflow implement-ticket --provider docker --json
 ```
 
 `--repo` accepts a full URL or a bare `host/path`; it's canonicalized (trailing `.git`,
 scheme, and case are normalized) so a repo cloned with or without the `.git` suffix
 maps to one bucket of run history. On `aws-ecs` the canonical repo comes from the
-deployment's SSM config regardless of `--repo`, so all runs share one bucket. See
-`horde docs config` for details.
+deployment's SSM config regardless of `--repo`, so all runs share one bucket; use
+`HORDE_SSM_PATH`/`--ssm-path` to point at the deployment. See `horde docs config`.
 
 ### Teardown
 

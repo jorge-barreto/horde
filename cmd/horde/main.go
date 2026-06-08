@@ -378,6 +378,11 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			if err != nil {
 				return err
 			}
+			// Relative mount host-paths anchor to the directory that declared
+			// them — the config's dir — so a --config-relocated config and its
+			// mounts stay together (same anchor as the .env lookup). With no
+			// --config override this is just cwd.
+			mountDir := resolver.EnvFileDir()
 
 			result, err := prov.Launch(ctx, provider.LaunchOpts{
 				Repo:           repo,
@@ -386,7 +391,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Workflow:       workflow,
 				RunID:          id,
 				EnvFile:        envPath,
-				Mounts:         projCfg.ResolveMounts(cwd),
+				Mounts:         projCfg.ResolveMounts(mountDir),
 				HomeDir:        homeDir,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,
@@ -521,6 +526,8 @@ resumes any interrupted agent session. Override with explicit orc args:
 			if err != nil {
 				return err
 			}
+			// Same anchor as launch: relative mounts follow the config's dir.
+			mountDir := resolver.EnvFileDir()
 
 			if dp, ok := prov.(*provider.DockerProvider); ok {
 				workerFS, err := fs.Sub(horde.WorkerFiles, "docker")
@@ -539,7 +546,7 @@ resumes any interrupted agent session. Override with explicit orc args:
 				Workflow:       run.Workflow,
 				RunID:          run.ID,
 				EnvFile:        envPath,
-				Mounts:         projCfg.ResolveMounts(cwd),
+				Mounts:         projCfg.ResolveMounts(mountDir),
 				HomeDir:        homeDir,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,

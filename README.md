@@ -2,7 +2,7 @@
 
 Cloud launcher for [orc](https://github.com/jorge-barreto/orc) workflows. Runs orc on ephemeral Docker containers — spin up, clone, run, collect, tear down.
 
-orc handles the "what" (workflow phases), horde handles the "where" (infrastructure). Any repo with an `.orc/` directory is deployable. Git is a hard requirement — horde infers the repo URL from the local git remote.
+orc handles the "what" (workflow phases), horde handles the "where" (infrastructure). Any repo with an `.orc/` directory is deployable. By default horde infers the repo URL from the local git remote, so it's normally run from inside a checkout — but every discovery step is overrideable for programmatic callers (see [Running without a checkout](#running-without-a-checkout)).
 
 See [SPEC.md](SPEC.md) for the full design.
 
@@ -155,6 +155,32 @@ Exit codes under `--json` are binary: 0 for any protocol-level outcome
 (`launched`/`duplicate`/`capped`), 1 only for true errors — branch on the `status`
 field. Without `--json`, `duplicate` and `capped` keep their human behavior (a stderr
 message and exit 1).
+
+### Running without a checkout
+
+By default horde discovers identity from `git remote get-url origin` and config from
+`.horde/config.yaml` in the working directory. Callers without a checkout (a Lambda, a
+CI runner outside the repo, a webhook handler) can override each step — precedence is
+flag > env var > discovery > error:
+
+| Discovery | Flag | Env var |
+|---|---|---|
+| `git remote get-url origin` | `--repo` | `HORDE_REPO_URL` |
+| `.horde/config.yaml` lookup | `--config` | `HORDE_CONFIG_PATH` |
+| SSM path (slug-derived) | `--ssm-path` | `HORDE_SSM_PATH` |
+
+```bash
+# No git, no .horde/, only env vars — never errors "not a git repository":
+HORDE_REPO_URL=github.com/org/prepdesk \
+HORDE_SSM_PATH=/horde/prepdesk/config \
+  horde launch PROJ-1 --workflow implement-ticket --provider aws-ecs --json
+```
+
+`--repo` accepts a full URL or a bare `host/path`; it's canonicalized (trailing `.git`,
+scheme, and case are normalized) so a repo cloned with or without the `.git` suffix
+maps to one bucket of run history. On `aws-ecs` the canonical repo comes from the
+deployment's SSM config regardless of `--repo`, so all runs share one bucket. See
+`horde docs config` for details.
 
 ### Teardown
 

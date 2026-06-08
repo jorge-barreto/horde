@@ -1,0 +1,34 @@
+name: release-cli
+
+# Build and publish horde CLI binaries when a cli-v* tag is pushed. The tag is
+# the version source (GoReleaser reads {{ .Version }} from it). Cut a release
+# with: git tag -a cli-v0.1.0 -m "..." && git push origin cli-v0.1.0
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+
+jobs:
+  release-cli:
+    name: release-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser needs full history for the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}

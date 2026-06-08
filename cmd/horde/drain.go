@@ -97,3 +97,35 @@ func peekNextQueued(ctx context.Context, st store.Store, repo string) (*store.Ru
 	sortByDrainOrder(runs)
 	return runs[0], nil
 }
+
+// realizedSpendGate builds a spendOK function that sums TotalCostUSD of runs
+// completed within the trailing window and reports whether the project is under
+// the cap. Realized-only: in-flight runs contribute $0 until they finish (the
+// concurrency limit is the blast-radius backstop; see follow-on #52). A cap of
+// 0 or a zero window means "no spend cap configured" — always OK.
+func realizedSpendGate(st store.Store, repo string, capUSD float64, window time.Duration, now func() time.Time) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		if capUSD <= 0 || window <= 0 {
+			return true, nil
+		}
+		since := now().Add(-window)
+		// The window is keyed on completed_at (when spend was realized), which
+		// RunFilter.Since/Until do not filter on (they bound started_at), so
+		// fetch the repo's runs and sum in-loop on CompletedAt.
+		runs, err := st.ListRuns(ctx, store.RunFilter{Repo: repo})
+		if err != nil {
+			return false, fmt.Errorf("listing runs for spend window: %w", err)
+		}
+		var total float64
+		for _, r := range runs {
+			if r.TotalCostUSD == nil || r.CompletedAt == nil {
+				continue
+			}
+			if r.CompletedAt.Before(since) {
+				continue
+			}
+			total += *r.TotalCostUSD
+		}
+		return total < capUSD, nil
+	}
+}

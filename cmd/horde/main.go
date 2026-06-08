@@ -49,7 +49,13 @@ func main() {
 		}
 	}
 	if err := newApp().Run(context.Background(), os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		// An empty message is the cli.Exit("", code) / emittedExit convention
+		// for "exit non-zero, message already shown" — don't print a bare
+		// "error:" line in that case (the command already emitted its output,
+		// e.g. the hydrate summary or a JSON envelope).
+		if msg := err.Error(); msg != "" {
+			fmt.Fprintf(os.Stderr, "error: %v\n", msg)
+		}
 		os.Exit(1)
 	}
 }
@@ -89,8 +95,24 @@ from the local git remote. Run 'horde docs' for detailed documentation.`,
 			},
 			&cli.BoolFlag{
 				Name:  "json",
-				Usage: "Machine-readable JSON output (status, results, list)",
+				Usage: "Machine-readable JSON output (launch, retry, status, results, list, kill, clean, hydrate, push)",
 			},
+		},
+		// ExitErrHandler is the single place that turns a command error into a
+		// JSON error envelope on stdout when --json is set. urfave/cli routes
+		// every command error here via the root command, so cmd.Bool("json")
+		// resolves the global flag. main() still prints "error: <msg>" to
+		// stderr and exits non-zero — this only adds the machine-readable
+		// object on stdout. A command that already emitted its own JSON wraps
+		// errJSONEmitted around its error so we don't print a second envelope.
+		ExitErrHandler: func(ctx context.Context, cmd *cli.Command, err error) {
+			if err == nil || !cmd.Bool("json") {
+				return
+			}
+			if errors.Is(err, errJSONEmitted) {
+				return
+			}
+			_ = writeJSONTo(cmd.Writer, errorEnvelopeV1(err))
 		},
 		Commands: []*cli.Command{
 			launchCmd(),
@@ -124,16 +146,24 @@ if a run with the same ticket is already active.
 Concurrency: docker provider caps active runs at 100 (pending + running);
 aws-ecs uses the bootstrap stack's max_concurrent (default 20). Hitting
 the cap fails with "max concurrent runs reached (N/N)" — wait for or
-kill some runs before launching more.`,
+kill some runs before launching more.
+
+With --json, output is a single JSON object with a stable status field
+(launched/capped/duplicate/error); capped and duplicate then exit 0 (not 1)
+so a caller can branch on status. See 'horde docs json' for the contract.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "branch",
 				Usage: "Git branch to use",
 			},
 			&cli.StringFlag{
-				Name:     "workflow",
-				Usage:    "Orc workflow to run (required, e.g. implement-ticket)",
-				Required: true,
+				// Not Required: the Action validates this itself (empty or
+				// whitespace-only is rejected below). A urfave Required flag
+				// fails *before* the Action and prints help to stdout without
+				// routing through the root ExitErrHandler — which would break
+				// the --json contract that stdout carries only a JSON object.
+				Name:  "workflow",
+				Usage: "Orc workflow to run (required, e.g. implement-ticket)",
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -161,6 +191,7 @@ kill some runs before launching more.`,
 			workflow := strings.TrimSpace(cmd.String("workflow"))
 			timeout := cmd.Duration("timeout")
 			force := cmd.Bool("force")
+			jsonOut := cmd.Bool("json")
 
 			extraEnv, err := parseEnvFlags(cmd.StringSlice("env"))
 			if err != nil {
@@ -186,6 +217,13 @@ kill some runs before launching more.`,
 				return fmt.Errorf("checking concurrency: %w", err)
 			}
 			if activeCount >= maxConcurrent {
+				reason := fmt.Sprintf("max concurrent runs reached (%d/%d)", activeCount, maxConcurrent)
+				if jsonOut {
+					// Capped is a protocol-level success: the caller should
+					// retry later, not treat it as a failure. Exit 0 with the
+					// status in the JSON.
+					return writeJSONTo(cmd.Writer, launchCappedV1(ticket, workflow, branch, reason))
+				}
 				activeRuns, listErr := st.ListActive(ctx)
 				if listErr != nil {
 					return fmt.Errorf("at capacity (%d/%d active runs) but failed to list them: %w", activeCount, maxConcurrent, listErr)
@@ -194,7 +232,7 @@ kill some runs before launching more.`,
 				for _, r := range activeRuns {
 					fmt.Fprintf(os.Stderr, "  %s  %s\n", r.ID, r.Ticket)
 				}
-				return fmt.Errorf("max concurrent runs reached (%d/%d)", activeCount, maxConcurrent)
+				return fmt.Errorf("%s", reason)
 			}
 
 			homeDir, err := os.UserHomeDir()
@@ -255,8 +293,14 @@ kill some runs before launching more.`,
 			}
 			active = stillActive
 			if len(active) > 0 && !force {
+				reason := "duplicate active ticket (use --force to override)"
+				if jsonOut {
+					// Duplicate is a protocol-level success: the caller learns
+					// the existing run and decides what it means. Exit 0.
+					return writeJSONTo(cmd.Writer, launchDuplicateV1(ticket, workflow, branch, active[0].ID, reason))
+				}
 				fmt.Fprintf(os.Stderr, "ticket %s already has an active run (%s)\n", ticket, active[0].ID)
-				return fmt.Errorf("duplicate active ticket (use --force to override)")
+				return fmt.Errorf("%s", reason)
 			}
 
 			now := time.Now()
@@ -327,6 +371,9 @@ kill some runs before launching more.`,
 				return fmt.Errorf("updating run status: %w", err)
 			}
 
+			if jsonOut {
+				return writeJSONTo(cmd.Writer, launchLaunchedV1(id, ticket, workflow, branch))
+			}
 			fmt.Println(id)
 			return nil
 		},
@@ -479,6 +526,9 @@ resumes any interrupted agent session. Override with explicit orc args:
 				return fmt.Errorf("updating run status: %w", err)
 			}
 
+			if cmd.Bool("json") {
+				return writeJSONTo(cmd.Writer, retryV1(runID, run.Ticket))
+			}
 			fmt.Fprintf(os.Stderr, "Retrying %s (run %s)\n", run.Ticket, runID)
 			fmt.Println(runID)
 			return nil
@@ -678,6 +728,9 @@ for 'horde retry' or 'horde shell'. Use 'horde clean' to remove it.`,
 			}); err != nil {
 				return fmt.Errorf("updating run: %w", err)
 			}
+			if cmd.Bool("json") {
+				return writeJSONTo(cmd.Writer, killV1(runID, exitCode, cost))
+			}
 			fmt.Printf("Killed run %s\n", runID)
 			wsDir := provider.WorkspacePath(homeDir, runID)
 			if _, err := os.Stat(wsDir); err == nil {
@@ -864,6 +917,7 @@ directories (all code changes will be lost).`,
 			runID := cmd.Args().First()
 
 			purge := cmd.Bool("purge")
+			jsonOut := cmd.Bool("json")
 
 			if runID != "" {
 				// Clean a specific run
@@ -877,11 +931,15 @@ directories (all code changes will be lost).`,
 				if run.Status == store.StatusRunning || run.Status == store.StatusPending {
 					return fmt.Errorf("run %s is still %s — kill it first", runID, run.Status)
 				}
+				var removed []string
 				if dp, ok := prov.(*provider.DockerProvider); ok && run.InstanceID != "" {
 					if err := dp.RemoveContainer(ctx, run.InstanceID); err != nil {
 						fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 					} else {
-						fmt.Printf("Removed container for run %s\n", runID)
+						removed = append(removed, runID)
+						if !jsonOut {
+							fmt.Printf("Removed container for run %s\n", runID)
+						}
 					}
 				}
 				homeDir, _ := os.UserHomeDir()
@@ -891,7 +949,7 @@ directories (all code changes will be lost).`,
 					if purge {
 						if err := removeWorkspace(ctx, workspaceDir); err != nil {
 							fmt.Fprintf(os.Stderr, "warning: removing workspace: %v\n", err)
-						} else {
+						} else if !jsonOut {
 							fmt.Printf("Removed workspace for run %s\n", runID)
 						}
 						if err := removeWorkspace(ctx, sessionsDir); err != nil {
@@ -900,6 +958,9 @@ directories (all code changes will be lost).`,
 					} else if _, err := os.Stat(workspaceDir); err == nil {
 						fmt.Fprintf(os.Stderr, "note: workspace preserved at %s (use --purge to remove)\n", workspaceDir)
 					}
+				}
+				if jsonOut {
+					return writeJSONTo(cmd.Writer, cleanV1(removed))
 				}
 				return nil
 			}
@@ -927,7 +988,7 @@ directories (all code changes will be lost).`,
 			for _, r := range activeRuns {
 				activeIDs[r.ID] = true
 			}
-			var cleaned int
+			var removed []string
 			for _, r := range allRuns {
 				if activeIDs[r.ID] {
 					continue
@@ -936,7 +997,7 @@ directories (all code changes will be lost).`,
 					if err := dp.RemoveContainer(ctx, r.InstanceID); err != nil {
 						fmt.Fprintf(os.Stderr, "warning: removing container for run %s: %v\n", r.ID, err)
 					} else {
-						cleaned++
+						removed = append(removed, r.ID)
 					}
 				}
 				if purge && homeDir != "" {
@@ -944,7 +1005,10 @@ directories (all code changes will be lost).`,
 					removeWorkspace(ctx, provider.SessionsPath(homeDir, r.ID))
 				}
 			}
-			fmt.Printf("Removed %d container(s)\n", cleaned)
+			if jsonOut {
+				return writeJSONTo(cmd.Writer, cleanV1(removed))
+			}
+			fmt.Printf("Removed %d container(s)\n", len(removed))
 			return nil
 		},
 	}

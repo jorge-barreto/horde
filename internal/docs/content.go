@@ -38,6 +38,12 @@ var topics = []Topic{
 		Content: topicHydrate,
 	},
 	{
+		Name:    "json",
+		Title:   "Machine-Readable Output (--json)",
+		Summary: "JSON output, launch status enum, exit codes for scripting",
+		Content: topicJSON,
+	},
+	{
 		Name:    "env",
 		Title:   "Environment Setup",
 		Summary: "Required secrets, .env file, token permissions",
@@ -669,7 +675,7 @@ Single run:
 Weekly batch (e.g. a cron job):
 
     horde list --all --json \\
-      | jq -r '.[].id' \\
+      | jq -r '.runs[].id' \\
       | xargs horde hydrate --into /tmp/weekly
 
 Semantics
@@ -687,6 +693,92 @@ Providers
 
 - Docker provider: copies from ~/.horde/results/<run-id>/.
 - ECS provider: downloads from s3://<artifacts-bucket>/horde-runs/<run-id>/.
+`
+
+const topicJSON = `Machine-Readable Output (--json)
+================================
+
+The global --json flag switches a command's stdout to a single
+machine-readable JSON object. It applies to:
+
+    launch  retry  status  results  list  kill  clean  hydrate  push
+
+Under --json, stdout carries exactly one JSON object and nothing else.
+Human-oriented chatter (image-build progress, warnings, the "Retrying..."
+line) always goes to stderr, so a consumer parsing stdout is never
+corrupted.
+
+Errors
+------
+
+On a real failure, any command emits an error envelope to stdout and
+exits non-zero, while the human "error: <message>" line still goes to
+stderr:
+
+    {
+      "status": "error",
+      "reason": "validating .env file: missing required key(s): GIT_TOKEN"
+    }
+
+Launch status enum
+------------------
+
+'horde launch --json' emits a stable status so programmatic callers never
+have to grep stderr wording:
+
+    {
+      "status": "launched",
+      "run_id": "a1b2c3d4e5f6",
+      "ticket": "PROJ-123",
+      "workflow": "implement-ticket",
+      "branch": "develop",
+      "existing_run_id": null
+    }
+
+    status            meaning                                        exit
+    --------------    -------------------------------------------    ----
+    launched          run started; run_id set                       0
+    duplicate         an active run already exists for the ticket;   0
+                      existing_run_id set
+    capped            at the concurrency limit; retry later;         0
+                      reason set
+    error             a real failure; reason set                     1
+
+run_id is null unless status is "launched"; existing_run_id is null
+unless status is "duplicate".
+
+Exit codes
+----------
+
+Under --json, exit codes are binary: 0 for any protocol-level outcome
+(launched / duplicate / capped) and 1 only for true errors. Branch on the
+"status" field to tell them apart — a capped launch is a signal to retry,
+not a failure.
+
+WITHOUT --json, 'launch' keeps its human behavior: a duplicate or capped
+launch prints a message to stderr and exits 1.
+
+Scripting examples
+------------------
+
+Launch and react to the outcome:
+
+    out=$(horde launch --provider docker --workflow implement-ticket PROJ-123 --json)
+    case "$(echo "$out" | jq -r .status)" in
+      launched)  echo "started $(echo "$out" | jq -r .run_id)" ;;
+      duplicate) echo "already running: $(echo "$out" | jq -r .existing_run_id)" ;;
+      capped)    echo "at capacity, requeue later" ;;          # retry the message
+      error)     echo "failed: $(echo "$out" | jq -r .reason)" >&2; exit 1 ;;
+    esac
+
+List every run's workflow without N+1 status calls (issue #25):
+
+    horde list --all --json | jq -r '.runs[] | "\(.id) \(.workflow) \(.status)"'
+
+Other commands report a status object too: retry -> "retrying",
+kill -> "killed", clean -> "cleaned" (with removed_run_ids), push ->
+"pushed" (with image + digest), hydrate -> aggregate counts plus a
+per-run "runs" array.
 `
 
 const topicBootstrap = `AWS Bootstrap

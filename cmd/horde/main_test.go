@@ -270,9 +270,10 @@ func TestLaunch_MissingTicket(t *testing.T) {
 }
 
 // TestLaunch_MissingWorkflow ensures launch refuses to proceed when --workflow
-// is omitted entirely (urfave's Required-flag check). Without this guard,
-// orc would silently apply its own default workflow and write audit files
-// under a path horde wouldn't read, leaving cost data orphaned.
+// is omitted entirely (validated inside the Action, not as a urfave Required
+// flag, so the error routes through the JSON envelope under --json). Without
+// this guard, orc would silently apply its own default workflow and write
+// audit files under a path horde wouldn't read, leaving cost data orphaned.
 func TestLaunch_MissingWorkflow(t *testing.T) {
 	env := setupLaunchEnv(t)
 	ctx := context.Background()
@@ -4214,7 +4215,7 @@ func TestList_JSON_ActiveOnly(t *testing.T) {
 	now := time.Now()
 	completedAt := now.Add(-10 * time.Minute)
 	runs := []*store.Run{
-		{ID: "listjson001", Ticket: "T-1", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "listjson001", Ticket: "T-1", Workflow: "implement-ticket", Branch: "develop", Status: store.StatusPending, Repo: "github.com/test/repo.git", Provider: "docker", InstanceID: "inst-001", LaunchedBy: "testuser", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
 		{ID: "listjson002", Ticket: "T-2", Status: store.StatusRunning, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-5 * time.Minute), TimeoutAt: now.Add(55 * time.Minute)},
 		{ID: "listjson003", Ticket: "T-3", Status: store.StatusSuccess, Repo: "github.com/test/repo.git", Provider: "docker", LaunchedBy: "testuser", StartedAt: now.Add(-20 * time.Minute), CompletedAt: &completedAt, TimeoutAt: now.Add(40 * time.Minute)},
 	}
@@ -4261,6 +4262,33 @@ func TestList_JSON_ActiveOnly(t *testing.T) {
 		if bad == "listjson003" {
 			t.Errorf("runs should not contain listjson003")
 		}
+	}
+
+	// #25: list --json must carry the same per-run detail as status --json so
+	// callers don't need N+1 status lookups. Verify the fields on listjson001.
+	var r1 *ListRunV1
+	for i := range v.Runs {
+		if v.Runs[i].ID == "listjson001" {
+			r1 = &v.Runs[i]
+		}
+	}
+	if r1 == nil {
+		t.Fatal("listjson001 not found in output")
+	}
+	if r1.Workflow != "implement-ticket" {
+		t.Errorf("Workflow = %q, want implement-ticket", r1.Workflow)
+	}
+	if r1.Branch != "develop" {
+		t.Errorf("Branch = %q, want develop", r1.Branch)
+	}
+	if r1.InstanceID != "inst-001" {
+		t.Errorf("InstanceID = %q, want inst-001", r1.InstanceID)
+	}
+	if r1.LaunchedBy != "testuser" {
+		t.Errorf("LaunchedBy = %q, want testuser", r1.LaunchedBy)
+	}
+	if r1.StartedAt == "" {
+		t.Errorf("StartedAt is empty")
 	}
 }
 
@@ -4886,6 +4914,580 @@ func TestAuditRelPath(t *testing.T) {
 					tc.workflow, tc.ticket, tc.filename, got, tc.want)
 			}
 		})
+	}
+}
+
+// --- launch/retry/kill/clean --json output tests ---
+
+func TestLaunch_JSON_Launched(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "launch", "--workflow", "implement-ticket", "--branch", "develop", "TICKET-1"})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+
+	var v LaunchV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "launched" {
+		t.Errorf("Status = %q, want launched", v.Status)
+	}
+	if v.RunID == nil || !regexp.MustCompile(`^[a-z0-9]{12}$`).MatchString(*v.RunID) {
+		t.Errorf("RunID = %v, want 12-char id", v.RunID)
+	}
+	if v.Ticket != "TICKET-1" || v.Workflow != "implement-ticket" || v.Branch != "develop" {
+		t.Errorf("ticket/workflow/branch = %q/%q/%q", v.Ticket, v.Workflow, v.Branch)
+	}
+	if v.ExistingRunID != nil {
+		t.Errorf("ExistingRunID = %v, want nil", v.ExistingRunID)
+	}
+
+	// The recorded run must match the reported run_id.
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	defer st.Close()
+	runs, err := st.ListByRepo(ctx, "github.com/test/repo.git", false)
+	if err != nil {
+		t.Fatalf("listing runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != *v.RunID {
+		t.Errorf("store run id mismatch: runs=%d, want id %q", len(runs), *v.RunID)
+	}
+}
+
+func TestLaunch_JSON_Duplicate(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: "existingrunid", Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
+		StartedAt: now, TimeoutAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("pre-creating run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "launch", "--workflow", "implement-ticket", "TICKET-1"})
+	// Duplicate is a protocol-level success: exit 0.
+	if runErr != nil {
+		t.Fatalf("expected nil error (exit 0), got %v", runErr)
+	}
+
+	var v LaunchV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "duplicate" {
+		t.Errorf("Status = %q, want duplicate", v.Status)
+	}
+	if v.ExistingRunID == nil || *v.ExistingRunID != "existingrunid" {
+		t.Errorf("ExistingRunID = %v, want existingrunid", v.ExistingRunID)
+	}
+	if v.RunID != nil {
+		t.Errorf("RunID = %v, want nil", v.RunID)
+	}
+	if v.Reason == "" {
+		t.Errorf("Reason is empty")
+	}
+}
+
+func TestLaunch_JSON_Capped(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	for i := 0; i < 100; i++ { // docker cap is 100
+		if err := st.CreateRun(ctx, &store.Run{
+			ID: fmt.Sprintf("cap-run-%03d", i), Repo: "github.com/test/repo.git",
+			Ticket: fmt.Sprintf("CAP-%d", i), Status: store.StatusRunning, Provider: "docker",
+			LaunchedBy: "someone", StartedAt: now.Add(time.Duration(i) * time.Second), TimeoutAt: now.Add(25 * time.Hour),
+		}); err != nil {
+			t.Fatalf("pre-creating run %d: %v", i, err)
+		}
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "launch", "--workflow", "implement-ticket", "TICKET-NEW"})
+	// Capped is a protocol-level success: exit 0.
+	if runErr != nil {
+		t.Fatalf("expected nil error (exit 0), got %v", runErr)
+	}
+
+	var v LaunchV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "capped" {
+		t.Errorf("Status = %q, want capped", v.Status)
+	}
+	if !strings.Contains(v.Reason, "max concurrent runs reached") {
+		t.Errorf("Reason = %q, want it to mention the cap", v.Reason)
+	}
+	if v.RunID != nil {
+		t.Errorf("RunID = %v, want nil", v.RunID)
+	}
+}
+
+func TestLaunch_JSON_Error(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	// Remove GIT_TOKEN from .env to trigger a real validation error.
+	if err := os.WriteFile(filepath.Join(env.projectDir, ".env"), []byte("CLAUDE_CODE_OAUTH_TOKEN=test-key\n"), 0o644); err != nil {
+		t.Fatalf("rewriting .env: %v", err)
+	}
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "launch", "--workflow", "implement-ticket", "TICKET-1"})
+	if runErr == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	// Under --json a real error emits an ErrorV1 envelope on stdout.
+	var v ErrorV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON error envelope: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "error" {
+		t.Errorf("Status = %q, want error", v.Status)
+	}
+	if v.Reason == "" {
+		t.Errorf("Reason is empty")
+	}
+}
+
+func TestLaunch_HumanDuplicate_StillExits1(t *testing.T) {
+	// Regression: without --json, a duplicate ticket keeps its human behavior
+	// (returns an error → exit 1) and emits no JSON on stdout.
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: "existingrunid", Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
+		StartedAt: now, TimeoutAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("pre-creating run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "launch", "--workflow", "implement-ticket", "TICKET-1"})
+	if runErr == nil {
+		t.Fatal("expected error (exit 1), got nil")
+	}
+	if !strings.Contains(runErr.Error(), "duplicate active ticket") {
+		t.Errorf("error %q does not mention duplicate active ticket", runErr.Error())
+	}
+	// No JSON object should have been written.
+	var probe map[string]any
+	if json.Unmarshal(buf.Bytes(), &probe) == nil {
+		if _, ok := probe["status"]; ok {
+			t.Errorf("human-mode duplicate emitted JSON on stdout: %s", buf.Bytes())
+		}
+	}
+}
+
+func TestRetry_JSON(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  image) echo "2099-01-01T00:00:00Z" ;;
+  inspect) echo '{"Running":false,"ExitCode":1,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"2026-01-01T00:05:00Z"}' ;;
+  exec) exit 1 ;;
+  cp) exit 0 ;;
+  *) echo retryrun0001container ;;
+esac
+`
+	env := setupLaunchEnv(t)
+	// Overwrite the fake docker with one that also handles launch on retry.
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing fake docker: %v", err)
+	}
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-1 * time.Minute)
+	runID := "retryjson001"
+	// Build the workspace so retry's resume path is satisfied (it checks for
+	// a .git dir inside the run's workspace).
+	wsDir := filepath.Join(filepath.Dir(env.projectDir), ".horde", "workspaces", runID)
+	if err := os.MkdirAll(filepath.Join(wsDir, ".git"), 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Workflow: "implement-ticket", Status: store.StatusFailed, Provider: "docker",
+		LaunchedBy: "someone", StartedAt: now.Add(-10 * time.Minute), CompletedAt: &completedAt,
+		TimeoutAt: now.Add(time.Hour), InstanceID: "oldcontainer",
+	}); err != nil {
+		t.Fatalf("pre-creating run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "retry", runID})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, buf.Bytes())
+	}
+
+	var v RetryV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "retrying" {
+		t.Errorf("Status = %q, want retrying", v.Status)
+	}
+	if v.RunID != runID {
+		t.Errorf("RunID = %q, want %q", v.RunID, runID)
+	}
+	if v.Ticket != "TICKET-1" {
+		t.Errorf("Ticket = %q, want TICKET-1", v.Ticket)
+	}
+}
+
+func TestKill_JSON(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  inspect) echo '{"Running":true,"ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"0001-01-01T00:00:00Z"}' ;;
+  exec) exit 1 ;;
+  stop) exit 0 ;;
+  cp) exit 0 ;;
+esac
+`
+	env := setupStatusEnv(t, dockerScript)
+	ctx := context.Background()
+
+	runID := "killjson0001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "testuser", StartedAt: time.Now(),
+		TimeoutAt: time.Now().Add(60 * time.Minute), Status: store.StatusRunning, InstanceID: "abc123",
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "kill", runID})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, buf.Bytes())
+	}
+
+	var v KillV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "killed" {
+		t.Errorf("Status = %q, want killed", v.Status)
+	}
+	if v.RunID != runID {
+		t.Errorf("RunID = %q, want %q", v.RunID, runID)
+	}
+}
+
+func TestClean_JSON_All(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  rm) exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	env := setupLaunchEnv(t)
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing fake docker: %v", err)
+	}
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-1 * time.Minute)
+	// Two terminal runs (with containers) and one running run that must survive.
+	terminal := []string{"cleanjson001", "cleanjson002"}
+	for _, id := range terminal {
+		if err := st.CreateRun(ctx, &store.Run{
+			ID: id, Repo: "github.com/test/repo.git", Ticket: id, Status: store.StatusSuccess,
+			Provider: "docker", LaunchedBy: "u", StartedAt: now.Add(-10 * time.Minute),
+			CompletedAt: &completedAt, TimeoutAt: now.Add(time.Hour), InstanceID: id + "-c",
+		}); err != nil {
+			t.Fatalf("creating run %s: %v", id, err)
+		}
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: "cleanjson999", Repo: "github.com/test/repo.git", Ticket: "T-run", Status: store.StatusRunning,
+		Provider: "docker", LaunchedBy: "u", StartedAt: now, TimeoutAt: now.Add(time.Hour), InstanceID: "run-c",
+	}); err != nil {
+		t.Fatalf("creating running run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "clean"})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, buf.Bytes())
+	}
+
+	var v CleanV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "cleaned" {
+		t.Errorf("Status = %q, want cleaned", v.Status)
+	}
+	if v.RemovedCount != 2 || len(v.RemovedRunIDs) != 2 {
+		t.Errorf("removed = %d / %v, want 2 terminal runs", v.RemovedCount, v.RemovedRunIDs)
+	}
+	for _, id := range v.RemovedRunIDs {
+		if id == "cleanjson999" {
+			t.Errorf("running run should not be removed")
+		}
+	}
+}
+
+func TestClean_JSON_Empty(t *testing.T) {
+	env := setupLaunchEnv(t)
+	ctx := context.Background()
+	// No runs at all → empty removed list, must serialize as [] not null.
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "clean"})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, buf.Bytes())
+	}
+	if !strings.Contains(buf.String(), `"removed_run_ids": []`) {
+		t.Errorf("expected empty array for removed_run_ids, got: %s", buf.String())
+	}
+	_ = env
+}
+
+func TestHydrate_JSON_FailureSingleEnvelope(t *testing.T) {
+	// End-to-end guard for the no-double-envelope behavior: hydrate --json
+	// emits one HydrateV1 (status:"error") and returns emittedExit{1}, so the
+	// root ExitErrHandler must NOT also write an ErrorV1. A non-terminal run
+	// produces a failure outcome without needing a real provider HydrateRun.
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	runID := "hydratejson01"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "u", StartedAt: time.Now(),
+		TimeoutAt: time.Now().Add(time.Hour), Status: store.StatusRunning, // non-terminal → failure
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+
+	into := filepath.Join(env.tmpHome, "hydrate-into")
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "hydrate", runID, "--into", into})
+	if runErr == nil {
+		t.Fatal("expected non-nil error (exit 1) for a failing hydrate")
+	}
+
+	// Stdout must be exactly ONE JSON object (a HydrateV1, not a trailing
+	// ErrorV1 envelope). json.Decoder.More() catches a second value.
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	var v HydrateV1
+	if err := dec.Decode(&v); err != nil {
+		t.Fatalf("decoding HydrateV1: %v\noutput: %s", err, buf.Bytes())
+	}
+	if dec.More() {
+		t.Errorf("stdout has a second JSON value (double envelope): %s", buf.Bytes())
+	}
+	if v.Status != "error" {
+		t.Errorf("Status = %q, want error", v.Status)
+	}
+	if v.Failed != 1 || len(v.Runs) != 1 {
+		t.Errorf("failed=%d runs=%d, want 1/1", v.Failed, len(v.Runs))
+	}
+	if v.Runs[0].RunID != runID || v.Runs[0].Status != "failed" || v.Runs[0].Reason == "" {
+		t.Errorf("run outcome = %+v, want failed with a reason", v.Runs[0])
+	}
+}
+
+func TestHydrate_JSON_MissingInto_EmitsEnvelope(t *testing.T) {
+	// Regression: --into must NOT be a urfave Required flag, or omitting it
+	// under --json dumps help to stdout instead of an ErrorV1 envelope (the
+	// same hole that was fixed for launch's --workflow).
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "hydrate", "somerunid"})
+	if runErr == nil {
+		t.Fatal("expected error when --into is omitted")
+	}
+	var v ErrorV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("stdout is not a JSON envelope (help leaked?): %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "error" || !strings.Contains(v.Reason, "--into") {
+		t.Errorf("envelope = %+v, want status=error mentioning --into", v)
+	}
+	_ = env
+}
+
+func TestHydrate_HumanMissingInto_Errors(t *testing.T) {
+	// Without --json, omitting --into still errors (no behavior regression
+	// from dropping Required:true).
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "hydrate", "somerunid"})
+	if err == nil {
+		t.Fatal("expected error when --into is omitted")
+	}
+	if !strings.Contains(err.Error(), "--into is required") {
+		t.Errorf("error %q does not mention --into is required", err.Error())
+	}
+	_ = env
+}
+
+func TestStatus_JSON_ErrorEnvelope(t *testing.T) {
+	// The JSON error envelope is produced by the shared root ExitErrHandler,
+	// so exercise it through a non-launch command (status on a missing run)
+	// to guard against a per-command routing regression.
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	// Create an empty store so the run genuinely doesn't exist.
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "status", "nonexistentrn"})
+	if runErr == nil {
+		t.Fatal("expected error for missing run")
+	}
+	var v ErrorV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing ErrorV1: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "error" || v.Reason == "" {
+		t.Errorf("envelope = %+v, want status=error with reason", v)
+	}
+}
+
+func TestResults_JSON_DurationSeconds(t *testing.T) {
+	env := setupStatusEnv(t, "#!/bin/sh\n# no-op\n")
+	ctx := context.Background()
+	runID := "durresults001"
+	st, err := store.NewSQLiteStore(env.dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo.git", Ticket: "TICKET-1",
+		Provider: "docker", LaunchedBy: "u", StartedAt: time.Now(),
+		TimeoutAt: time.Now().Add(60 * time.Minute), Status: store.StatusSuccess,
+	}); err != nil {
+		t.Fatalf("creating run: %v", err)
+	}
+	st.Close()
+	resultDir := filepath.Join(env.tmpHome, ".horde", "results", runID, "audit", "TICKET-1")
+	if err := os.MkdirAll(resultDir, 0o755); err != nil {
+		t.Fatalf("creating result dir: %v", err)
+	}
+	// total_duration "12m 34s" = 754s; phase "4m 57s" = 297s; phase "bogus" unparseable.
+	resultJSON := `{"exit_code":0,"status":"completed","ticket":"TICKET-1","workflow":"","total_cost_usd":1.0,"total_duration":"12m 34s","phases":[{"name":"a","status":"completed","cost_usd":0.5,"duration":"4m 57s"},{"name":"b","status":"completed","cost_usd":0.5,"duration":"bogus"}]}`
+	if err := os.WriteFile(filepath.Join(resultDir, "run-result.json"), []byte(resultJSON), 0o644); err != nil {
+		t.Fatalf("writing run-result.json: %v", err)
+	}
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "results", runID})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, buf.Bytes())
+	}
+	var v ResultsV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.TotalDurationSecs == nil || *v.TotalDurationSecs != 754 {
+		t.Errorf("TotalDurationSecs = %v, want 754", v.TotalDurationSecs)
+	}
+	if len(v.Phases) != 2 {
+		t.Fatalf("len(Phases) = %d, want 2", len(v.Phases))
+	}
+	if v.Phases[0].DurationSecs == nil || *v.Phases[0].DurationSecs != 297 {
+		t.Errorf("Phases[0].DurationSecs = %v, want 297", v.Phases[0].DurationSecs)
+	}
+	// Unparseable orc string → numeric field omitted, string preserved.
+	if v.Phases[1].DurationSecs != nil {
+		t.Errorf("Phases[1].DurationSecs = %v, want nil (unparseable)", v.Phases[1].DurationSecs)
+	}
+	if v.Phases[1].Duration != "bogus" {
+		t.Errorf("Phases[1].Duration = %q, want bogus (string preserved)", v.Phases[1].Duration)
 	}
 }
 

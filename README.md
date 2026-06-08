@@ -114,6 +114,29 @@ Example `horde status --json` output:
 }
 ```
 
+### Programmatic launches (`--json`)
+
+`--json` works on `launch`, `retry`, `status`, `results`, `list`, `kill`, `clean`,
+`hydrate`, and `push`. Under `--json`, stdout carries exactly one JSON object; on a
+real error any command emits `{"status":"error","reason":"..."}` to stdout and exits
+non-zero, while the human `error:` line still goes to stderr.
+
+`horde launch --json` emits a stable status enum so callers don't grep stderr wording:
+
+```json
+{ "status": "launched", "run_id": "a1b2c3d4e5f6", "ticket": "PROJ-123", "workflow": "implement-ticket", "branch": "develop", "existing_run_id": null }
+```
+
+- `launched` — run started (`run_id` set); exit 0
+- `duplicate` — an active run already exists for the ticket (`existing_run_id` set); exit 0
+- `capped` — at the concurrency limit, retry later (`reason` set); exit 0
+- `error` — a real failure (`reason` set); exit 1
+
+Exit codes under `--json` are binary: 0 for any protocol-level outcome
+(`launched`/`duplicate`/`capped`), 1 only for true errors — branch on the `status`
+field. Without `--json`, `duplicate` and `capped` keep their human behavior (a stderr
+message and exit 1).
+
 ### Teardown
 
 ```bash

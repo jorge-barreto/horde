@@ -220,3 +220,16 @@ func TestResultsTokens(t *testing.T) {
 }
 
 func ptrInt(i int) *int { return &i }
+
+func TestLaunchQueuedV1Shape(t *testing.T) {
+	v := launchQueuedV1("run123", "T-1", "impl", "main", "high")
+	if v.Status != "queued" {
+		t.Errorf("status = %q, want queued", v.Status)
+	}
+	if v.RunID == nil || *v.RunID != "run123" {
+		t.Errorf("run_id = %v, want run123", v.RunID)
+	}
+	if v.Priority != "high" {
+		t.Errorf("priority = %q, want high", v.Priority)
+	}
+}

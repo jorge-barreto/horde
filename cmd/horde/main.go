@@ -211,6 +211,14 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Name:  "label",
 				Usage: "Attach a key=value label to the run (repeatable); filterable via `horde list --label`",
 			},
+			&cli.BoolFlag{
+				Name:  "enqueue",
+				Usage: "Park the launch in the server-side queue (aws-ecs only); it runs when a slot frees. Exits 0 with status 'queued' under --json.",
+			},
+			&cli.StringFlag{
+				Name:  "priority",
+				Usage: "Queue priority for --enqueue: lowest|low|med|high|highest (default med). Higher drains first.",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -235,6 +243,12 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				return err
 			}
 
+			enqueue := cmd.Bool("enqueue")
+			priority, err := store.ParsePriority(cmd.String("priority"))
+			if err != nil {
+				return err
+			}
+
 			if workflow == "" {
 				return fmt.Errorf("--workflow is required (e.g. --workflow implement-ticket)")
 			}
@@ -248,12 +262,15 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			}
 			defer cleanup()
 
-			// Concurrency check: reject launch if at capacity.
+			// Concurrency check: reject a DIRECT launch at capacity. An
+			// --enqueue launch skips the gate — it is parking a row to run
+			// later, not contending for a slot now (a queued run counts as
+			// neither pending nor running in CountActive).
 			activeCount, err := st.CountActive(ctx)
 			if err != nil {
 				return fmt.Errorf("checking concurrency: %w", err)
 			}
-			if activeCount >= maxConcurrent {
+			if !enqueue && activeCount >= maxConcurrent {
 				reason := fmt.Sprintf("max concurrent runs reached (%d/%d)", activeCount, maxConcurrent)
 				if jsonOut {
 					// Capped is a protocol-level success: the caller should
@@ -326,7 +343,9 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				if err := finalizeAndSync(ctx, prov, st, r, homeDir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 				}
-				if r.Status == store.StatusPending || r.Status == store.StatusRunning {
+				// A queued run also blocks a duplicate (it is waiting to run for
+				// this (ticket, workflow)); Finalize is a no-op for it.
+				if r.Status == store.StatusPending || r.Status == store.StatusRunning || r.Status == store.StatusQueued {
 					stillActive = append(stillActive, r)
 				}
 			}
@@ -340,6 +359,35 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				}
 				fmt.Fprintf(os.Stderr, "ticket %s already has an active run (%s)\n", ticket, active[0].ID)
 				return fmt.Errorf("%s", reason)
+			}
+
+			// --enqueue: park a queued run and exit. It skips provider launch
+			// entirely; the drain (terminal event / lazy CLI) starts it later.
+			if enqueue {
+				if provName != "aws-ecs" {
+					return fmt.Errorf("--enqueue requires the aws-ecs provider; docker has no event source to drain the queue")
+				}
+				qrun := &store.Run{
+					ID:         id,
+					Repo:       repo,
+					Ticket:     ticket,
+					Branch:     branch,
+					Workflow:   workflow,
+					Provider:   provName,
+					Status:     store.StatusQueued,
+					Labels:     labels,
+					LaunchedBy: launchedBy,
+					Priority:   priority,
+					EnqueuedAt: time.Now(),
+				}
+				if err := st.CreateRun(ctx, qrun); err != nil {
+					return fmt.Errorf("enqueuing run: %w", err)
+				}
+				if jsonOut {
+					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority)))
+				}
+				fmt.Printf("%s (queued, priority %s)\n", id, priority)
+				return nil
 			}
 
 			now := time.Now()

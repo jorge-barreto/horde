@@ -338,6 +338,9 @@ type LaunchV1 struct {
 	Branch        string  `json:"branch"`
 	Reason        string  `json:"reason,omitempty"`
 	ExistingRunID *string `json:"existing_run_id"`
+	// Priority is set only for the "queued" status (the level the run was
+	// parked at). Omitted for launched/capped/duplicate.
+	Priority string `json:"priority,omitempty"`
 }
 
 func launchLaunchedV1(runID, ticket, workflow, branch string) LaunchV1 {
@@ -350,6 +353,12 @@ func launchCappedV1(ticket, workflow, branch, reason string) LaunchV1 {
 
 func launchDuplicateV1(ticket, workflow, branch, existingRunID, reason string) LaunchV1 {
 	return LaunchV1{Status: "duplicate", Ticket: ticket, Workflow: workflow, Branch: branch, Reason: reason, ExistingRunID: &existingRunID}
+}
+
+// launchQueuedV1 reports a launch parked in the server-side backlog
+// (`--enqueue`). Exit 0 — a protocol-level outcome like capped/duplicate.
+func launchQueuedV1(runID, ticket, workflow, branch, priority string) LaunchV1 {
+	return LaunchV1{Status: "queued", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Priority: priority}
 }
 
 // RetryV1 is the JSON contract for `horde retry --json`.

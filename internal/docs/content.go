@@ -807,9 +807,11 @@ kill -> "killed", clean -> "cleaned" (with removed_run_ids), push ->
 per-run "runs" array.
 `
 
-const topicInstall = `# Installing and Updating horde
+const topicInstall = `Installing and Updating horde
+=============================
 
-## Install (no Go toolchain required)
+Install (no Go toolchain required)
+----------------------------------
 
 Download the latest release binary:
 
@@ -823,16 +825,19 @@ Pin a version or change the install directory:
 The script detects your OS/arch, downloads the matching release archive,
 verifies its SHA-256 checksum, and installs the binary.
 
-## Install via Homebrew
+Install via Homebrew
+--------------------
 
     brew tap jorge-barreto/tap
     brew install horde
 
-## Install from source (requires Go 1.24+)
+Install from source (requires Go 1.24+)
+---------------------------------------
 
     make install
 
-## Updating
+Updating
+--------
 
 If you installed via the script or a downloaded binary:
 

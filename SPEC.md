@@ -78,7 +78,7 @@ The horde CLI reads infrastructure config from SSM Parameter Store, then calls E
 The status Lambda:
 - Receives ECS task state change events filtered to the horde cluster
 - Extracts the task ARN and maps it to a run ID via DynamoDB query
-- Updates `status`, `exit_code`, `completed_at`, and `total_cost_usd` (reads `run-result.json` from S3 if present) on terminal states (STOPPED)
+- Updates `status`, `exit_code`, `completed_at`, and `total_cost_usd` (reads `run-result.json` from S3 if present) on terminal states (STOPPED). The exit code is read from the **worker** container (found by name, `horde-worker`), not the first container in the event — so sidecar containers can't be mistaken for the worker. The same by-name selection is applied in the Go provider's lazy reconciliation (`internal/provider/ecs.go`), the third place that derives run status from a container exit code.
 - Records the ECS stop reason (`stopCode`/`stoppedReason` from the event) into the run's `metadata` map as `stop_code`/`stop_reason`. This is diagnostic today and is the signal a future spot auto-resume keys off — a Fargate spot interruption surfaces as `stop_code == "TerminationNotice"`.
 - Is idempotent — CLI-driven updates and Lambda-driven updates converge to the same state. The CDK (`cdk/src/status-lambda/index.ts`) and bootstrap-CloudFormation (Python) implementations are kept in lockstep.
 
@@ -680,12 +680,22 @@ new HordeWorker(this, 'Horde', {
   defaultTimeoutMinutes: 1440,   // Default run timeout (default 1440 = 24h)
   logRetentionDays: 30,          // CloudWatch log retention
   ssmParameterPath: '/horde/config',
+  sidecars: [                    // optional — extra containers in the worker task
+    {                            //   (test DBs, headless browsers, mock services)
+      containerName: 'postgres',
+      image: ecs.ContainerImage.fromRegistry('postgres:16'),
+      environment: { POSTGRES_PASSWORD: 'dev' },
+      // essential defaults to false; logging defaults to the worker log group
+    },
+  ],
 });
 ```
 
 The construct creates:
 - ECS cluster (or uses existing one if provided)
-- Fargate task definition with the worker image
+- Fargate task definition with the worker image (plus any `sidecars` — extra
+  containers sharing the task's network namespace, reachable on `localhost`;
+  CDK-only, see `horde docs cdk`)
 - Secrets injected via `valueFrom` (Secrets Manager ARN injection)
 - IAM task role (scoped: S3 write to artifacts bucket, Secrets Manager read for secrets)
 - IAM execution role (ECR pull, CloudWatch Logs write)

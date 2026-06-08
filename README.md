@@ -88,6 +88,8 @@ horde push                            # build + upload worker image
 
 Attach the `CliUserManagedPolicyArn` output to the IAM user or role that will run `horde launch`. Full flow: `horde docs cdk`.
 
+Need a database, headless browser, or mock service running alongside the worker? The construct's `sidecars` prop attaches extra containers to the worker task, reachable on `localhost` (see [`cdk/README.md`](cdk/README.md#sidecar-containers) or `horde docs cdk`).
+
 ### Launch
 
 Once the stack is up and the image is pushed, from any repo whose git remote matches the slug:

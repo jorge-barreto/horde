@@ -140,6 +140,11 @@ Other useful commands:
     horde shell <run-id>     # interactive shell into the container
     horde clean [run-id]     # remove stopped containers
     horde docs <topic>       # read detailed documentation
+
+Need a database, headless browser, or mock service alongside the worker? If you
+deploy via the @horde.io/cdk construct you can attach sidecar containers to the
+worker task (reachable on localhost) with the 'sidecars' prop — see
+'horde docs cdk'.
 `
 
 const topicConfig = `Project Configuration

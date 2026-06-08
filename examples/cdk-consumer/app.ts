@@ -75,6 +75,16 @@ const worker = new HordeWorker(stack, "Worker", {
   // maxConcurrent: 5,
   // defaultTimeoutMinutes: 1440,
   // logRetentionDays: 30,
+  // Extra containers in the worker task, reachable on localhost (see
+  // `horde docs cdk`). essential defaults to false; logging defaults to the
+  // worker log group.
+  // sidecars: [
+  //   {
+  //     containerName: "postgres",
+  //     image: ecs.ContainerImage.fromRegistry("postgres:16"),
+  //     environment: { POSTGRES_PASSWORD: "dev" },
+  //   },
+  // ],
 });
 
 // CFN outputs useful for wiring horde locally.

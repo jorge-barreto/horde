@@ -460,7 +460,7 @@ type RunResult struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	ExitCode     *int     `json:"exit_code"`
 	// Forward token fields: orc does not write these to run-result.json yet
-	// (tracked in jorge-barreto/orc#NN). costs.json is the source today; these
+	// (tracked in jorge-barreto/orc#4). costs.json is the source today; these
 	// become the run-summary fallback once orc promotes them. Field names match
 	// costs.json's run-total names.
 	TotalInputTokens         *int `json:"total_input_tokens"`
@@ -548,7 +548,7 @@ func tokenUsageFromRunResult(rr RunResult) *store.TokenUsage {
 // ReadTokenUsage reads per-run token totals from the run's local audit dir.
 // costs.json is preferred (orc writes token totals there today, flushed
 // per-phase and atomically); the run-result.json token fields are the forward
-// fallback once orc promotes them (jorge-barreto/orc#NN). Returns nil when
+// fallback once orc promotes them (jorge-barreto/orc#4). Returns nil when
 // neither source carries usage — best-effort, exactly like ReadRunResult.
 func ReadTokenUsage(homeDir string, run *store.Run) *store.TokenUsage {
 	auditBase := LocalResultsDir(homeDir, run.ID)

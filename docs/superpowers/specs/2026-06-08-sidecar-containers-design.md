@@ -93,8 +93,11 @@ this.sidecarContainers = (props.sidecars ?? []).map((s) => {
 });
 ```
 
-The merge spreads `s` last so a caller-provided `essential`/`logging` wins over
-the defaults; the snippet is illustrative of intent, not final code. Expose
+Defaults are applied with `essential: s.essential ?? false` and
+`logging: s.logging ?? <shared-group>` — NOT by spreading `s` last — so a caller
+passing an explicit `essential: undefined` can't fall through to CDK's own
+`essential: true` default and silently flip a sidecar to essential. The snippet
+is illustrative of intent, not final code. Expose
 `public readonly sidecarContainers: ecs.ContainerDefinition[]`.
 
 The worker container is still added first (defensive), but correctness no longer
@@ -157,6 +160,19 @@ exit_code = worker.get("exitCode") if worker else None
 This is a no-op for current single-container stacks and future-proofs the
 bootstrap path if it ever gains a sidecar.
 
+**The third reader: the Go provider's lazy reconciliation.** The status Lambdas
+are not the only code that derives run status from a container's exit code.
+`internal/provider/ecs.go::Status()` reads `task.Containers[0].ExitCode`, and
+`Finalize()` (the lazy-status path used by `horde status`/`list`/`results` when
+the Lambda is behind or failed) feeds that into `mapExitCode` to write the run's
+terminal status. With a sidecar present this has the *same* index-0 bug — a
+sidecar killed non-zero when the worker exits 0 could be reconciled as `failed`.
+So the find-by-name fix must be applied here too: a `workerContainer(containers)`
+helper finds the `horde-worker` container by name with a `containers[0]`
+fallback, mirroring the Lambdas. Covered by
+`TestECSProvider_Status_SidecarExitIgnored` (sidecar 137 at index 0, worker 0 at
+index 1 → exit 0) and `TestECSProvider_Status_NoWorkerNameFallback`.
+
 ### 3. Testing
 
 **Synth/unit (CI — `cd cdk && npm test`):**
@@ -177,29 +193,42 @@ bootstrap path if it ever gains a sidecar.
 - Event `containers: [{exitCode:0}]` (no name) → `success`. Proves legacy
   fallback.
 
-**Live e2e (developer-local, `make e2e-*`, never CI): `TestECSCDK_Sidecar`**
+**Go provider unit (`internal/provider/ecs_test.go`):**
 
-Proves it works on real Fargate before shipping:
+- `TestECSProvider_Status_SidecarExitIgnored`: task with
+  `[{name:"postgres",exit:137},{name:"horde-worker",exit:0}]` → `ExitCode == 0`.
+  Proves the reconciliation path finds the worker by name, not index.
+- `TestECSProvider_Status_NoWorkerNameFallback`: single unnamed container → that
+  container's exit. Proves the legacy fallback.
 
-- Add a Postgres sidecar to `cdk/e2e/app.ts`:
-  `worker.taskDefinition.addContainer("postgres", { image: postgres:16,
-  environment: { POSTGRES_HOST_AUTH_METHOD: "trust" }, essential: false })`.
+These deterministic unit tests are the **real proof** of the find-by-name fix,
+across all three readers (TS Lambda, Python Lambda, Go provider).
+
+**Live e2e (developer-local, `make e2e-*`, never CI): `TestECS_Sidecar`**
+
+Proves localhost reachability on real Fargate:
+
+- Add a Postgres sidecar to `cdk/e2e/app.ts` via the `sidecars` prop
+  (`postgres:16-alpine`, `POSTGRES_HOST_AUTH_METHOD: "trust"`, mem-capped,
+  essential defaults to false).
 - Add `.orc/workflows/postgres-probe.yaml` — a `type: script` phase that probes
-  `localhost:5432`. Prefer `pg_isready`/`psql` if present in the worker image;
-  otherwise a dependency-free bash `/dev/tcp/localhost/5432` TCP check. Exit 0
-  on reach, non-zero otherwise. (Implementation verifies which client exists;
-  the `/dev/tcp` fallback needs no extra tooling, so the e2e is feasible
-  regardless.)
-- `TestECSCDK_Sidecar` (in `test/integration/cdk_e2e_test.go`, gated by
-  `skipUnlessCDKE2E`) launches the probe workflow, polls DynamoDB to terminal
-  via `h.driver.StoreStatus`, and asserts `status == "success"` **and**
-  `StoreExitCode == 0`.
+  `localhost:5432` with a dependency-free bash `/dev/tcp/localhost/5432` check
+  (the worker image has no postgres client), retrying briefly. Exit 0 on reach.
+- `TestECS_Sidecar` (in `test/integration/ecs_sidecar_test.go`) runs under the
+  full `TestECS` suite with `HORDE_E2E_ECS_BACKEND=cdk`. It launches the probe
+  workflow, polls to terminal, and asserts `status == "success"` + exit 0. The
+  worker clones the canonical repo and runs the workflow from the checked-out
+  branch, so before this lands on `main` set `HORDE_E2E_SIDECAR_BRANCH=<branch>`
+  (pushed to GitHub) so the worker finds the workflow; post-merge the default
+  (main) checkout has it.
 
-This single test proves **both** properties: (a) the worker reaches the sidecar
-on `localhost`, and (b) the name-filter holds — the non-essential Postgres
-sidecar is killed (non-zero, ~137/143) when the essential worker exits 0, so if
-the Lambda read the sidecar the status would be `failed`. A green test is real
-proof.
+Scope of the e2e: it reliably proves the worker **reaches the sidecar on
+localhost** (the user-facing feature). It does **not**, on its own, prove the
+find-by-name fix — ECS does not guarantee container order, so the test cannot
+force the sidecar ahead of the worker; on a run where the worker sorts first the
+old index-0 logic would also pass. The name-filter is proven by the unit tests
+above. **Verified green on prepdesk** (run `1aawbgjq8v70` → success/0), plus the
+broader `TestECS` suite passed against the sidecar-bearing stack.
 
 ### 4. Docs & version
 
@@ -222,23 +251,28 @@ proof.
 - `cdk/src/horde-worker-props.ts` — `sidecars` prop + TSDoc
 - `cdk/src/horde-worker.ts` — `WORKER_CONTAINER_NAME` const, sidecar loop, guard,
   `sidecarContainers` field
-- `cdk/src/status-lambda/index.ts` — find-worker-by-name filter
-- `cdk/src/index.ts` — export `WORKER_CONTAINER_NAME` if needed by tests
-- `cdk/test/*.test.ts` — synth assertions
+- `cdk/src/status-lambda/index.ts` — find-worker-by-name filter (TS Lambda)
+- `cdk/src/index.ts` — export `WORKER_CONTAINER_NAME` for tests
+- `cdk/test/horde-worker-sidecars.test.ts` — synth assertions
 - `cdk/src/status-lambda/index.test.ts` — filter unit tests
 - `cdk/e2e/app.ts` — Postgres sidecar
-- `cdk/package.json` — 0.4.0
+- `cdk/package.json` + `package-lock.json` — 0.4.0
 - `cdk/README.md` — docs
 - `internal/bootstrap/templates/stack.yaml.tmpl` — Python Lambda filter (lockstep)
+- `internal/provider/ecs.go` — `workerContainer` helper; `Status()` finds the
+  worker by name (the third reader — Go lazy reconciliation)
+- `internal/provider/ecs_test.go` — `Status` sidecar + fallback unit tests
 - `internal/docs/content.go` — `topicCDK` note
 - `.orc/workflows/postgres-probe.yaml` — e2e probe workflow
-- `test/integration/cdk_e2e_test.go` — `TestECSCDK_Sidecar`
+- `test/integration/ecs_sidecar_test.go` — `TestECS_Sidecar`
 
 ## Verification
 
-- `cd cdk && npm run build && npm test` — unit + synth assertions pass.
-- `make unit-test && make vet` — Go side clean (template change compiles).
+- `cd cdk && npm run build && npm test` — unit + synth assertions pass (91).
+- `make unit-test && make vet` — Go side clean, incl. the `ecs.go` find-by-name
+  fix + its unit tests.
 - `make bootstrap-validate-test` — rendered CFN still ValidateTemplate-clean.
-- `make e2e-up && make e2e-test && make e2e-down` — live: `TestECSCDK_Sidecar`
-  green proves worker↔sidecar localhost reachability and the name-filter fix on
-  real Fargate.
+- `make e2e-up && make e2e-test && make e2e-down` — live on prepdesk:
+  `TestECS_Sidecar` green proves worker↔sidecar localhost reachability on real
+  Fargate (run `1aawbgjq8v70`). The find-by-name fix is proven by the unit tests
+  across all three readers, not the e2e (ECS container order is not forceable).

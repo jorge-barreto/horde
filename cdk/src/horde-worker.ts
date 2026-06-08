@@ -338,8 +338,10 @@ export class HordeWorker extends Construct {
     // Sidecars are added AFTER the worker, so the worker is container index 0
     // (defensive — the status Lambda finds the worker by name, not by index).
     // Defaults: essential:false so a crashing sidecar doesn't stop the run, and
-    // logging routed to the worker log group keyed by the sidecar name. The
-    // caller's explicit values win (spread last).
+    // logging routed to the worker log group keyed by the sidecar name. Applied
+    // with `??` (not spread order) so an explicit `essential: undefined` from a
+    // caller can't fall through to CDK's own `essential: true` default and
+    // silently flip a sidecar to essential / drop its logging.
     this.sidecarContainers = (props.sidecars ?? []).map((sidecar, i) => {
       if (sidecar.containerName === WORKER_CONTAINER_NAME) {
         throw new Error(
@@ -349,12 +351,14 @@ export class HordeWorker extends Construct {
       }
       const id = sidecar.containerName ?? `Sidecar${i}`;
       return this.taskDefinition.addContainer(id, {
-        essential: false,
-        logging: ecs.LogDriver.awsLogs({
-          logGroup: this.logGroup,
-          streamPrefix: sidecar.containerName ?? `sidecar${i}`,
-        }),
         ...sidecar,
+        essential: sidecar.essential ?? false,
+        logging:
+          sidecar.logging ??
+          ecs.LogDriver.awsLogs({
+            logGroup: this.logGroup,
+            streamPrefix: sidecar.containerName ?? `sidecar${i}`,
+          }),
       });
     });
 

@@ -10,16 +10,20 @@ import (
 //
 // The CDK e2e stack (cdk/e2e/app.ts) adds a Postgres sidecar to the worker task
 // definition. The `postgres-probe` workflow connects to localhost:5432 from the
-// worker container and exits 0 once it reaches the sidecar. A green run proves
-// two things at once:
+// worker container and exits 0 once it reaches the sidecar.
 //
-//  1. The worker reaches the sidecar on localhost — i.e. they share the task's
-//     network namespace, the user-facing point of the feature.
-//  2. Run status reflects the WORKER's exit code, not the sidecar's. The
-//     Postgres sidecar is non-essential and is killed (non-zero, ~137/143) when
-//     the essential worker exits 0. If the status Lambda read the sidecar
-//     instead of finding the worker by name, the run would land "failed".
-//     Asserting success + exit_code 0 confirms the find-by-name fix holds.
+// What this proves: the worker REACHES the sidecar on localhost — they share the
+// task's network namespace, the user-facing point of the feature — and the run
+// completes cleanly with sidecars present.
+//
+// What it does NOT prove on its own: the find-worker-by-name fix. ECS does not
+// guarantee container order in the stop event/DescribeTasks response, so this
+// test cannot force the sidecar ahead of the worker; on a run where the worker
+// happens to sort first, even the old containers[0] logic would pass. The
+// name-filter is proven deterministically by unit tests instead:
+// cdk/src/status-lambda/index.test.ts and
+// internal/provider/ecs_test.go::TestECSProvider_Status_SidecarExitIgnored,
+// which pin a non-zero sidecar at index 0 and assert the worker's exit wins.
 //
 // The sidecar only exists on the CDK-deployed stack, so this skips unless the
 // e2e backend is cdk (HORDE_E2E_ECS_BACKEND=cdk, as set by `make e2e-test`).

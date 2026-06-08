@@ -327,6 +327,13 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		run.ExitCode = ptr(0)
 		run.CompletedAt = ptr(now.Add(5 * time.Minute))
 		run.TotalCostUSD = ptr(1.23)
+		run.Tokens = &TokenUsage{
+			InputTokens:         100,
+			OutputTokens:        200,
+			CacheCreationTokens: 300,
+			CacheReadTokens:     400,
+			Turns:               5,
+		}
 		run.Metadata = map[string]string{"key": "val", "k2": "v2"}
 
 		if err := s.CreateRun(ctx, run); err != nil {
@@ -378,6 +385,12 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if got.TotalCostUSD == nil || *got.TotalCostUSD != *run.TotalCostUSD {
 			t.Errorf("TotalCostUSD: got %v, want %v", got.TotalCostUSD, run.TotalCostUSD)
 		}
+		if got.Tokens == nil {
+			t.Fatalf("Tokens: got nil, want %+v", run.Tokens)
+		}
+		if *got.Tokens != *run.Tokens {
+			t.Errorf("Tokens: got %+v, want %+v", *got.Tokens, *run.Tokens)
+		}
 		if len(got.Metadata) != 2 {
 			t.Errorf("Metadata len: got %d, want 2", len(got.Metadata))
 		}
@@ -409,6 +422,9 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if got.TotalCostUSD != nil {
 			t.Errorf("TotalCostUSD: expected nil, got %v", got.TotalCostUSD)
+		}
+		if got.Tokens != nil {
+			t.Errorf("Tokens: expected nil, got %+v", got.Tokens)
 		}
 		if got.Metadata != nil {
 			t.Errorf("Metadata: expected nil, got %v", got.Metadata)
@@ -550,6 +566,9 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		if got.TotalCostUSD != nil {
 			t.Errorf("TotalCostUSD: expected nil, got %v", got.TotalCostUSD)
 		}
+		if got.Tokens != nil {
+			t.Errorf("Tokens: expected nil, got %+v", got.Tokens)
+		}
 		if got.Metadata != nil {
 			t.Errorf("Metadata: expected nil, got %v", got.Metadata)
 		}
@@ -571,8 +590,15 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			ExitCode:     ptr(42),
 			CompletedAt:  ptr(completedAt),
 			TotalCostUSD: ptr(9.99),
-			Metadata:     map[string]string{"updated": "true"},
-			TimeoutAt:    ptr(timeoutAt),
+			Tokens: &TokenUsage{
+				InputTokens:         11,
+				OutputTokens:        22,
+				CacheCreationTokens: 33,
+				CacheReadTokens:     44,
+				Turns:               2,
+			},
+			Metadata:  map[string]string{"updated": "true"},
+			TimeoutAt: ptr(timeoutAt),
 		}
 		if err := s.UpdateRun(ctx, "r1", update); err != nil {
 			t.Fatalf("UpdateRun: %v", err)
@@ -595,6 +621,14 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if got.TotalCostUSD == nil || *got.TotalCostUSD != 9.99 {
 			t.Errorf("TotalCostUSD: got %v, want 9.99", got.TotalCostUSD)
+		}
+		if got.Tokens == nil {
+			t.Fatalf("Tokens after update: got nil, want non-nil")
+		}
+		if got.Tokens.InputTokens != 11 || got.Tokens.OutputTokens != 22 ||
+			got.Tokens.CacheCreationTokens != 33 || got.Tokens.CacheReadTokens != 44 ||
+			got.Tokens.Turns != 2 {
+			t.Errorf("Tokens after update: got %+v", *got.Tokens)
 		}
 		if got.Metadata["updated"] != "true" {
 			t.Errorf("Metadata[updated]: got %q, want %q", got.Metadata["updated"], "true")

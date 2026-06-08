@@ -820,10 +820,12 @@ Download the latest release binary:
 
     curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
 
-Pin a version or change the install directory:
+Pin a version or change the install directory. Note the env vars go on the
+'sh' side of the pipe, not before 'curl' — 'VAR=x curl ... | sh' would set the
+var for curl, not the script:
 
-    HORDE_VERSION=v0.1.0 HORDE_BINDIR="$HOME/.local/bin" \
-      curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/jorge-barreto/horde/main/scripts/install.sh \
+      | HORDE_VERSION=v0.4.0 HORDE_BINDIR="$HOME/.local/bin" sh
 
 The script detects your OS/arch, downloads the matching release archive,
 verifies its SHA-256 checksum, and installs the binary.

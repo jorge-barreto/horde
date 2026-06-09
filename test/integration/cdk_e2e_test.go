@@ -54,6 +54,7 @@ type cdkE2EState struct {
 	LogGroup        string    `json:"log_group"`
 	ClaudeSecretArn string    `json:"claude_secret_arn"`
 	GitSecretArn    string    `json:"git_secret_arn"`
+	EventBusName    string    `json:"event_bus_name"`
 	DeployedAt      time.Time `json:"deployed_at"`
 }
 
@@ -158,6 +159,7 @@ func readCDKOutputs(t *testing.T, path string) cdkE2EState {
 		LogGroup:        o["LogGroupOut"],
 		ClaudeSecretArn: o["ClaudeSecretArnOut"],
 		GitSecretArn:    o["GitSecretArnOut"],
+		EventBusName:    o["EventBusNameOut"],
 	}
 }
 

@@ -75,6 +75,11 @@ const worker = new HordeWorker(stack, "Worker", {
   // to 20 to match the bootstrap CF stack's e2e budget. Production
   // consumers are expected to tune this per their own load.
   maxConcurrent: 20,
+  // Spend cap (#36). A GENEROUS cap that never gates the e2e suite (the
+  // script workflows cost ~$0), present only so TestECSSpendCapConfigured can
+  // assert the SSM config + drain Lambda env carry the spend-cap wiring.
+  maxSpendPerWindow: 1000,
+  spendWindow: cdk.Duration.hours(24),
   // Sidecar containers (#7). A Postgres the worker reaches on localhost:5432.
   // TestECSCDK_Sidecar launches the `postgres-probe` workflow against this to
   // prove (a) localhost reachability and (b) that run status is the WORKER's
@@ -105,6 +110,9 @@ new cdk.CfnOutput(stack, "ArtifactsBucketOut", {
 });
 new cdk.CfnOutput(stack, "RunsTableOut", { value: worker.runsTable.tableName });
 new cdk.CfnOutput(stack, "LogGroupOut", { value: worker.logGroup.logGroupName });
+new cdk.CfnOutput(stack, "EventBusNameOut", {
+  value: worker.eventBus.eventBusName,
+});
 new cdk.CfnOutput(stack, "ClaudeSecretArnOut", { value: claudeSecret.secretArn });
 new cdk.CfnOutput(stack, "GitSecretArnOut", { value: gitSecret.secretArn });
 

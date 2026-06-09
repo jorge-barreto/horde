@@ -24,6 +24,7 @@ import (
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
+	"github.com/jorge-barreto/horde/internal/store"
 )
 
 // ecsHarnessRepoURL is the repo whose remote we set on the temp project dir,
@@ -45,6 +46,10 @@ type ecsDriver struct {
 	logPrefix    string // LogStreamPrefix (typically "ecs")
 	artifactsBkt string
 	runsToClean  []string
+	// awsCfg + cfg are stashed so #36 tests (events/spend) can reach the
+	// EventBridge bus name and spend-cap config without re-loading SSM.
+	awsCfg aws.Config
+	cfg    *config.HordeConfig
 }
 
 // SessionObjectCount returns how many objects exist under the run's S3
@@ -258,6 +263,111 @@ func (d *ecsDriver) StoreMetadata(runID, key string) string {
 	return v.Value
 }
 
+// getItem fetches the run row with a strongly-consistent read. Strong
+// consistency matters for the #36 queue tests: they assert a status/priority
+// transition immediately after a CLI mutation, and an eventually-consistent
+// read could observe the pre-mutation value and flake. Returns nil if absent.
+func (d *ecsDriver) getItem(runID string) map[string]dyntypes.AttributeValue {
+	d.t.Helper()
+	out, err := d.dynamo.GetItem(d.ctx, &dynamodb.GetItemInput{
+		TableName:      aws.String(d.runsTable),
+		ConsistentRead: aws.Bool(true),
+		Key: map[string]dyntypes.AttributeValue{
+			store.AttrID: &dyntypes.AttributeValueMemberS{Value: runID},
+		},
+	})
+	if err != nil {
+		d.t.Fatalf("ecsDriver.getItem: dynamo GetItem(%s, id=%s): %v", d.runsTable, runID, err)
+	}
+	return out.Item
+}
+
+// StorePriority reads the "priority" attribute (#36 queue). "" if absent.
+func (d *ecsDriver) StorePriority(runID string) string {
+	d.t.Helper()
+	item := d.getItem(runID)
+	if v, ok := item[store.AttrPriority].(*dyntypes.AttributeValueMemberS); ok {
+		return v.Value
+	}
+	return ""
+}
+
+// StoreEnqueuedAt reads the "enqueued_at" attribute (#36 queue). "" if absent.
+func (d *ecsDriver) StoreEnqueuedAt(runID string) string {
+	d.t.Helper()
+	item := d.getItem(runID)
+	if v, ok := item[store.AttrEnqueuedAt].(*dyntypes.AttributeValueMemberS); ok {
+		return v.Value
+	}
+	return ""
+}
+
+// StoreLabels reads the "labels" map attribute (#17/#19). nil if absent.
+func (d *ecsDriver) StoreLabels(runID string) map[string]string {
+	d.t.Helper()
+	item := d.getItem(runID)
+	m, ok := item[store.AttrLabels].(*dyntypes.AttributeValueMemberM)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(m.Value))
+	for k, v := range m.Value {
+		if s, ok := v.(*dyntypes.AttributeValueMemberS); ok {
+			out[k] = s.Value
+		}
+	}
+	return out
+}
+
+// StoreTokens reads the per-run token attributes (#24/#49) into a
+// store.TokenUsage. Returns nil if none of the five attributes are present
+// (a run whose tokens were never finalized).
+func (d *ecsDriver) StoreTokens(runID string) *store.TokenUsage {
+	d.t.Helper()
+	item := d.getItem(runID)
+	num := func(attr string) (int, bool) {
+		v, ok := item[attr].(*dyntypes.AttributeValueMemberN)
+		if !ok {
+			return 0, false
+		}
+		n, err := strconv.Atoi(v.Value)
+		if err != nil {
+			d.t.Fatalf("ecsDriver.StoreTokens: parsing %s=%q: %v", attr, v.Value, err)
+		}
+		return n, true
+	}
+	in, ok1 := num(store.AttrInputTokens)
+	out, ok2 := num(store.AttrOutputTokens)
+	cc, ok3 := num(store.AttrCacheCreationTokens)
+	cr, ok4 := num(store.AttrCacheReadTokens)
+	turns, ok5 := num(store.AttrTurns)
+	if !ok1 && !ok2 && !ok3 && !ok4 && !ok5 {
+		return nil
+	}
+	return &store.TokenUsage{
+		InputTokens:         in,
+		OutputTokens:        out,
+		CacheCreationTokens: cc,
+		CacheReadTokens:     cr,
+		Turns:               turns,
+	}
+}
+
+// StoreCostUSD reads the "total_cost_usd" attribute (#49). nil if absent.
+func (d *ecsDriver) StoreCostUSD(runID string) *float64 {
+	d.t.Helper()
+	item := d.getItem(runID)
+	v, ok := item[store.AttrTotalCostUSD].(*dyntypes.AttributeValueMemberN)
+	if !ok {
+		return nil
+	}
+	f, err := strconv.ParseFloat(v.Value, 64)
+	if err != nil {
+		d.t.Fatalf("ecsDriver.StoreCostUSD: parsing %q: %v", v.Value, err)
+	}
+	return &f
+}
+
 // TearDown removes any DynamoDB run rows the harness tracked during the test.
 // Best-effort: logs on failure rather than failing the cleanup.
 func (d *ecsDriver) TearDown() {
@@ -409,6 +519,8 @@ func newECSHarnessForRepoWithSSM(t *testing.T, repoURL, ssmPathOverride string) 
 		logGroup:     hc.LogGroup,
 		logPrefix:    hc.LogStreamPrefix,
 		artifactsBkt: hc.ArtifactsBucket,
+		awsCfg:       awsCfg,
+		cfg:          hc,
 	}
 
 	h := &harness{

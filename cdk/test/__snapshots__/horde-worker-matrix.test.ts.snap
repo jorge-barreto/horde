@@ -1113,7 +1113,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "72497fe75731376971f79d208fec5f3180c452d9b69a4c8fa20c5f20c007f476.zip",
+          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
         },
         "Environment": {
           "Variables": {
@@ -2748,7 +2748,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "72497fe75731376971f79d208fec5f3180c452d9b69a4c8fa20c5f20c007f476.zip",
+          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
         },
         "Environment": {
           "Variables": {
@@ -4391,7 +4391,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "72497fe75731376971f79d208fec5f3180c452d9b69a4c8fa20c5f20c007f476.zip",
+          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
         },
         "Environment": {
           "Variables": {
@@ -6238,7 +6238,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "72497fe75731376971f79d208fec5f3180c452d9b69a4c8fa20c5f20c007f476.zip",
+          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
         },
         "Environment": {
           "Variables": {

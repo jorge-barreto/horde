@@ -21,14 +21,19 @@ func TestECSRunLifecycleEvents(t *testing.T) {
 	d := ecsd(t, h)
 
 	nonce := fmt.Sprintf("%d", time.Now().UnixNano())
-	evtCap := newEventCapture(t, d.awsCfg, d.cfg.EventBusName, nonce)
+	// Scope the capture rule to a unique launch label so the queue receives
+	// ONLY this run's events — under the parallel sweep a broad source-only
+	// rule floods the queue with every concurrent test's events and races this
+	// run's (earlier) run.started out of the poll budget.
+	const evtLabelKey = "evtcap"
+	evtCap := newEventCapture(t, d.awsCfg, d.cfg.EventBusName, nonce, evtLabelKey, nonce)
 
-	// Let the rule + target propagate before the run fires its events. Newly
-	// created EventBridge rules can take a few seconds to start matching.
+	// Let the rule + target propagate before the run fires its events.
 	time.Sleep(8 * time.Second)
 
 	ticket := uniqueTicket("events")
-	runID := h.Launch(ticket, "quick-success", 5*time.Minute)
+	runID := h.launchWith(ticket, "quick-success", "",
+		[]string{"--label", evtLabelKey + "=" + nonce}, 5*time.Minute)
 	h.TrackRunForCleanup(runID)
 
 	waitForECSTerminal(t, h, runID, 6*time.Minute)

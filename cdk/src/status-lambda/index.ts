@@ -72,7 +72,9 @@ type Result =
       readonly exitCode: number | null;
     };
 
-async function findRun(taskArn: string): Promise<{ runId: string; repo: string } | null> {
+async function findRun(
+  taskArn: string,
+): Promise<{ runId: string; repo: string; labels: Record<string, string> } | null> {
   const out = await ddb.send(
     new QueryCommand({
       TableName: RUNS_TABLE,
@@ -91,7 +93,17 @@ async function findRun(taskArn: string): Promise<{ runId: string; repo: string }
   // Lambda needs it to query this repo's queued backlog off the run.terminal event.
   const repoAttr = items[0].repo;
   const repo = repoAttr && "S" in repoAttr ? repoAttr.S ?? "" : "";
-  return { runId, repo };
+  // labels (a DynamoDB Map of String values) are carried on run.terminal so the
+  // event Detail shape is consistent with run.started (which the Go CLI emits
+  // with labels) — letting external consumers filter both event types uniformly.
+  const labels: Record<string, string> = {};
+  const labelsAttr = items[0].labels;
+  if (labelsAttr && "M" in labelsAttr && labelsAttr.M) {
+    for (const [k, v] of Object.entries(labelsAttr.M)) {
+      if (v && "S" in v && v.S !== undefined) labels[k] = v.S;
+    }
+  }
+  return { runId, repo, labels };
 }
 
 async function fetchTotalCost(runId: string): Promise<number | null> {
@@ -219,7 +231,7 @@ export const handler: Handler<
     console.log("status-lambda: skip, task not managed by horde", { taskArn });
     return { skipped: "task not managed by horde" };
   }
-  const { runId, repo } = found;
+  const { runId, repo, labels } = found;
 
   // Status is the WORKER container's exit code, not the task's. With sidecars
   // in the task def the event's `containers` order is not guaranteed, so find
@@ -361,6 +373,7 @@ export const handler: Handler<
                 status,
                 exit_code: exitCode,
                 total_cost_usd: cost,
+                labels,
                 stop_code: detail.stopCode ?? "",
                 stop_reason: detail.stoppedReason ?? "",
               }),

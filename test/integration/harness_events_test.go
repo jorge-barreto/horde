@@ -42,7 +42,14 @@ type envelope struct {
 
 // newEventCapture wires the tap. busName is the custom bus (from
 // hc.EventBusName). nonce makes resource names unique per test invocation.
-func newEventCapture(t *testing.T, awsCfg aws.Config, busName, nonce string) *eventCapture {
+//
+// labelKey/labelVal scope the EventBridge rule to ONLY events whose
+// detail.labels[labelKey] == labelVal — i.e. the run launched with that
+// --label. This is essential under the parallel e2e sweep: a broad
+// source:["horde"] rule would capture every concurrent test's events, flooding
+// the queue and racing this run's (earlier) run.started out of the poll budget.
+// Scoping to a unique launch label gives the queue exactly this run's events.
+func newEventCapture(t *testing.T, awsCfg aws.Config, busName, nonce, labelKey, labelVal string) *eventCapture {
 	t.Helper()
 	if busName == "" {
 		t.Fatal("newEventCapture: empty bus name (SSM config has no event_bus_name?)")
@@ -75,11 +82,14 @@ func newEventCapture(t *testing.T, awsCfg aws.Config, busName, nonce string) *ev
 	}
 	c.queueArn = ga.Attributes[string(sqstypes.QueueAttributeNameQueueArn)]
 
-	// 3. Create the EventBridge rule on the horde bus.
+	// 3. Create the EventBridge rule on the horde bus, scoped to this run's
+	// unique launch label so the queue receives only its events.
+	pattern := fmt.Sprintf(`{"source":["%s"],"detail":{"labels":{"%s":["%s"]}}}`,
+		event.Source, labelKey, labelVal)
 	pr, err := c.eb.PutRule(ctx, &eventbridge.PutRuleInput{
 		Name:         aws.String(c.ruleName),
 		EventBusName: aws.String(busName),
-		EventPattern: aws.String(`{"source":["` + event.Source + `"]}`),
+		EventPattern: aws.String(pattern),
 		State:        ebtypes.RuleStateEnabled,
 	})
 	if err != nil {

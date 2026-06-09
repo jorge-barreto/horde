@@ -24,6 +24,7 @@ import (
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
+	"github.com/jorge-barreto/horde/internal/runid"
 	"github.com/jorge-barreto/horde/internal/store"
 )
 
@@ -261,6 +262,41 @@ func (d *ecsDriver) StoreMetadata(runID, key string) string {
 		return ""
 	}
 	return v.Value
+}
+
+// SeedQueuedRun writes a queued run row DIRECTLY to DynamoDB via the store's
+// own serialization, bypassing the CLI's `launch --enqueue` path (which runs an
+// opportunistic drain that would immediately claim the run when capacity is
+// free). This lets the queue-management tests (prioritize/cancel) operate on a
+// run that is reliably parked. Returns the generated run ID; registers it for
+// cleanup. The repo + provider match the deployed stack so `queue list` finds
+// it on the by-repo GSI.
+func (d *ecsDriver) SeedQueuedRun(ticket, workflow string, priority store.Priority) string {
+	d.t.Helper()
+	st, err := store.NewDynamoStore(d.ctx, d.awsCfg, d.runsTable)
+	if err != nil {
+		d.t.Fatalf("SeedQueuedRun: NewDynamoStore: %v", err)
+	}
+	id, err := runid.Generate()
+	if err != nil {
+		d.t.Fatalf("SeedQueuedRun: runid.Generate: %v", err)
+	}
+	run := &store.Run{
+		ID:         id,
+		Repo:       d.cfg.Repo,
+		Ticket:     ticket,
+		Workflow:   workflow,
+		Provider:   "aws-ecs",
+		Status:     store.StatusQueued,
+		Priority:   priority,
+		EnqueuedAt: time.Now().UTC(),
+		LaunchedBy: "e2e-seed",
+	}
+	if err := st.CreateRun(d.ctx, run); err != nil {
+		d.t.Fatalf("SeedQueuedRun: CreateRun: %v", err)
+	}
+	d.runsToClean = append(d.runsToClean, id)
+	return id
 }
 
 // getItem fetches the run row with a strongly-consistent read. Strong

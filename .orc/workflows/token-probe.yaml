@@ -1,0 +1,13 @@
+name: horde-test
+ticket-pattern: 'TEST-[\w-]+'
+# E2E fixture for token telemetry (#24/#49): one minimal agent turn so orc
+# writes costs.json with non-zero input tokens + total_cost_usd, which the
+# status Lambda promotes into the run row at finalize (and `horde status --json`
+# surfaces as the nested `tokens` object + `total_cost_usd`). Kept to ONE cheap
+# turn on haiku — this is the only e2e test that spends real model money.
+phases:
+  - name: probe
+    type: agent
+    prompt: .orc/prompts/token-probe.md
+    model: haiku
+    timeout: 5

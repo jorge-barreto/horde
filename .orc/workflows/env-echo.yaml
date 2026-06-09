@@ -1,0 +1,11 @@
+name: horde-test
+ticket-pattern: 'TEST-[\w-]+'
+# E2E fixture for per-launch env (#22): echoes a launch-provided env var into
+# logs so the test can assert `horde launch --env KEY=VALUE` reached the worker
+# container's environment. The worker clones the horde repo and runs this
+# workflow; the value is supplied by the test via --env HORDE_E2E_ENV_PROBE=...
+phases:
+  - name: run
+    type: script
+    run: 'echo "ENV_PROBE=${HORDE_E2E_ENV_PROBE:-<unset>}"'
+    timeout: 1

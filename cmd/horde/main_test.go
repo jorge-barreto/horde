@@ -523,6 +523,7 @@ func TestLaunch_DuplicateTicket_NoForce(t *testing.T) {
 		ID:         "existingrunid",
 		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
+		Workflow:   "test-flow",
 		Status:     store.StatusRunning,
 		Provider:   "docker",
 		LaunchedBy: "someone",
@@ -571,6 +572,7 @@ func TestLaunch_DuplicateTicket_WithForce(t *testing.T) {
 		ID:         "existingrunid",
 		Repo:       "github.com/test/repo",
 		Ticket:     "TICKET-1",
+		Workflow:   "test-flow",
 		Status:     store.StatusRunning,
 		Provider:   "docker",
 		LaunchedBy: "someone",
@@ -5285,7 +5287,8 @@ func TestLaunch_JSON_Duplicate(t *testing.T) {
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
 		ID: "existingrunid", Repo: "github.com/test/repo", Ticket: "TICKET-1",
-		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
+		Workflow: "implement-ticket",
+		Status:   store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
 		StartedAt: now, TimeoutAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("pre-creating run: %v", err)
@@ -5394,6 +5397,31 @@ func TestLaunch_JSON_Error(t *testing.T) {
 	}
 }
 
+func TestLaunch_EnqueueRejectedOnDocker(t *testing.T) {
+	// --enqueue is ECS-only; on docker it must be a real error (exit 1) with
+	// an ErrorV1 envelope under --json explaining why.
+	setupLaunchEnv(t)
+	ctx := context.Background()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "--json", "launch", "--enqueue", "--workflow", "implement-ticket", "TICKET-Q"})
+	if runErr == nil {
+		t.Fatal("expected error (exit 1), got nil")
+	}
+	var v ErrorV1
+	if err := json.Unmarshal(buf.Bytes(), &v); err != nil {
+		t.Fatalf("parsing JSON error envelope: %v\noutput: %s", err, buf.Bytes())
+	}
+	if v.Status != "error" {
+		t.Errorf("Status = %q, want error", v.Status)
+	}
+	if !strings.Contains(v.Reason, "--enqueue requires the aws-ecs provider") {
+		t.Errorf("Reason = %q, want it to mention the ECS-only requirement", v.Reason)
+	}
+}
+
 func TestLaunch_HumanDuplicate_StillExits1(t *testing.T) {
 	// Regression: without --json, a duplicate ticket keeps its human behavior
 	// (returns an error → exit 1) and emits no JSON on stdout.
@@ -5408,7 +5436,8 @@ func TestLaunch_HumanDuplicate_StillExits1(t *testing.T) {
 	now := time.Now()
 	if err := st.CreateRun(ctx, &store.Run{
 		ID: "existingrunid", Repo: "github.com/test/repo", Ticket: "TICKET-1",
-		Status: store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
+		Workflow: "implement-ticket",
+		Status:   store.StatusRunning, Provider: "docker", LaunchedBy: "someone",
 		StartedAt: now, TimeoutAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("pre-creating run: %v", err)

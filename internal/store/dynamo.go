@@ -56,6 +56,12 @@ func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 		AttrLaunchedBy: &types.AttributeValueMemberS{Value: run.LaunchedBy},
 		AttrStartedAt:  &types.AttributeValueMemberS{Value: run.StartedAt.UTC().Format(time.RFC3339)},
 		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: run.TimeoutAt.UTC().Format(time.RFC3339)},
+		AttrPriority:   &types.AttributeValueMemberS{Value: string(run.Priority)},
+	}
+	// enqueued_at is set only for queued runs; mirror the completed_at
+	// conditional-write pattern (zero time means "not enqueued").
+	if !run.EnqueuedAt.IsZero() {
+		item[AttrEnqueuedAt] = &types.AttributeValueMemberS{Value: run.EnqueuedAt.UTC().Format(time.RFC3339)}
 	}
 	// instance_id is the GSI "by-instance" partition key. DynamoDB rejects
 	// empty strings on GSI keys, so only set it when known (UpdateRun fills
@@ -225,6 +231,26 @@ func parseRun(item map[string]types.AttributeValue) (*Run, error) {
 		run.TotalCostUSD = &v
 	}
 
+	if av, ok := item[AttrPriority]; ok {
+		sv, ok := av.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrPriority)
+		}
+		run.Priority = Priority(sv.Value)
+	}
+
+	if av, ok := item[AttrEnqueuedAt]; ok {
+		sv, ok := av.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrEnqueuedAt)
+		}
+		t, err := time.Parse(time.RFC3339, sv.Value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing run %q: parsing enqueued_at: %w", id, err)
+		}
+		run.EnqueuedAt = t
+	}
+
 	// Token counts: all five attributes are written together (or not at all)
 	// by CreateRun/UpdateRun, but parse each defensively. Presence of ANY of
 	// them yields a non-nil Tokens; a missing individual attribute reads as 0.
@@ -374,6 +400,12 @@ func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 	if update.TimeoutAt != nil {
 		setClauses = append(setClauses, "timeout_at = :ta")
 		exprAttrValues[":ta"] = &types.AttributeValueMemberS{Value: update.TimeoutAt.UTC().Format(time.RFC3339)}
+	}
+	if update.Priority != nil {
+		// "priority" is a DynamoDB reserved word; alias it.
+		setClauses = append(setClauses, "#prio = :prio")
+		exprAttrNames["#prio"] = AttrPriority
+		exprAttrValues[":prio"] = &types.AttributeValueMemberS{Value: string(*update.Priority)}
 	}
 
 	if len(setClauses) == 0 {
@@ -562,22 +594,28 @@ func (s *DynamoStore) ListByRepo(ctx context.Context, repo string, activeOnly bo
 	return runs, nil
 }
 
-func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error) {
+func (s *DynamoStore) FindActiveByTicket(ctx context.Context, repo, ticket, workflow string) ([]*Run, error) {
+	// "workflow" is a DynamoDB reserved word; alias it. Active = a slot is or is
+	// about to be consumed: pending, running, OR queued (a queued run for the
+	// same (ticket, workflow) must block a duplicate enqueue).
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(s.tableName),
 		IndexName:              aws.String(GSIByTicket),
 		KeyConditionExpression: aws.String("#ticket = :ticket"),
-		FilterExpression:       aws.String("#repo = :repo AND #st IN (:pending, :running)"),
+		FilterExpression:       aws.String("#repo = :repo AND #wf = :wf AND #st IN (:pending, :running, :queued)"),
 		ExpressionAttributeNames: map[string]string{
 			"#ticket": AttrTicket,
 			"#repo":   AttrRepo,
+			"#wf":     AttrWorkflow,
 			"#st":     AttrStatus,
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":ticket":  &types.AttributeValueMemberS{Value: ticket},
 			":repo":    &types.AttributeValueMemberS{Value: repo},
+			":wf":      &types.AttributeValueMemberS{Value: workflow},
 			":pending": &types.AttributeValueMemberS{Value: string(StatusPending)},
 			":running": &types.AttributeValueMemberS{Value: string(StatusRunning)},
+			":queued":  &types.AttributeValueMemberS{Value: string(StatusQueued)},
 		},
 		ScanIndexForward: aws.Bool(false),
 	}
@@ -673,4 +711,43 @@ func (s *DynamoStore) ListActive(ctx context.Context) ([]*Run, error) {
 		return runs[i].StartedAt.After(runs[j].StartedAt)
 	})
 	return runs, nil
+}
+
+func (s *DynamoStore) ClaimNextQueued(ctx context.Context, repo string) (*Run, error) {
+	// Query the by-repo GSI (via ListRuns) for queued runs; order in-memory
+	// (the backlog is small, bounded by what was enqueued). Try to claim
+	// candidates in order until one conditional update wins.
+	candidates, err := s.ListRuns(ctx, RunFilter{Repo: repo, Statuses: []Status{StatusQueued}})
+	if err != nil {
+		return nil, fmt.Errorf("listing queued: %w", err)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		oi, oj := candidates[i].Priority.Ordinal(), candidates[j].Priority.Ordinal()
+		if oi != oj {
+			return oi > oj // higher priority first
+		}
+		return candidates[i].EnqueuedAt.Before(candidates[j].EnqueuedAt) // oldest first
+	})
+	for _, c := range candidates {
+		_, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName:                aws.String(s.tableName),
+			Key:                      map[string]types.AttributeValue{AttrID: &types.AttributeValueMemberS{Value: c.ID}},
+			UpdateExpression:         aws.String("SET #s = :pending"),
+			ConditionExpression:      aws.String("#s = :queued"),
+			ExpressionAttributeNames: map[string]string{"#s": AttrStatus},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pending": &types.AttributeValueMemberS{Value: string(StatusPending)},
+				":queued":  &types.AttributeValueMemberS{Value: string(StatusQueued)},
+			},
+		})
+		if err != nil {
+			var ccf *types.ConditionalCheckFailedException
+			if errors.As(err, &ccf) {
+				continue // lost the race for this candidate; try the next
+			}
+			return nil, fmt.Errorf("claiming queued run %s: %w", c.ID, err)
+		}
+		return s.GetRun(ctx, c.ID)
+	}
+	return nil, nil
 }

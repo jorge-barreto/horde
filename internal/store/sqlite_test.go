@@ -195,6 +195,7 @@ func TestNewSQLiteStore_CorrectColumns(t *testing.T) {
 		"instance_id", "metadata", "labels", "status", "exit_code", "launched_by",
 		"started_at", "completed_at", "timeout_at", "total_cost_usd",
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "turns",
+		"enqueued_at", "priority",
 	}
 
 	if len(cols) != len(want) {
@@ -1015,7 +1016,7 @@ func TestSQLiteStore_FindActiveByTicket_Match(t *testing.T) {
 		}
 	}
 
-	results, err := s.FindActiveByTicket(ctx, repo, ticket)
+	results, err := s.FindActiveByTicket(ctx, repo, ticket, "default")
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
@@ -1045,7 +1046,7 @@ func TestSQLiteStore_FindActiveByTicket_NoMatch(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := s.FindActiveByTicket(ctx, run.Repo, run.Ticket)
+	results, err := s.FindActiveByTicket(ctx, run.Repo, run.Ticket, "default")
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
@@ -1074,7 +1075,7 @@ func TestSQLiteStore_FindActiveByTicket_RepoMismatch(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := s.FindActiveByTicket(ctx, "github.com/org/repo.git", "PROJ-42")
+	results, err := s.FindActiveByTicket(ctx, "github.com/org/repo.git", "PROJ-42", "default")
 	if err != nil {
 		t.Fatalf("FindActiveByTicket: %v", err)
 	}
@@ -1183,5 +1184,126 @@ func TestSQLiteStore_CountActive_CrossRepo(t *testing.T) {
 	}
 	if count != 2 {
 		t.Errorf("CountActive = %d, want 2 (one from each repo)", count)
+	}
+}
+
+func TestSQLiteEnqueuedFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	enq := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	run := &Run{
+		ID: "q1", Repo: "r", Ticket: "T-1", Provider: "aws-ecs",
+		Status: StatusQueued, Priority: PriorityHigh, EnqueuedAt: enq,
+		LaunchedBy: "me",
+		StartedAt:  time.Time{}, // queued runs have no start time yet
+		TimeoutAt:  enq,         // non-zero to satisfy NOT NULL timeout_at
+	}
+	if err := s.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetRun(ctx, "q1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Priority != PriorityHigh {
+		t.Errorf("priority = %q, want high", got.Priority)
+	}
+	if !got.EnqueuedAt.Equal(enq) {
+		t.Errorf("enqueued_at = %v, want %v", got.EnqueuedAt, enq)
+	}
+}
+
+func TestFindActiveByTicketWorkflowScoped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().Truncate(time.Second)
+	for _, r := range []*Run{
+		{ID: "a", Repo: "r", Ticket: "T-1", Workflow: "plan", Provider: "aws-ecs", Status: StatusRunning, LaunchedBy: "me", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+		{ID: "b", Repo: "r", Ticket: "T-1", Workflow: "impl", Provider: "aws-ecs", Status: StatusRunning, LaunchedBy: "me", StartedAt: now, TimeoutAt: now.Add(time.Hour)},
+	} {
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.FindActiveByTicket(ctx, "r", "T-1", "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "a" {
+		t.Fatalf("want only run a (workflow plan), got %+v", got)
+	}
+}
+
+func TestClaimNextQueuedOrderAndAtomicity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	mk := func(id string, p Priority, enq time.Time) *Run {
+		return &Run{ID: id, Repo: "r", Ticket: id, Workflow: "w", Provider: "aws-ecs",
+			Status: StatusQueued, Priority: p, EnqueuedAt: enq, LaunchedBy: "me",
+			TimeoutAt: enq.Add(time.Hour)}
+	}
+	t0 := time.Date(2026, 6, 8, 9, 0, 0, 0, time.UTC)
+	// low-but-older, high-newer, high-older → expect high-older first.
+	if err := s.CreateRun(ctx, mk("low-old", PriorityLow, t0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, mk("high-new", PriorityHigh, t0.Add(2*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, mk("high-old", PriorityHigh, t0.Add(1*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := s.ClaimNextQueued(ctx, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil || claimed.ID != "high-old" {
+		t.Fatalf("want high-old claimed first, got %+v", claimed)
+	}
+	if claimed.Status != StatusPending {
+		t.Errorf("claimed run status = %q, want pending", claimed.Status)
+	}
+	// Second claim cannot re-take the same run.
+	again, err := s.ClaimNextQueued(ctx, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != nil && again.ID == "high-old" {
+		t.Error("high-old claimed twice — atomicity broken")
+	}
+}
+
+func TestClaimNextQueuedEmpty(t *testing.T) {
+	t.Parallel()
+	s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "horde.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+	got, err := s.ClaimNextQueued(context.Background(), "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("want nil on empty queue, got %+v", got)
 	}
 }

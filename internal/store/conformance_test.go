@@ -1191,7 +1191,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			}
 		}
 
-		results, err := s.FindActiveByTicket(ctx, repo, ticket)
+		results, err := s.FindActiveByTicket(ctx, repo, ticket, "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1217,7 +1217,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Fatalf("CreateRun: %v", err)
 		}
 
-		results, err := s.FindActiveByTicket(ctx, repo, ticket)
+		results, err := s.FindActiveByTicket(ctx, repo, ticket, "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1239,7 +1239,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Fatalf("CreateRun: %v", err)
 		}
 
-		results, err := s.FindActiveByTicket(ctx, "github.com/org/repo", ticket)
+		results, err := s.FindActiveByTicket(ctx, "github.com/org/repo", ticket, "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1636,7 +1636,7 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		check("ListRuns", listRuns)
 
-		byTicket, err := s.FindActiveByTicket(ctx, repo, "TOK-1")
+		byTicket, err := s.FindActiveByTicket(ctx, repo, "TOK-1", "default")
 		if err != nil {
 			t.Fatalf("FindActiveByTicket: %v", err)
 		}
@@ -1647,6 +1647,90 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 			t.Fatalf("ListActive: %v", err)
 		}
 		check("ListActive", active)
+	})
+
+	t.Run("Queue/ClaimOrder", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		t0 := time.Date(2026, 6, 8, 9, 0, 0, 0, time.UTC)
+		mk := func(id string, p Priority, off time.Duration) *Run {
+			return &Run{ID: id, Repo: "qr", Ticket: id, Workflow: "w", Provider: "aws-ecs",
+				Status: StatusQueued, Priority: p, EnqueuedAt: t0.Add(off), LaunchedBy: "me",
+				TimeoutAt: t0.Add(time.Hour)}
+		}
+		for _, r := range []*Run{mk("a", PriorityLow, 0), mk("b", PriorityHigh, time.Minute), mk("c", PriorityHigh, 0)} {
+			if err := s.CreateRun(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.ClaimNextQueued(ctx, "qr")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == nil || got.ID != "c" {
+			t.Fatalf("want c (high, oldest), got %+v", got)
+		}
+		if got.Status != StatusPending {
+			t.Errorf("claimed status = %q, want pending", got.Status)
+		}
+	})
+
+	t.Run("Queue/ClaimEmpty", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		got, err := s.ClaimNextQueued(ctx, "none")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != nil {
+			t.Errorf("want nil, got %+v", got)
+		}
+	})
+
+	t.Run("Queue/QueuedBlocksDuplicate", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		now := time.Date(2026, 6, 8, 9, 0, 0, 0, time.UTC)
+		if err := s.CreateRun(ctx, &Run{ID: "qd", Repo: "qr2", Ticket: "T-9", Workflow: "w",
+			Provider: "aws-ecs", Status: StatusQueued, Priority: PriorityMed, LaunchedBy: "me",
+			EnqueuedAt: now, TimeoutAt: now.Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.FindActiveByTicket(ctx, "qr2", "T-9", "w")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("queued run should block duplicate; got %d active", len(got))
+		}
+		// A different workflow for the same ticket is NOT a duplicate.
+		other, err := s.FindActiveByTicket(ctx, "qr2", "T-9", "other-wf")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(other) != 0 {
+			t.Fatalf("different workflow must not match; got %d", len(other))
+		}
+	})
+
+	t.Run("Queue/StatusRoundTrip", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		now := time.Date(2026, 6, 8, 9, 0, 0, 0, time.UTC)
+		for _, st := range []Status{StatusQueued, StatusCancelled} {
+			id := "rt-" + string(st)
+			if err := s.CreateRun(ctx, &Run{ID: id, Repo: "rtr", Ticket: id, Provider: "aws-ecs",
+				Status: st, LaunchedBy: "me", StartedAt: now, TimeoutAt: now.Add(time.Hour)}); err != nil {
+				t.Fatalf("CreateRun(%s): %v", st, err)
+			}
+			got, err := s.GetRun(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != st {
+				t.Errorf("status = %q, want %q", got.Status, st)
+			}
+		}
 	})
 }
 

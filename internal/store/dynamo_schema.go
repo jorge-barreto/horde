@@ -29,6 +29,9 @@ const (
 	AttrCacheCreationTokens = "cache_creation_tokens"
 	AttrCacheReadTokens     = "cache_read_tokens"
 	AttrTurns               = "turns"
+
+	AttrEnqueuedAt = "enqueued_at"
+	AttrPriority   = "priority"
 )
 
 // GSI name constants.

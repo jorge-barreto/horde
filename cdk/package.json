@@ -14,12 +14,14 @@
     "lib/**/*.js",
     "lib/**/*.d.ts",
     "!lib/status-lambda/index.js",
+    "!lib/drain-lambda/index.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && npm run bundle-lambda",
+    "build": "tsc && npm run bundle-lambda && npm run bundle-drain-lambda",
     "bundle-lambda": "esbuild src/status-lambda/index.ts --bundle --platform=node --target=node20 --external:@aws-sdk/* --outfile=lib/status-lambda/bundle.js",
+    "bundle-drain-lambda": "esbuild src/drain-lambda/index.ts --bundle --platform=node --target=node20 --external:@aws-sdk/* --outfile=lib/drain-lambda/bundle.js",
     "watch": "tsc -w",
     "test": "jest --passWithNoTests",
     "clean": "rm -rf lib coverage cdk.out",
@@ -34,6 +36,8 @@
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/client-ecs": "^3.1064.0",
+    "@aws-sdk/client-eventbridge": "^3.1064.0",
     "@aws-sdk/client-s3": "^3.600.0",
     "@types/aws-lambda": "^8.10.140",
     "@types/jest": "^29.5.12",

@@ -79,6 +79,18 @@ var topics = []Topic{
 		Summary: "Tag runs with --label and filter/aggregate horde list",
 		Content: topicLabels,
 	},
+	{
+		Name:    "queue",
+		Title:   "Server-Side Queue and Spend Cap",
+		Summary: "Enqueue launches (--enqueue), priority, drain semantics, spend-rate cap (aws-ecs)",
+		Content: topicQueue,
+	},
+	{
+		Name:    "events",
+		Title:   "Run-Lifecycle Events",
+		Summary: "run.started / run.terminal / run.cost-threshold-exceeded on the EventBridge bus",
+		Content: topicEvents,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -803,14 +815,21 @@ have to grep stderr wording:
     status            meaning                                        exit
     --------------    -------------------------------------------    ----
     launched          run started; run_id set                       0
+    queued            parked in the server-side queue (--enqueue);   0
+                      run_id + priority set (aws-ecs only)
     duplicate         an active run already exists for the ticket;   0
                       existing_run_id set
     capped            at the concurrency limit; retry later;         0
                       reason set
     error             a real failure; reason set                     1
 
-run_id is null unless status is "launched"; existing_run_id is null
-unless status is "duplicate".
+run_id is set for "launched" and "queued"; existing_run_id is null unless
+status is "duplicate". For "queued", a "priority" field carries the level
+(lowest|low|med|high|highest). See 'horde docs queue'.
+
+The 'horde queue' subcommands also emit JSON under --json: 'queue list' returns
+{"status":"ok","queued":[...]} in drain order; 'queue prioritize' returns
+{"status":"reprioritized",...}; 'queue cancel' returns {"status":"cancelled",...}.
 
 Exit codes
 ----------
@@ -1173,10 +1192,34 @@ Same surface as 'horde bootstrap' (CloudFormation flavor):
   - SSM /horde/<slug>/config parameter consumed by the CLI
   - EventBridge rule + status-sync Lambda (Node 20) that updates run
     rows in DynamoDB on STOPPED ECS task events
-  - Scoped IAM task role, execution role, status Lambda role
+  - Custom EventBridge bus (horde-<slug>) carrying run-lifecycle events,
+    plus a queue-drain Lambda subscribed to run.terminal (see below and
+    'horde docs queue' / 'horde docs events')
+  - Scoped IAM task role, execution role, status Lambda role, drain Lambda role
   - Managed policy for the horde CLI, exposed as CfnOutput
     CliUserManagedPolicyArn — attach to the IAM principals that
     will run the CLI
+
+Queue, events, and spend cap
+----------------------------
+
+The construct provisions the run-lifecycle event backbone: a horde-<slug>
+EventBridge bus, the status Lambda emitting run.terminal after each terminal
+write, and a drain Lambda that starts the next queued run when a slot frees.
+This enables 'horde launch --enqueue' and the 'horde queue' commands (aws-ecs
+only). Subscribe your own rules to the bus to react to runs — see
+'horde docs events'. The backbone is CDK-only; 'horde bootstrap' does not
+provision it.
+
+Optional realized spend cap:
+
+    maxSpendPerWindow: 200,                 // USD; omit to disable
+    spendWindow: cdk.Duration.hours(24),    // defaults to 24h when cap set
+
+When the realized cost of runs completed in the trailing window meets the cap,
+the drain holds queued runs and emits run.cost-threshold-exceeded. Realized-only
+(in-flight runs are uncosted until they finish); the maxConcurrent limit is the
+blast-radius backstop. See 'horde docs queue'.
 
 Sidecar containers
 ------------------
@@ -1302,9 +1345,12 @@ Filtering the list
 AND-combined (a run must match every one you pass):
 
     --label key=value   only runs carrying this label (repeatable)
-    --status <status>    pending | running | success | failed | killed |
-                         timed_out | rate_limited (repeatable). Passing
-                         --status also includes terminal runs, like --all.
+    --status <status>    pending | running | queued | success | failed |
+                         killed | timed_out | rate_limited | cancelled
+                         (repeatable). Passing --status also includes terminal
+                         runs, like --all. ('queued' is the server-side backlog;
+                         'cancelled' is a queued run cancelled before it ran —
+                         see 'horde docs queue'.)
     --workflow <name>    only runs of this workflow
     --ticket <id>        only runs for this ticket
     --since <when>       only runs started at/after <when>
@@ -1349,4 +1395,123 @@ has token data):
     horde list --all --label epic=KS-100 --json | jq .summary
 
 The human table prints the same as a trailing "12 runs, $4.82 total" line.
+`
+
+const topicQueue = `Server-Side Queue and Spend Cap
+
+The queue lets you submit more launches than the cluster can run at once and
+have horde start them mechanically as slots free. It is aws-ecs only — the
+docker provider stays local/pull-based with no background process, so --enqueue
+on docker is an error.
+
+ENQUEUE
+
+    horde launch --enqueue --workflow implement-ticket PROJ-1 --priority high
+
+--enqueue writes the launch to the backlog (a run with status "queued") and
+exits immediately instead of starting a task. Under --json the status is
+"queued" with exit 0, alongside run_id and priority. A queued run does not
+consume a concurrency slot — it is waiting for one.
+
+PRIORITY
+
+Five levels: lowest, low, med (default), high, highest. The drain starts the
+highest-priority queued run first, then the oldest within a level (by enqueue
+time). Priority is the steering lever — horde never infers urgency from ticket
+contents. Adjust a waiting run with:
+
+    horde queue prioritize <run-id> --priority highest
+
+INSPECT AND CANCEL
+
+    horde queue list                 # backlog in drain order (what runs next)
+    horde queue cancel <run-id>      # cancel a queued run before it ever runs
+
+A cancelled queued run gets the terminal status "cancelled" (distinct from
+"killed", which means a running task was stopped — a cancelled run never ran and
+never cost anything).
+
+HOW THE DRAIN WORKS
+
+A run reaching a terminal state frees a slot and fires the drain: the drain
+checks capacity and the spend cap, then claims and starts the next queued run.
+A backstop drain also runs opportunistically on 'horde launch'/'horde list', so
+a missed event self-heals the next time you touch the project. There is no
+background daemon. If a claimed run fails to start, it is marked "failed" (not
+re-queued) and shows up in 'horde list' for you to retry.
+
+The prioritization "brain" lives above horde: a human or an agent watching the
+project curates the backlog (bump priority, or 'horde launch --force' to bypass
+the queue for a true emergency). horde just launches what's next.
+
+SPEND-RATE CAP
+
+Configure a realized spend cap in the deployment (CDK HordeWorker props
+maxSpendPerWindow / spendWindow, written to SSM as max_spend_per_window /
+spend_window). When the realized cost of runs completed in the trailing window
+meets the cap, the drain is held — queued runs wait — and a
+run.cost-threshold-exceeded event is emitted (see 'horde docs events'). The
+backlog drains again as the window slides or in-flight runs finish.
+
+Realized-only caveat: cost is known only when a run finishes, so in-flight runs
+count as $0 until then and a burst can overshoot the cap before any report cost.
+The concurrency limit (max_concurrent) is the real blast-radius backstop. Live
+enforcement is a future enhancement.
+`
+
+const topicEvents = `Run-Lifecycle Events
+
+On aws-ecs, horde publishes run-lifecycle events to a dedicated EventBridge bus
+(named horde-<project-slug>, created by the CDK construct). Subscribe your own
+rules to react to runs without polling horde — notifications, metrics, chained
+launches, budget alarms.
+
+EVENT TYPES (EventBridge DetailType, Source = "horde")
+
+    run.started                    a run began executing
+    run.terminal                   a run reached a terminal state
+    run.cost-threshold-exceeded    a drain was held by the spend cap
+
+DETAIL SHAPE (stable, versioned JSON)
+
+    {
+      "version": 1,
+      "run_id":  "ab12cd34ef56",
+      "repo":    "github.com/org/repo",
+      "ticket":  "PROJ-1",
+      "workflow":"implement-ticket",
+      "branch":  "main",
+      "status":  "success",          // horde vocabulary, never raw ECS:
+                                      //   success|failed|killed|timed_out|
+                                      //   rate_limited|cancelled|running
+      "exit_code": 0,
+      "total_cost_usd": 1.25,
+      "labels": { "epic": "KS-100" },
+      "started_at":   "2026-06-08T10:00:00Z",
+      "completed_at": "2026-06-08T10:42:00Z",
+      "stop_code":    "",            // ECS stop diagnostics when present
+      "stop_reason":  ""
+    }
+
+The "version" field is the contract version; new fields are additive. Events
+carry horde's run identity and mapped status directly, so subscribers never
+re-derive status from raw ECS task events.
+
+SUBSCRIBING
+
+Add an EventBridge rule on the horde-<slug> bus filtering by detail-type:
+
+    {
+      "source": ["horde"],
+      "detail-type": ["run.terminal"]
+    }
+
+Target a Lambda, SNS topic, Step Function, or anything EventBridge supports. The
+queue drain itself is just one such subscriber (an internal rule on run.terminal).
+
+EMISSION SEMANTICS
+
+Events are best-effort and emitted AFTER the authoritative DynamoDB write — the
+store is the source of truth; an event is a notification of truth. A failed
+publish is logged and never reverses a run's recorded state.
 `

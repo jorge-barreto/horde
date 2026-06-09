@@ -24,6 +24,7 @@ import (
 	"github.com/jorge-barreto/horde/internal/awscfg"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/docs"
+	"github.com/jorge-barreto/horde/internal/event"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/runid"
 	"github.com/jorge-barreto/horde/internal/store"
@@ -68,9 +69,11 @@ func main() {
 func setOutputs(app *cli.Command, w io.Writer) {
 	app.Writer = w
 	app.ErrWriter = w
+	// Recurse into nested command groups (e.g. `queue list`): urfave defaults
+	// each command's Writer to os.Stdout independently at setup if nil, so a
+	// nested subcommand would otherwise bypass w.
 	for _, sub := range app.Commands {
-		sub.Writer = w
-		sub.ErrWriter = w
+		setOutputs(sub, w)
 	}
 }
 
@@ -148,6 +151,7 @@ detailed documentation.`,
 			resultsCmd(),
 			hydrateCmd(),
 			listCmd(),
+			queueCmd(),
 			cleanCmd(),
 			shellCmd(),
 			bootstrapCmd(),
@@ -210,6 +214,14 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Name:  "label",
 				Usage: "Attach a key=value label to the run (repeatable); filterable via `horde list --label`",
 			},
+			&cli.BoolFlag{
+				Name:  "enqueue",
+				Usage: "Park the launch in the server-side queue (aws-ecs only); it runs when a slot frees. Exits 0 with status 'queued' under --json.",
+			},
+			&cli.StringFlag{
+				Name:  "priority",
+				Usage: "Queue priority for --enqueue: lowest|low|med|high|highest (default med). Higher drains first.",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -234,6 +246,12 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				return err
 			}
 
+			enqueue := cmd.Bool("enqueue")
+			priority, err := store.ParsePriority(cmd.String("priority"))
+			if err != nil {
+				return err
+			}
+
 			if workflow == "" {
 				return fmt.Errorf("--workflow is required (e.g. --workflow implement-ticket)")
 			}
@@ -247,12 +265,15 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			}
 			defer cleanup()
 
-			// Concurrency check: reject launch if at capacity.
+			// Concurrency check: reject a DIRECT launch at capacity. An
+			// --enqueue launch skips the gate — it is parking a row to run
+			// later, not contending for a slot now (a queued run counts as
+			// neither pending nor running in CountActive).
 			activeCount, err := st.CountActive(ctx)
 			if err != nil {
 				return fmt.Errorf("checking concurrency: %w", err)
 			}
-			if activeCount >= maxConcurrent {
+			if !enqueue && activeCount >= maxConcurrent {
 				reason := fmt.Sprintf("max concurrent runs reached (%d/%d)", activeCount, maxConcurrent)
 				if jsonOut {
 					// Capped is a protocol-level success: the caller should
@@ -312,7 +333,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				return err
 			}
 
-			active, err := st.FindActiveByTicket(ctx, repo, ticket)
+			active, err := st.FindActiveByTicket(ctx, repo, ticket, workflow)
 			if err != nil {
 				return fmt.Errorf("checking active runs: %w", err)
 			}
@@ -325,7 +346,9 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				if err := finalizeAndSync(ctx, prov, st, r, homeDir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 				}
-				if r.Status == store.StatusPending || r.Status == store.StatusRunning {
+				// A queued run also blocks a duplicate (it is waiting to run for
+				// this (ticket, workflow)); Finalize is a no-op for it.
+				if r.Status == store.StatusPending || r.Status == store.StatusRunning || r.Status == store.StatusQueued {
 					stillActive = append(stillActive, r)
 				}
 			}
@@ -339,6 +362,40 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				}
 				fmt.Fprintf(os.Stderr, "ticket %s already has an active run (%s)\n", ticket, active[0].ID)
 				return fmt.Errorf("%s", reason)
+			}
+
+			// --enqueue: park a queued run and exit. It skips provider launch
+			// entirely; the drain (terminal event / lazy CLI) starts it later.
+			if enqueue {
+				if provName != "aws-ecs" {
+					return fmt.Errorf("--enqueue requires the aws-ecs provider; docker has no event source to drain the queue")
+				}
+				qrun := &store.Run{
+					ID:         id,
+					Repo:       repo,
+					Ticket:     ticket,
+					Branch:     branch,
+					Workflow:   workflow,
+					Provider:   provName,
+					Status:     store.StatusQueued,
+					Labels:     labels,
+					LaunchedBy: launchedBy,
+					Priority:   priority,
+					EnqueuedAt: time.Now(),
+				}
+				if err := st.CreateRun(ctx, qrun); err != nil {
+					return fmt.Errorf("enqueuing run: %w", err)
+				}
+				// Opportunistic drain: a slot may already be free, in which case
+				// this run (or an older higher-priority one) starts immediately.
+				// Best-effort; runs before the output so a drain hiccup can't
+				// corrupt --json, but its own writes go to stderr only.
+				lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
+				if jsonOut {
+					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority)))
+				}
+				fmt.Printf("%s (queued, priority %s)\n", id, priority)
+				return nil
 			}
 
 			now := time.Now()
@@ -413,6 +470,17 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Metadata:   result.Metadata,
 			}); err != nil {
 				return fmt.Errorf("updating run status: %w", err)
+			}
+
+			// Emit run.started (best-effort: a failed emit warns, never fails
+			// the launch). On ECS this PutEvents to the bus; on docker it is a
+			// no-op. Reflect the running transition on the in-memory run so the
+			// event Detail carries status/instance_id.
+			run.Status = store.StatusRunning
+			run.InstanceID = result.InstanceID
+			run.Metadata = result.Metadata
+			if err := newEmitter(awsCfg, hordeCfg).Emit(ctx, event.TypeRunStarted, event.DetailFromRun(run)); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: emitting run.started: %v\n", err)
 			}
 
 			if jsonOut {
@@ -928,7 +996,7 @@ duration-ago (1h, 30m, 7d).`,
 				return fmt.Errorf("--until: %w", err)
 			}
 
-			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, maxConcurrent, provName, awsCfg, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -939,7 +1007,8 @@ duration-ago (1h, 30m, 7d).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			repo, err := resolveCanonicalRepo(hordeCfg, newResolver(cmd))
+			resolver := newResolver(cmd)
+			repo, err := resolveCanonicalRepo(hordeCfg, resolver)
 			if err != nil {
 				return err
 			}
@@ -996,11 +1065,15 @@ duration-ago (1h, 30m, 7d).`,
 				default:
 					fmt.Println("No active runs for this repo.")
 				}
+				lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 				return nil
 			}
 
 			printRunTable(runs)
 			printRunSummary(runs)
+			// Best-effort backstop drain (ECS-only, after output): self-heals a
+			// missed terminal event the next time anyone lists the project.
+			lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 			return nil
 		},
 	}
@@ -1698,6 +1771,16 @@ func newResolver(cmd *cli.Command) *config.Resolver {
 		SSMOverride:    cmd.String("ssm-path"),
 		Dir:            cwd,
 	}
+}
+
+// newEmitter returns an EventBridge emitter when the deployment configures a
+// bus (ECS), else a no-op (docker, or pre-bus deployments). Emission is always
+// best-effort at the call site — a nil/zero config never blocks a command.
+func newEmitter(awsCfg *aws.Config, hordeCfg *config.HordeConfig) event.Emitter {
+	if awsCfg != nil && hordeCfg != nil && hordeCfg.EventBusName != "" {
+		return event.NewEventBridgeEmitter(*awsCfg, hordeCfg.EventBusName)
+	}
+	return event.NopEmitter{}
 }
 
 // initProviderAndStore creates the Provider and Store based on the --provider flag.

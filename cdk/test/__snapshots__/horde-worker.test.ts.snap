@@ -495,12 +495,298 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
               {
                 "Ref": "AWS::URLSuffix",
               },
-              "/horde-test","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
+              "/horde-test","event_bus_name":"",
+              {
+                "Ref": "HordeRunEventBus2D36F50D",
+              },
+              "","repo":"github.com/example/test","max_concurrent":5,"default_timeout_minutes":1440}",
             ],
           ],
         },
       },
       "Type": "AWS::SSM::Parameter",
+    },
+    "HordeDrainEventRule74758369": {
+      "Properties": {
+        "Description": "Drain the horde-test queue when a run reaches a terminal state",
+        "EventBusName": {
+          "Ref": "HordeRunEventBus2D36F50D",
+        },
+        "EventPattern": {
+          "detail-type": [
+            "run.terminal",
+          ],
+          "source": [
+            "horde",
+          ],
+        },
+        "Name": "horde-test-drain",
+        "State": "ENABLED",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "HordeDrainLambdaEB916BD1",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "HordeDrainEventRuleAllowEventRuleTestStackHordeDrainLambda568DB74931E39D7D": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "HordeDrainLambdaEB916BD1",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "HordeDrainEventRule74758369",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "HordeDrainLambdaEB916BD1": {
+      "DependsOn": [
+        "HordeDrainLambdaServiceRoleDefaultPolicyCF6F1DDF",
+        "HordeDrainLambdaServiceRoleE03F5B73",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
+          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "ARTIFACTS_BUCKET": {
+              "Ref": "HordeArtifactsBucket1A7FD4A4",
+            },
+            "ASSIGN_PUBLIC_IP": "DISABLED",
+            "CLUSTER_ARN": {
+              "Fn::GetAtt": [
+                "HordeClusterA7629518",
+                "Arn",
+              ],
+            },
+            "EVENT_BUS_NAME": {
+              "Ref": "HordeRunEventBus2D36F50D",
+            },
+            "MAX_CONCURRENT": "5",
+            "RUNS_TABLE": {
+              "Ref": "HordeRunsTableAC562C05",
+            },
+            "SECURITY_GROUP": {
+              "Fn::GetAtt": [
+                "HordeWorkerSecurityGroupC1335488",
+                "GroupId",
+              ],
+            },
+            "SUBNETS": {
+              "Fn::Join": [
+                ",",
+                [
+                  {
+                    "Ref": "HordeVpcprivateSubnet1Subnet50085241",
+                  },
+                  {
+                    "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
+                  },
+                ],
+              ],
+            },
+            "TASK_DEF_ARN": {
+              "Ref": "HordeTaskDefinition1A4F86D0",
+            },
+          },
+        },
+        "FunctionName": "horde-test-queue-drain",
+        "Handler": "bundle.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "HordeDrainLambdaLogGroupD43C4A02",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "HordeDrainLambdaServiceRoleE03F5B73",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs20.x",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-drain-lambda",
+          },
+        ],
+        "Timeout": 30,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "HordeDrainLambdaLogGroupD43C4A02": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/horde-test-queue-drain",
+        "RetentionInDays": 30,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "HordeDrainLambdaServiceRoleDefaultPolicyCF6F1DDF": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:Query",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeRunsTableAC562C05",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "HordeRunsTableAC562C05",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "DynamoRunsTableRW",
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Fn::GetAtt": [
+                      "HordeClusterA7629518",
+                      "Arn",
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "EcsRunTask",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ecs-tasks.amazonaws.com",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "HordeTaskRole4CD3769C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "HordeExecutionRole89AE651A",
+                    "Arn",
+                  ],
+                },
+              ],
+              "Sid": "EcsPassRole",
+            },
+            {
+              "Action": "events:PutEvents",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeRunEventBus2D36F50D",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "HordeDrainLambdaServiceRoleDefaultPolicyCF6F1DDF",
+        "Roles": [
+          {
+            "Ref": "HordeDrainLambdaServiceRoleE03F5B73",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "HordeDrainLambdaServiceRoleE03F5B73": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test-drain-lambda",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
     },
     "HordeExecutionRole89AE651A": {
       "Properties": {
@@ -632,6 +918,18 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       },
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Delete",
+    },
+    "HordeRunEventBus2D36F50D": {
+      "Properties": {
+        "Name": "horde-test",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "horde-test",
+          },
+        ],
+      },
+      "Type": "AWS::Events::EventBus",
     },
     "HordeRunsTableAC562C05": {
       "DeletionPolicy": "Delete",
@@ -815,12 +1113,15 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "377c49705d8a9bc36fae8c9f439bf882a1bbc26cb71ae1d802de10a5d998d988.zip",
+          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
         },
         "Environment": {
           "Variables": {
             "ARTIFACTS_BUCKET": {
               "Ref": "HordeArtifactsBucket1A7FD4A4",
+            },
+            "EVENT_BUS_NAME": {
+              "Ref": "HordeRunEventBus2D36F50D",
             },
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
@@ -908,6 +1209,16 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Properties": {
         "PolicyDocument": {
           "Statement": [
+            {
+              "Action": "events:PutEvents",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "HordeRunEventBus2D36F50D",
+                  "Arn",
+                ],
+              },
+            },
             {
               "Action": [
                 "dynamodb:GetItem",

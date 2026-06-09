@@ -29,6 +29,7 @@ import {
   ListObjectsV2Command,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
+import { EventBridgeClient, PutEventsCommand } from "@aws-sdk/client-eventbridge";
 
 const RUNS_TABLE = process.env.RUNS_TABLE ?? "";
 const ARTIFACTS_BUCKET = process.env.ARTIFACTS_BUCKET ?? "";
@@ -42,6 +43,7 @@ const WORKER_CONTAINER_NAME = "horde-worker";
 
 const ddb = new DynamoDBClient({});
 const s3 = new S3Client({});
+const eb = new EventBridgeClient({});
 
 interface EcsContainer {
   readonly exitCode?: number;
@@ -70,7 +72,9 @@ type Result =
       readonly exitCode: number | null;
     };
 
-async function findRunId(taskArn: string): Promise<string | null> {
+async function findRun(
+  taskArn: string,
+): Promise<{ runId: string; repo: string; labels: Record<string, string> } | null> {
   const out = await ddb.send(
     new QueryCommand({
       TableName: RUNS_TABLE,
@@ -83,7 +87,23 @@ async function findRunId(taskArn: string): Promise<string | null> {
   const items = out.Items ?? [];
   if (items.length === 0) return null;
   const id = items[0].id;
-  return id && "S" in id ? id.S ?? null : null;
+  const runId = id && "S" in id ? id.S ?? null : null;
+  if (!runId) return null;
+  // repo comes from the by-instance GSI item (ProjectionType ALL). The drain
+  // Lambda needs it to query this repo's queued backlog off the run.terminal event.
+  const repoAttr = items[0].repo;
+  const repo = repoAttr && "S" in repoAttr ? repoAttr.S ?? "" : "";
+  // labels (a DynamoDB Map of String values) are carried on run.terminal so the
+  // event Detail shape is consistent with run.started (which the Go CLI emits
+  // with labels) — letting external consumers filter both event types uniformly.
+  const labels: Record<string, string> = {};
+  const labelsAttr = items[0].labels;
+  if (labelsAttr && "M" in labelsAttr && labelsAttr.M) {
+    for (const [k, v] of Object.entries(labelsAttr.M)) {
+      if (v && "S" in v && v.S !== undefined) labels[k] = v.S;
+    }
+  }
+  return { runId, repo, labels };
 }
 
 async function fetchTotalCost(runId: string): Promise<number | null> {
@@ -206,11 +226,12 @@ export const handler: Handler<
     return { skipped: "no taskArn" };
   }
 
-  const runId = await findRunId(taskArn);
-  if (!runId) {
+  const found = await findRun(taskArn);
+  if (!found) {
     console.log("status-lambda: skip, task not managed by horde", { taskArn });
     return { skipped: "task not managed by horde" };
   }
+  const { runId, repo, labels } = found;
 
   // Status is the WORKER container's exit code, not the task's. With sidecars
   // in the task def the event's `containers` order is not guaranteed, so find
@@ -326,6 +347,43 @@ export const handler: Handler<
       return { skipped: "already terminal", runId };
     }
     throw err;
+  }
+
+  // Emit run.terminal to the bus AFTER the authoritative DynamoDB write (only on
+  // the branch where the terminal write actually applied — not the already-
+  // terminal CCFE path, which returned above). Best-effort: a failed PutEvents
+  // logs but never reverses the store write. EVENT_BUS_NAME is read at call time
+  // so deployments without the bus (or tests) simply skip emission. The Detail
+  // is horde-vocabulary and carries `repo` so the drain Lambda can find this
+  // repo's queued backlog. Stable, versioned public contract (see internal/event).
+  const eventBusName = process.env.EVENT_BUS_NAME ?? "";
+  if (eventBusName) {
+    try {
+      await eb.send(
+        new PutEventsCommand({
+          Entries: [
+            {
+              EventBusName: eventBusName,
+              Source: "horde",
+              DetailType: "run.terminal",
+              Detail: JSON.stringify({
+                version: 1,
+                run_id: runId,
+                repo,
+                status,
+                exit_code: exitCode,
+                total_cost_usd: cost,
+                labels,
+                stop_code: detail.stopCode ?? "",
+                stop_reason: detail.stoppedReason ?? "",
+              }),
+            },
+          ],
+        }),
+      );
+    } catch (err) {
+      console.error("status-lambda: emit run.terminal failed (non-fatal)", { runId, err });
+    }
   }
 
   console.log("status-lambda: updated", { runId, status, exitCode, hasCost: cost !== null, hasTokens: tokens !== null });

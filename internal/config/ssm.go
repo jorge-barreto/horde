@@ -134,6 +134,18 @@ type HordeConfig struct {
 	Repo                  string `json:"repo"`
 	MaxConcurrent         int    `json:"max_concurrent"`
 	DefaultTimeoutMinutes int    `json:"default_timeout_minutes"`
+	// EventBusName is the custom EventBridge bus horde publishes run-lifecycle
+	// events to (run.started / run.terminal / run.cost-threshold-exceeded).
+	// Optional: empty means no bus is configured and the CLI uses a no-op
+	// emitter (docker, or ECS deployments predating the bus).
+	EventBusName string `json:"event_bus_name,omitempty"`
+	// MaxSpendPerWindow caps realized spend (USD) over SpendWindow before the
+	// queue drain is held. Optional: 0 (or a zero window) disables the spend
+	// cap, leaving concurrency-only gating. Realized-only — see horde docs queue.
+	MaxSpendPerWindow float64 `json:"max_spend_per_window,omitempty"`
+	// SpendWindow is the trailing window for MaxSpendPerWindow, as a Go duration
+	// string (e.g. "24h"). Optional; ignored without MaxSpendPerWindow.
+	SpendWindow string `json:"spend_window,omitempty"`
 }
 
 // Validate checks that all required fields are present and valid.

@@ -173,6 +173,10 @@ func TestStatus_IsTerminal(t *testing.T) {
 		{StatusSuccess, true},
 		{StatusFailed, true},
 		{StatusKilled, true},
+		{StatusTimedOut, true},
+		{StatusRateLimited, true},
+		{StatusCancelled, true},
+		{StatusQueued, false},
 		{Status("unknown-future-status"), false},
 	}
 	for _, tc := range cases {
@@ -183,5 +187,39 @@ func TestStatus_IsTerminal(t *testing.T) {
 				t.Errorf("%q.IsTerminal() = %v, want %v", tc.status, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPriorityOrdinalOrdering(t *testing.T) {
+	t.Parallel()
+	want := []Priority{PriorityLowest, PriorityLow, PriorityMed, PriorityHigh, PriorityHighest}
+	for i := 1; i < len(want); i++ {
+		if want[i-1].Ordinal() >= want[i].Ordinal() {
+			t.Errorf("%s ordinal %d should be < %s ordinal %d",
+				want[i-1], want[i-1].Ordinal(), want[i], want[i].Ordinal())
+		}
+	}
+}
+
+func TestParsePriority(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"lowest", "low", "med", "high", "highest"} {
+		if _, err := ParsePriority(s); err != nil {
+			t.Errorf("ParsePriority(%q): unexpected error %v", s, err)
+		}
+	}
+	if _, err := ParsePriority("urgent"); err == nil {
+		t.Error("ParsePriority(\"urgent\"): want error, got nil")
+	}
+}
+
+func TestParsePriorityEmptyDefaultsMed(t *testing.T) {
+	t.Parallel()
+	p, err := ParsePriority("")
+	if err != nil {
+		t.Fatalf("ParsePriority(\"\"): %v", err)
+	}
+	if p != PriorityMed {
+		t.Errorf("empty priority = %s, want med", p)
 	}
 }

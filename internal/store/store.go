@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -27,7 +28,58 @@ const (
 	// exit code 4 (cost/rate limit) → StatusRateLimited (see mapExitCode).
 	StatusTimedOut    Status = "timed_out"
 	StatusRateLimited Status = "rate_limited"
+	// StatusQueued is a launch parked in the server-side backlog
+	// (`horde launch --enqueue`), waiting for a concurrency slot and budget
+	// headroom. It is NON-terminal and NOT "active" — it consumes no slot
+	// (CountActive counts only pending+running). It drains to pending.
+	StatusQueued Status = "queued"
+	// StatusCancelled is a queued run cancelled before it ever ran
+	// (`horde queue cancel`). Terminal. Distinct from StatusKilled, which
+	// means a RUNNING task was stopped and may have committed work / spent
+	// money; a cancelled run definitionally did neither.
+	StatusCancelled Status = "cancelled"
 )
+
+// Priority is the queue drain-order lever set at enqueue and adjustable via
+// `horde queue prioritize`. The drain picks highest priority first, then
+// oldest enqueued_at within a level. It is purely mechanical: horde never
+// decides priority from ticket meaning — the operator (or an agent above
+// horde) curates the backlog.
+type Priority string
+
+const (
+	PriorityLowest  Priority = "lowest"
+	PriorityLow     Priority = "low"
+	PriorityMed     Priority = "med"
+	PriorityHigh    Priority = "high"
+	PriorityHighest Priority = "highest"
+)
+
+var priorityOrdinals = map[Priority]int{
+	PriorityLowest: 0, PriorityLow: 1, PriorityMed: 2, PriorityHigh: 3, PriorityHighest: 4,
+}
+
+// Ordinal is the sortable rank; higher drains first. Unknown priorities sort
+// as med so a malformed stored value never starves the queue.
+func (p Priority) Ordinal() int {
+	if o, ok := priorityOrdinals[p]; ok {
+		return o
+	}
+	return priorityOrdinals[PriorityMed]
+}
+
+// ParsePriority validates a user-supplied priority string. Empty defaults to
+// med. Unknown values are an error (surfaced to the CLI user).
+func ParsePriority(s string) (Priority, error) {
+	if s == "" {
+		return PriorityMed, nil
+	}
+	p := Priority(s)
+	if _, ok := priorityOrdinals[p]; !ok {
+		return "", fmt.Errorf("invalid priority %q: want one of lowest, low, med, high, highest", s)
+	}
+	return p, nil
+}
 
 // matchesFilter reports whether a run satisfies the non-repo dimensions of a
 // RunFilter (Repo scoping is handled by the query that fetched the run). It is
@@ -73,7 +125,7 @@ func matchesFilter(run *Run, f RunFilter) bool {
 // to decide "active vs done" without enumerating statuses inline.
 func (s Status) IsTerminal() bool {
 	switch s {
-	case StatusSuccess, StatusFailed, StatusKilled, StatusTimedOut, StatusRateLimited:
+	case StatusSuccess, StatusFailed, StatusKilled, StatusTimedOut, StatusRateLimited, StatusCancelled:
 		return true
 	}
 	return false
@@ -116,6 +168,13 @@ type Run struct {
 	CompletedAt  *time.Time
 	TimeoutAt    time.Time
 	TotalCostUSD *float64
+	// EnqueuedAt is set when a run enters the backlog via --enqueue; it is the
+	// zero value for directly-launched runs. It is the drain-order tiebreaker
+	// (oldest first within a priority level). Distinct from StartedAt, which is
+	// set when the run actually begins running (at drain time for queued runs).
+	EnqueuedAt time.Time
+	// Priority is the drain-order lever; empty for directly-launched runs.
+	Priority Priority
 	// Tokens is nil until orc reports usage (pre-finalize, or an orc old
 	// enough that neither costs.json nor run-result.json carried token totals).
 	Tokens *TokenUsage
@@ -132,6 +191,7 @@ type RunUpdate struct {
 	TotalCostUSD *float64
 	Tokens       *TokenUsage
 	TimeoutAt    *time.Time
+	Priority     *Priority // nil = don't update
 }
 
 // RunFilter scopes a ListRuns query. Repo is always required (listing is
@@ -162,7 +222,12 @@ type Store interface {
 	// by started_at descending (newest first). It is the general-purpose query
 	// behind `horde list`; ListByRepo is the active-only/all special case.
 	ListRuns(ctx context.Context, filter RunFilter) ([]*Run, error)
-	FindActiveByTicket(ctx context.Context, repo string, ticket string) ([]*Run, error)
+	// FindActiveByTicket returns active runs for the given repo + ticket +
+	// workflow. "Active" here means a slot is, or is about to be, consumed:
+	// pending, running, OR queued. Scope includes workflow because the same
+	// ticket under a different workflow is a legitimately different run (#20),
+	// so duplicate-launch protection must not collide across workflows.
+	FindActiveByTicket(ctx context.Context, repo, ticket, workflow string) ([]*Run, error)
 	CountActive(ctx context.Context) (int, error)
 	// ListActive returns all runs in pending or running status across every
 	// repo, sorted by started_at descending (newest first). The pending /
@@ -170,4 +235,11 @@ type Store interface {
 	// fetch them in separate queries must merge-sort before returning so
 	// callers can rely on a stable cross-status ordering.
 	ListActive(ctx context.Context) ([]*Run, error)
+	// ClaimNextQueued atomically claims the highest-priority, oldest-enqueued
+	// queued run for the repo, transitioning it queued→pending, and returns it
+	// (with Status already set to pending). Returns (nil, nil) when no queued
+	// run is eligible. The transition is atomic: under concurrent callers
+	// exactly one wins a given run; losers skip it. This is the double-launch
+	// guard for both the drain Lambda and the lazy CLI drain.
+	ClaimNextQueued(ctx context.Context, repo string) (*Run, error)
 }

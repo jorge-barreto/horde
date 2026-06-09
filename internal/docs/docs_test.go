@@ -60,3 +60,16 @@ func TestGet_NotFound(t *testing.T) {
 		t.Fatal("Get(nonexistent) returned no error")
 	}
 }
+
+func TestQueueAndEventsTopicsExist(t *testing.T) {
+	for _, name := range []string{"queue", "events"} {
+		topic, err := Get(name)
+		if err != nil {
+			t.Errorf("Get(%q): %v", name, err)
+			continue
+		}
+		if topic.Content == "" {
+			t.Errorf("topic %q has empty content", name)
+		}
+	}
+}

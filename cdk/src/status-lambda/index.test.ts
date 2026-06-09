@@ -8,6 +8,7 @@ import {
   UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { EventBridgeClient, PutEventsCommand } from "@aws-sdk/client-eventbridge";
 import { mockClient } from "aws-sdk-client-mock";
 import { Readable } from "stream";
 import type { Context, EventBridgeEvent } from "aws-lambda";
@@ -24,6 +25,7 @@ const { handler } = require("./index") as typeof import("./index");
 
 const ddbMock = mockClient(DynamoDBClient);
 const s3Mock = mockClient(S3Client);
+const ebMock = mockClient(EventBridgeClient);
 
 // Lambda Context is unused by our handler; a minimal stub keeps tsc happy.
 const ctx = {} as Context;
@@ -70,6 +72,8 @@ function streamFromString(s: string): unknown {
 beforeEach(() => {
   ddbMock.reset();
   s3Mock.reset();
+  ebMock.reset();
+  delete process.env.EVENT_BUS_NAME;
 });
 
 describe("status-lambda handler (5fh.16)", () => {
@@ -539,5 +543,54 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(q.KeyConditionExpression).toBe("instance_id = :iid");
     expect(q.ExpressionAttributeValues?.[":iid"]).toEqual({ S: "arn:task/q" });
     expect(q.Limit).toBe(1);
+  });
+
+  it("emits run.terminal to the bus after the terminal write when EVENT_BUS_NAME is set", async () => {
+    process.env.EVENT_BUS_NAME = "horde-test-bus";
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-emit" }, repo: { S: "github.com/o/r" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+    ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0 });
+
+    await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/emit",
+        stoppedAt: "2026-04-19T00:00:01Z",
+        containers: [{ exitCode: 0, name: "horde-worker" }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    const calls = ebMock.commandCalls(PutEventsCommand);
+    expect(calls).toHaveLength(1);
+    const entry = calls[0].args[0].input.Entries?.[0];
+    expect(entry?.Source).toBe("horde");
+    expect(entry?.DetailType).toBe("run.terminal");
+    expect(entry?.EventBusName).toBe("horde-test-bus");
+    const detail = JSON.parse(entry?.Detail ?? "{}");
+    expect(detail.run_id).toBe("run-emit");
+    expect(detail.repo).toBe("github.com/o/r");
+    expect(detail.status).toBe("success");
+    expect(detail.version).toBe(1);
+  });
+
+  it("does NOT emit when EVENT_BUS_NAME is unset", async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-noemit" } }] });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/noemit",
+        containers: [{ exitCode: 0, name: "horde-worker" }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    expect(ebMock.commandCalls(PutEventsCommand)).toHaveLength(0);
   });
 });

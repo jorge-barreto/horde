@@ -561,3 +561,45 @@ func TestHordeConfig_Validate_AssignPublicIp(t *testing.T) {
 		})
 	}
 }
+
+func TestHordeConfigEventAndSpendFields(t *testing.T) {
+	const js = `{
+		"cluster_arn": "arn:cluster", "task_definition_arn": "arn:td",
+		"subnets": ["s-1"], "security_group": "sg-1",
+		"log_group": "lg", "log_stream_prefix": "lsp",
+		"artifacts_bucket": "bucket", "runs_table": "rt", "ecr_repo_uri": "ecr",
+		"repo": "github.com/o/r", "max_concurrent": 5, "default_timeout_minutes": 60,
+		"event_bus_name": "horde-proj", "max_spend_per_window": 200, "spend_window": "24h"
+	}`
+	cfg, err := ParseHordeConfig([]byte(js))
+	if err != nil {
+		t.Fatalf("ParseHordeConfig: %v", err)
+	}
+	if cfg.EventBusName != "horde-proj" {
+		t.Errorf("EventBusName = %q, want horde-proj", cfg.EventBusName)
+	}
+	if cfg.MaxSpendPerWindow != 200 {
+		t.Errorf("MaxSpendPerWindow = %v, want 200", cfg.MaxSpendPerWindow)
+	}
+	if cfg.SpendWindow != "24h" {
+		t.Errorf("SpendWindow = %q, want 24h", cfg.SpendWindow)
+	}
+}
+
+func TestHordeConfigEventFieldsOptional(t *testing.T) {
+	// A config WITHOUT the new fields must still validate (they are optional).
+	const js = `{
+		"cluster_arn": "arn:cluster", "task_definition_arn": "arn:td",
+		"subnets": ["s-1"], "security_group": "sg-1",
+		"log_group": "lg", "log_stream_prefix": "lsp",
+		"artifacts_bucket": "bucket", "runs_table": "rt", "ecr_repo_uri": "ecr",
+		"repo": "github.com/o/r", "max_concurrent": 5, "default_timeout_minutes": 60
+	}`
+	cfg, err := ParseHordeConfig([]byte(js))
+	if err != nil {
+		t.Fatalf("ParseHordeConfig without event fields: %v", err)
+	}
+	if cfg.EventBusName != "" {
+		t.Errorf("EventBusName = %q, want empty", cfg.EventBusName)
+	}
+}

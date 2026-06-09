@@ -155,6 +155,20 @@ export class HordeWorker extends Construct {
   /** EventBridge rule routing STOPPED task events to `statusLambda`. */
   public readonly statusEventRule: events.Rule;
 
+  /**
+   * Custom EventBridge bus carrying horde run-lifecycle events (run.started /
+   * run.terminal / run.cost-threshold-exceeded). The drain Lambda subscribes;
+   * external consumers (notifications, your own automation) can add their own
+   * rules. See `horde docs events`.
+   */
+  public readonly eventBus: events.EventBus;
+
+  /** Lambda that drains the queue on run.terminal (capacity + spend gated). */
+  public readonly drainLambda: lambda.Function;
+
+  /** EventBridge rule routing run.terminal events to `drainLambda`. */
+  public readonly drainEventRule: events.Rule;
+
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
     super(scope, id);
 
@@ -371,6 +385,26 @@ export class HordeWorker extends Construct {
     const maxConcurrent = props.maxConcurrent ?? 5;
     const defaultTimeoutMinutes = props.defaultTimeoutMinutes ?? 1440;
 
+    // Custom EventBridge bus for run-lifecycle events. Created before the SSM
+    // config so its name (a token) can be written into the CLI config JSON the
+    // launch path / lazy drain read to emit run.started.
+    this.eventBus = new events.EventBus(this, "RunEventBus", {
+      eventBusName: `horde-${slug}`,
+    });
+
+    // Spend cap: realized-only (see HordeWorkerProps.maxSpendPerWindow). The
+    // window defaults to 24h when a cap is set. Surfaced to SSM config + the
+    // drain Lambda env; absent ⇒ concurrency-only gating.
+    const spendWindowSeconds =
+      props.maxSpendPerWindow !== undefined
+        ? (props.spendWindow ?? cdk.Duration.hours(24)).toSeconds()
+        : undefined;
+    // Go consumers parse spend_window as a duration string; emit "<N>s".
+    const spendConfigJSON =
+      props.maxSpendPerWindow !== undefined
+        ? `,"max_spend_per_window":${props.maxSpendPerWindow},"spend_window":"${spendWindowSeconds}s"`
+        : "";
+
     const subnetsJson = cdk.Fn.join("", [
       "[",
       cdk.Fn.join(",", privateSubnetIds.map((id) => cdk.Fn.join("", ['"', id, '"']))),
@@ -393,7 +427,9 @@ export class HordeWorker extends Construct {
       this.runsTable.tableName,
       '","ecr_repo_uri":"',
       props.ecrRepository.repositoryUri,
-      `","repo":"${props.repo}","max_concurrent":${maxConcurrent},"default_timeout_minutes":${defaultTimeoutMinutes}}`,
+      '","event_bus_name":"',
+      this.eventBus.eventBusName,
+      `","repo":"${props.repo}","max_concurrent":${maxConcurrent},"default_timeout_minutes":${defaultTimeoutMinutes}${spendConfigJSON}}`,
     ]);
 
     this.configParameter = new ssm.StringParameter(this, "ConfigParameter", {
@@ -469,6 +505,7 @@ export class HordeWorker extends Construct {
       environment: {
         RUNS_TABLE: this.runsTable.tableName,
         ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
+        EVENT_BUS_NAME: this.eventBus.eventBusName,
       },
       logGroup: new logs.LogGroup(this, "StatusLambdaLogGroup", {
         logGroupName: `/aws/lambda/horde-${slug}-status-updater`,
@@ -477,6 +514,8 @@ export class HordeWorker extends Construct {
       }),
     });
     cdk.Tags.of(this.statusLambda).add("Name", `horde-${slug}-status-lambda`);
+    // The status Lambda emits run.terminal after its authoritative write.
+    this.eventBus.grantPutEventsTo(this.statusLambda);
 
     this.statusLambda.addToRolePolicy(
       new iam.PolicyStatement({
@@ -516,6 +555,82 @@ export class HordeWorker extends Construct {
       },
     });
     this.statusEventRule.addTarget(new targets.LambdaFunction(this.statusLambda));
+
+    // --- Queue drain (issue #36) ---
+    // The drain Lambda subscribes to run.terminal on the bus. On each event it
+    // checks capacity + the realized spend cap, atomically claims the next
+    // queued run (queued→pending), RunTasks it, and emits run.started. Bundled
+    // standalone like the status Lambda (no consumer-side esbuild/Docker).
+    const drainEnv: Record<string, string> = {
+      RUNS_TABLE: this.runsTable.tableName,
+      EVENT_BUS_NAME: this.eventBus.eventBusName,
+      MAX_CONCURRENT: String(maxConcurrent),
+      CLUSTER_ARN: this.cluster.clusterArn,
+      TASK_DEF_ARN: this.taskDefinition.taskDefinitionArn,
+      SUBNETS: cdk.Fn.join(",", privateSubnetIds),
+      SECURITY_GROUP: this.workerSecurityGroup.securityGroupId,
+      ASSIGN_PUBLIC_IP: "DISABLED", // matches the SSM config above
+      ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
+    };
+    if (props.maxSpendPerWindow !== undefined) {
+      drainEnv.MAX_SPEND_PER_WINDOW = String(props.maxSpendPerWindow);
+      drainEnv.SPEND_WINDOW_SECONDS = String(spendWindowSeconds);
+    }
+
+    this.drainLambda = new lambda.Function(this, "DrainLambda", {
+      functionName: `horde-${slug}-queue-drain`,
+      code: lambda.Code.fromAsset(path.join(__dirname, "drain-lambda")),
+      handler: "bundle.handler",
+      runtime: lambda.Runtime.NODEJS_20_X,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: drainEnv,
+      logGroup: new logs.LogGroup(this, "DrainLambdaLogGroup", {
+        logGroupName: `/aws/lambda/horde-${slug}-queue-drain`,
+        retention,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    cdk.Tags.of(this.drainLambda).add("Name", `horde-${slug}-drain-lambda`);
+
+    this.drainLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "DynamoRunsTableRW",
+        effect: iam.Effect.ALLOW,
+        actions: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+        resources: [this.runsTable.tableArn, `${this.runsTable.tableArn}/index/*`],
+      }),
+    );
+    this.drainLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "EcsRunTask",
+        effect: iam.Effect.ALLOW,
+        actions: ["ecs:RunTask"],
+        resources: ["*"],
+        conditions: { ArnEquals: { "ecs:cluster": this.cluster.clusterArn } },
+      }),
+    );
+    this.drainLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "EcsPassRole",
+        effect: iam.Effect.ALLOW,
+        actions: ["iam:PassRole"],
+        resources: [this.taskRole.roleArn, this.executionRole.roleArn],
+        conditions: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
+      }),
+    );
+    this.eventBus.grantPutEventsTo(this.drainLambda);
+
+    this.drainEventRule = new events.Rule(this, "DrainEventRule", {
+      ruleName: `horde-${slug}-drain`,
+      description: `Drain the horde-${slug} queue when a run reaches a terminal state`,
+      eventBus: this.eventBus,
+      eventPattern: {
+        source: ["horde"],
+        detailType: ["run.terminal"],
+      },
+    });
+    this.drainEventRule.addTarget(new targets.LambdaFunction(this.drainLambda));
 
     new cdk.CfnOutput(this, "CliUserManagedPolicyArn", {
       value: this.cliUserPolicy.managedPolicyArn,

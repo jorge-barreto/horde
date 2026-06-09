@@ -1,3 +1,4 @@
+import type { Duration } from "aws-cdk-lib";
 import type { IVpc } from "aws-cdk-lib/aws-ec2";
 import type { ContainerDefinitionOptions, ContainerImage } from "aws-cdk-lib/aws-ecs";
 import type { IRepository } from "aws-cdk-lib/aws-ecr";
@@ -147,4 +148,24 @@ export interface HordeWorkerProps {
    * @default — none; a single-container task definition.
    */
   readonly sidecars?: ContainerDefinitionOptions[];
+
+  /**
+   * Maximum realized spend (USD) over `spendWindow` before the queue drain is
+   * held. Realized-only: in-flight runs are uncosted until they finish, so a
+   * burst can overshoot before any report cost — the `maxConcurrent` limit is
+   * the blast-radius backstop (live enforcement is tracked separately). Written
+   * to SSM `max_spend_per_window` and read by both the drain Lambda and the
+   * lazy CLI drain. Omit to disable the spend cap (concurrency-only gating).
+   *
+   * @default — none; no spend cap.
+   */
+  readonly maxSpendPerWindow?: number;
+
+  /**
+   * Trailing window for `maxSpendPerWindow`. Written to SSM `spend_window` as a
+   * Go duration string (e.g. "24h"). Ignored unless `maxSpendPerWindow` is set.
+   *
+   * @default — Duration.hours(24) when maxSpendPerWindow is set.
+   */
+  readonly spendWindow?: Duration;
 }

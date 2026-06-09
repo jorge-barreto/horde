@@ -386,6 +386,11 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				if err := st.CreateRun(ctx, qrun); err != nil {
 					return fmt.Errorf("enqueuing run: %w", err)
 				}
+				// Opportunistic drain: a slot may already be free, in which case
+				// this run (or an older higher-priority one) starts immediately.
+				// Best-effort; runs before the output so a drain hiccup can't
+				// corrupt --json, but its own writes go to stderr only.
+				lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 				if jsonOut {
 					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority)))
 				}
@@ -991,7 +996,7 @@ duration-ago (1h, 30m, 7d).`,
 				return fmt.Errorf("--until: %w", err)
 			}
 
-			prov, st, _, _, _, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
+			prov, st, maxConcurrent, provName, awsCfg, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -1002,7 +1007,8 @@ duration-ago (1h, 30m, 7d).`,
 				return fmt.Errorf("getting home directory: %w", err)
 			}
 
-			repo, err := resolveCanonicalRepo(hordeCfg, newResolver(cmd))
+			resolver := newResolver(cmd)
+			repo, err := resolveCanonicalRepo(hordeCfg, resolver)
 			if err != nil {
 				return err
 			}
@@ -1059,11 +1065,15 @@ duration-ago (1h, 30m, 7d).`,
 				default:
 					fmt.Println("No active runs for this repo.")
 				}
+				lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 				return nil
 			}
 
 			printRunTable(runs)
 			printRunSummary(runs)
+			// Best-effort backstop drain (ECS-only, after output): self-heals a
+			// missed terminal event the next time anyone lists the project.
+			lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 			return nil
 		},
 	}

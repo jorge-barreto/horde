@@ -7,7 +7,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/event"
+	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/store"
 )
 
@@ -128,4 +130,114 @@ func realizedSpendGate(st store.Store, repo string, capUSD float64, window time.
 		}
 		return total < capUSD, nil
 	}
+}
+
+// lazyDrainComponents bundles the live dependencies the CLI backstop drain
+// needs. It is ECS-only (the queue/event backbone is ECS-only); on docker
+// lazyDrain is a no-op.
+type lazyDrainComponents struct {
+	prov          provider.Provider
+	store         store.Store
+	resolver      *config.Resolver
+	emitter       event.Emitter
+	repo          string
+	provName      string
+	homeDir       string
+	maxConcurrent int
+	maxSpend      float64
+	spendWindow   string // Go duration string; "" or unparsable → no spend cap
+}
+
+// lazyDrain runs one opportunistic drain pass using live components. It is the
+// CLI backstop invoked after `horde launch`/`list` finish their own work, so a
+// missed terminal event self-heals the next time anyone touches the project.
+// Strictly best-effort: it never returns an error and must run AFTER the host
+// command's output so a drain hiccup can't corrupt --json stdout.
+func lazyDrain(ctx context.Context, lc lazyDrainComponents) {
+	if lc.provName != "aws-ecs" {
+		return // queue/drain is ECS-only; docker stays pull-based, no daemon
+	}
+	window, _ := time.ParseDuration(lc.spendWindow) // empty/invalid → 0 → no cap
+	drainOnce(ctx, drainDeps{
+		store:         lc.store,
+		repo:          lc.repo,
+		maxConcurrent: lc.maxConcurrent,
+		spendOK:       realizedSpendGate(lc.store, lc.repo, lc.maxSpend, window, timeNow),
+		launch:        launchQueuedRun(lc),
+		emit: func(dt string, r *store.Run) {
+			if err := lc.emitter.Emit(ctx, dt, event.DetailFromRun(r)); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: emitting %s: %v\n", dt, err)
+			}
+		},
+	})
+}
+
+// launchQueuedRun is the lazy drain's launch closure: it re-resolves current
+// secrets/mounts (so a run that waited in the queue launches against today's
+// config) and starts the run via the provider, then transitions it to running.
+// ECS-only — no docker EnsureImage. Mirrors the direct-launch path's
+// prov.Launch + UpdateRun-to-running, deliberately kept separate from it so the
+// well-tested direct path is not disturbed.
+func launchQueuedRun(lc lazyDrainComponents) func(context.Context, *store.Run) error {
+	return func(ctx context.Context, run *store.Run) error {
+		envPath, _, secretRemap, err := resolveSecretsForLaunch(lc.provName, lc.resolver)
+		if err != nil {
+			return fmt.Errorf("resolving secrets: %w", err)
+		}
+		projCfg, err := lc.resolver.ProjectConfig()
+		if err != nil {
+			return fmt.Errorf("resolving project config: %w", err)
+		}
+		now := timeNow()
+		timeoutAt := now.Add(run.TimeoutAt.Sub(run.StartedAt)) // preserve requested window if set
+		if !run.TimeoutAt.After(run.StartedAt) {
+			timeoutAt = now.Add(24 * time.Hour) // queued runs have no started_at yet; default window
+		}
+		result, err := lc.prov.Launch(ctx, provider.LaunchOpts{
+			Repo:           run.Repo,
+			Ticket:         run.Ticket,
+			Branch:         run.Branch,
+			Workflow:       run.Workflow,
+			RunID:          run.ID,
+			EnvFile:        envPath,
+			Mounts:         projCfg.ResolveMounts(lc.resolver.EnvFileDir()),
+			HomeDir:        lc.homeDir,
+			SecretEnvRemap: secretRemap,
+		})
+		if err != nil {
+			return err // drainOnce marks the run failed (not re-queued)
+		}
+		running := store.StatusRunning
+		if err := lc.store.UpdateRun(ctx, run.ID, &store.RunUpdate{
+			Status:     &running,
+			InstanceID: &result.InstanceID,
+			Metadata:   result.Metadata,
+			TimeoutAt:  &timeoutAt,
+		}); err != nil {
+			return fmt.Errorf("updating drained run to running: %w", err)
+		}
+		// Reflect running state on the in-memory run so the run.started event
+		// Detail (emitted by drainOnce) carries instance_id/status/started_at.
+		run.Status = store.StatusRunning
+		run.InstanceID = result.InstanceID
+		run.Metadata = result.Metadata
+		run.StartedAt = now
+		run.TimeoutAt = timeoutAt
+		return nil
+	}
+}
+
+// lazyDrainFromContext assembles lazyDrainComponents from the standard command
+// locals shared by launch/list and runs one best-effort drain pass. Centralizes
+// the wiring so call sites stay one line. No-op on docker (checked in lazyDrain).
+func lazyDrainFromContext(ctx context.Context, prov provider.Provider, st store.Store, resolver *config.Resolver, hordeCfg *config.HordeConfig, repo, provName, homeDir string, maxConcurrent int, emitter event.Emitter) {
+	lc := lazyDrainComponents{
+		prov: prov, store: st, resolver: resolver, emitter: emitter,
+		repo: repo, provName: provName, homeDir: homeDir, maxConcurrent: maxConcurrent,
+	}
+	if hordeCfg != nil {
+		lc.maxSpend = hordeCfg.MaxSpendPerWindow
+		lc.spendWindow = hordeCfg.SpendWindow
+	}
+	lazyDrain(ctx, lc)
 }

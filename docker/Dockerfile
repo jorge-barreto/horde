@@ -1,7 +1,9 @@
 FROM golang:1.25-bookworm AS builder
 ENV GOBIN=/out
+# Pinned for reproducible builds. Bump with intent (mirrors CLAUDE_VERSION below).
+ARG ORC_VERSION=v0.1.1
 RUN mkdir -p /out \
-    && go install github.com/jorge-barreto/orc/cmd/orc@latest \
+    && go install github.com/jorge-barreto/orc/cmd/orc@${ORC_VERSION} \
     && go install github.com/jorge-barreto/bd/cmd/bd@latest
 
 FROM debian:bookworm-slim

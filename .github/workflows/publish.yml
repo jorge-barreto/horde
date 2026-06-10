@@ -21,7 +21,7 @@ jobs:
       run:
         working-directory: cdk
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Node 24: ships npm >= 11.5.1, which is required for trusted-publisher
       # OIDC publish. Node 22 LTS still bundles npm 10.x; with npm 10 the
@@ -32,7 +32,7 @@ jobs:
       # actions/runner-images#13883 (promise-retry MODULE_NOT_FOUND mid-install).
       # Bumping node-version is the canonical fix per npm's trusted-publishers
       # docs example.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"

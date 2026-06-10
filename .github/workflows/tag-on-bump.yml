@@ -28,7 +28,7 @@ jobs:
     steps:
       # fetch-depth 2 so HEAD~1 (the pre-merge parent) is available for the
       # version diff. Squash-merge to main means HEAD~1 is the correct "before".
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 2
           token: ${{ secrets.RELEASE_TAG_PAT }}

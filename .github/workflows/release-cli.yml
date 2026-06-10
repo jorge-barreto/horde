@@ -16,16 +16,16 @@ jobs:
     name: release-cli
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # GoReleaser needs full history for the changelog
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
           cache: true
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           # pinned (not floating ~> v2) so a future v2 that removes brews: can't break releases silently
           version: "2.12.7"

@@ -81,6 +81,32 @@ func ParsePriority(s string) (Priority, error) {
 	return p, nil
 }
 
+// Capacity selects which Fargate capacity provider a run launches on. It is a
+// per-run choice (horde launch --capacity), set once and carried across
+// resume/retry. spot is the default (cost); on-demand opts a run out of Spot
+// reclaim. ECS maps these to a CapacityProviderStrategy in the provider; both
+// providers are always registered on the cluster.
+type Capacity string
+
+const (
+	CapacitySpot     Capacity = "spot"
+	CapacityOnDemand Capacity = "on-demand"
+)
+
+// ParseCapacity validates a user-supplied capacity string. Empty defaults to
+// spot. Unknown values are an error (surfaced to the CLI user).
+func ParseCapacity(s string) (Capacity, error) {
+	if s == "" {
+		return CapacitySpot, nil
+	}
+	switch Capacity(s) {
+	case CapacitySpot, CapacityOnDemand:
+		return Capacity(s), nil
+	default:
+		return "", fmt.Errorf("invalid capacity %q: want spot or on-demand", s)
+	}
+}
+
 // matchesFilter reports whether a run satisfies the non-repo dimensions of a
 // RunFilter (Repo scoping is handled by the query that fetched the run). It is
 // the single source of truth for filter semantics, shared by the SQLite store
@@ -175,6 +201,13 @@ type Run struct {
 	EnqueuedAt time.Time
 	// Priority is the drain-order lever; empty for directly-launched runs.
 	Priority Priority
+	// Capacity selects the Fargate capacity provider (spot|on-demand). Empty
+	// means spot (the default). Set at launch, carried across resume/retry.
+	Capacity Capacity
+	// ResumeCount counts automatic Spot resumes of this run. Incremented each
+	// time the status Lambda re-queues a Spot-interrupted run; at MAX_RESUMES
+	// the run is left terminal instead of resumed (loop guard).
+	ResumeCount int
 	// Tokens is nil until orc reports usage (pre-finalize, or an orc old
 	// enough that neither costs.json nor run-result.json carried token totals).
 	Tokens *TokenUsage
@@ -192,6 +225,8 @@ type RunUpdate struct {
 	Tokens       *TokenUsage
 	TimeoutAt    *time.Time
 	Priority     *Priority // nil = don't update
+	Capacity     *Capacity // nil = don't update
+	ResumeCount  *int      // nil = don't update
 }
 
 // RunFilter scopes a ListRuns query. Repo is always required (listing is

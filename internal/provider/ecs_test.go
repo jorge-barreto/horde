@@ -23,10 +23,10 @@ import (
 )
 
 type fakeECSClient struct {
-	runTaskInput      *ecs.RunTaskInput
-	runTaskOutput     *ecs.RunTaskOutput
-	runTaskReturnNil  bool // if true, RunTask returns (nil, nil)
-	runTaskErr        error
+	runTaskInput     *ecs.RunTaskInput
+	runTaskOutput    *ecs.RunTaskOutput
+	runTaskReturnNil bool // if true, RunTask returns (nil, nil)
+	runTaskErr       error
 
 	describeTasksInput   *ecs.DescribeTasksInput
 	describeTasksOutput  *ecs.DescribeTasksOutput
@@ -233,8 +233,11 @@ func TestECSProvider_Launch_Success(t *testing.T) {
 	if *in.Cluster != "arn:aws:ecs:us-east-1:123456789012:cluster/horde" {
 		t.Errorf("Cluster = %q", *in.Cluster)
 	}
-	if in.LaunchType != ecstypes.LaunchTypeFargate {
-		t.Errorf("LaunchType = %v", in.LaunchType)
+	if in.LaunchType != "" {
+		t.Errorf("LaunchType = %v, want empty (using CapacityProviderStrategy)", in.LaunchType)
+	}
+	if len(in.CapacityProviderStrategy) != 1 || aws.ToString(in.CapacityProviderStrategy[0].CapacityProvider) != "FARGATE_SPOT" {
+		t.Errorf("CapacityProviderStrategy = %+v, want one FARGATE_SPOT item", in.CapacityProviderStrategy)
 	}
 	if *in.Count != 1 {
 		t.Errorf("Count = %d, want 1", *in.Count)
@@ -580,6 +583,47 @@ func TestECSProvider_Launch_RejectsBadRunID(t *testing.T) {
 		if fake.runTaskInput != nil {
 			t.Errorf("RunID=%q reached RunTask; validation should short-circuit", bad)
 		}
+	}
+}
+
+func TestECSProvider_Launch_CapacityStrategy(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		capacity string
+		want     string
+	}{
+		{"spot default (empty)", "", "FARGATE_SPOT"},
+		{"explicit spot", "spot", "FARGATE_SPOT"},
+		{"on-demand", "on-demand", "FARGATE"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeECSClient{
+				runTaskOutput: &ecs.RunTaskOutput{
+					Tasks: []ecstypes.Task{{TaskArn: aws.String("arn:task/x")}},
+				},
+			}
+			p := NewECSProvider(fake, &fakeCloudWatchLogsClient{}, &fakeS3Client{}, testHordeConfig())
+			_, err := p.Launch(context.Background(), LaunchOpts{
+				Repo: "r", Ticket: "T", RunID: "abc123def456", Capacity: tc.capacity,
+			})
+			if err != nil {
+				t.Fatalf("Launch() error = %v", err)
+			}
+			in := fake.runTaskInput
+			if in.LaunchType != "" {
+				t.Errorf("LaunchType = %q, want empty (mutually exclusive with strategy)", in.LaunchType)
+			}
+			if len(in.CapacityProviderStrategy) != 1 {
+				t.Fatalf("CapacityProviderStrategy len = %d, want 1", len(in.CapacityProviderStrategy))
+			}
+			if got := aws.ToString(in.CapacityProviderStrategy[0].CapacityProvider); got != tc.want {
+				t.Errorf("CapacityProvider = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

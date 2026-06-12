@@ -46,17 +46,19 @@ func newDynamoStore(_ context.Context, client dynamoAPI, tableName string) (*Dyn
 
 func (s *DynamoStore) CreateRun(ctx context.Context, run *Run) error {
 	item := map[string]types.AttributeValue{
-		AttrID:         &types.AttributeValueMemberS{Value: run.ID},
-		AttrRepo:       &types.AttributeValueMemberS{Value: run.Repo},
-		AttrTicket:     &types.AttributeValueMemberS{Value: run.Ticket},
-		AttrBranch:     &types.AttributeValueMemberS{Value: run.Branch},
-		AttrWorkflow:   &types.AttributeValueMemberS{Value: run.Workflow},
-		AttrProvider:   &types.AttributeValueMemberS{Value: run.Provider},
-		AttrStatus:     &types.AttributeValueMemberS{Value: string(run.Status)},
-		AttrLaunchedBy: &types.AttributeValueMemberS{Value: run.LaunchedBy},
-		AttrStartedAt:  &types.AttributeValueMemberS{Value: run.StartedAt.UTC().Format(time.RFC3339)},
-		AttrTimeoutAt:  &types.AttributeValueMemberS{Value: run.TimeoutAt.UTC().Format(time.RFC3339)},
-		AttrPriority:   &types.AttributeValueMemberS{Value: string(run.Priority)},
+		AttrID:          &types.AttributeValueMemberS{Value: run.ID},
+		AttrRepo:        &types.AttributeValueMemberS{Value: run.Repo},
+		AttrTicket:      &types.AttributeValueMemberS{Value: run.Ticket},
+		AttrBranch:      &types.AttributeValueMemberS{Value: run.Branch},
+		AttrWorkflow:    &types.AttributeValueMemberS{Value: run.Workflow},
+		AttrProvider:    &types.AttributeValueMemberS{Value: run.Provider},
+		AttrStatus:      &types.AttributeValueMemberS{Value: string(run.Status)},
+		AttrLaunchedBy:  &types.AttributeValueMemberS{Value: run.LaunchedBy},
+		AttrStartedAt:   &types.AttributeValueMemberS{Value: run.StartedAt.UTC().Format(time.RFC3339)},
+		AttrTimeoutAt:   &types.AttributeValueMemberS{Value: run.TimeoutAt.UTC().Format(time.RFC3339)},
+		AttrPriority:    &types.AttributeValueMemberS{Value: string(run.Priority)},
+		AttrCapacity:    &types.AttributeValueMemberS{Value: string(run.Capacity)},
+		AttrResumeCount: &types.AttributeValueMemberN{Value: strconv.Itoa(run.ResumeCount)},
 	}
 	// enqueued_at is set only for queued runs; mirror the completed_at
 	// conditional-write pattern (zero time means "not enqueued").
@@ -239,6 +241,26 @@ func parseRun(item map[string]types.AttributeValue) (*Run, error) {
 		run.Priority = Priority(sv.Value)
 	}
 
+	if av, ok := item[AttrCapacity]; ok {
+		sv, ok := av.(*types.AttributeValueMemberS)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrCapacity)
+		}
+		run.Capacity = Capacity(sv.Value)
+	}
+
+	if av, ok := item[AttrResumeCount]; ok {
+		nv, ok := av.(*types.AttributeValueMemberN)
+		if !ok {
+			return nil, fmt.Errorf("parsing run %q: invalid %q attribute", id, AttrResumeCount)
+		}
+		n, err := strconv.Atoi(nv.Value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing run %q: parsing resume_count: %w", id, err)
+		}
+		run.ResumeCount = n
+	}
+
 	if av, ok := item[AttrEnqueuedAt]; ok {
 		sv, ok := av.(*types.AttributeValueMemberS)
 		if !ok {
@@ -406,6 +428,14 @@ func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 		setClauses = append(setClauses, "#prio = :prio")
 		exprAttrNames["#prio"] = AttrPriority
 		exprAttrValues[":prio"] = &types.AttributeValueMemberS{Value: string(*update.Priority)}
+	}
+	if update.Capacity != nil {
+		setClauses = append(setClauses, "capacity = :cap")
+		exprAttrValues[":cap"] = &types.AttributeValueMemberS{Value: string(*update.Capacity)}
+	}
+	if update.ResumeCount != nil {
+		setClauses = append(setClauses, "resume_count = :rc")
+		exprAttrValues[":rc"] = &types.AttributeValueMemberN{Value: strconv.Itoa(*update.ResumeCount)}
 	}
 
 	if len(setClauses) == 0 {

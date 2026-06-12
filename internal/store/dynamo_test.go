@@ -150,10 +150,11 @@ func TestDynamoStore_CreateRun_AllFields(t *testing.T) {
 		t.Fatal("PutItem was not called")
 	}
 	item := capturedInput.Item
-	// 16 = 15 prior attrs + priority (always written, even empty). enqueued_at
-	// is NOT written here because this run has a zero EnqueuedAt.
-	if len(item) != 16 {
-		t.Errorf("expected 16 attributes, got %d", len(item))
+	// 18 = 15 prior attrs + priority + capacity + resume_count (always written,
+	// even empty/zero). enqueued_at is NOT written here because this run has a
+	// zero EnqueuedAt.
+	if len(item) != 18 {
+		t.Errorf("expected 18 attributes, got %d", len(item))
 	}
 	if _, ok := item[AttrEnqueuedAt]; ok {
 		t.Errorf("enqueued_at should be absent for a non-queued run, got %v", item[AttrEnqueuedAt])
@@ -199,6 +200,11 @@ func TestDynamoStore_CreateRun_AllFields(t *testing.T) {
 		if !ok || mv.Value != kv.v {
 			t.Errorf("metadata[%q] = %v, want S{%q}", kv.k, metaAttr.Value[kv.k], kv.v)
 		}
+	}
+	// capacity and resume_count are always written (even zero values).
+	assertS(AttrCapacity, "")
+	if v, ok := item[AttrResumeCount].(*types.AttributeValueMemberN); !ok || v.Value != "0" {
+		t.Errorf("AttrResumeCount = %v, want N{0}", item[AttrResumeCount])
 	}
 	if capturedInput.ConditionExpression == nil || *capturedInput.ConditionExpression != "attribute_not_exists(id)" {
 		t.Errorf("ConditionExpression = %v, want %q", capturedInput.ConditionExpression, "attribute_not_exists(id)")

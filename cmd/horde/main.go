@@ -222,6 +222,10 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Name:  "priority",
 				Usage: "Queue priority for --enqueue: lowest|low|med|high|highest (default med). Higher drains first.",
 			},
+			&cli.StringFlag{
+				Name:  "capacity",
+				Usage: "Fargate capacity for this run: spot|on-demand (default spot). on-demand opts out of Spot reclaim. ECS-only; ignored on docker. Carried across retry/resume.",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -248,6 +252,10 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 
 			enqueue := cmd.Bool("enqueue")
 			priority, err := store.ParsePriority(cmd.String("priority"))
+			if err != nil {
+				return err
+			}
+			capacity, err := store.ParseCapacity(cmd.String("capacity"))
 			if err != nil {
 				return err
 			}
@@ -381,6 +389,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 					Labels:     labels,
 					LaunchedBy: launchedBy,
 					Priority:   priority,
+					Capacity:   capacity,
 					EnqueuedAt: time.Now(),
 				}
 				if err := st.CreateRun(ctx, qrun); err != nil {
@@ -409,6 +418,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Status:     store.StatusPending,
 				Labels:     labels,
 				LaunchedBy: launchedBy,
+				Capacity:   capacity,
 				StartedAt:  now,
 				TimeoutAt:  now.Add(timeout),
 			}
@@ -453,6 +463,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,
 				ExtraEnv:       extraEnv,
+				Capacity:       string(capacity),
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
@@ -618,6 +629,7 @@ resumes any interrupted agent session. Override with explicit orc args:
 				HomeDir:        homeDir,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,
+				Capacity:       string(run.Capacity),
 			})
 			if err != nil {
 				return fmt.Errorf("relaunching container for retry: %w", err)

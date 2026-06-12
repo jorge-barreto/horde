@@ -272,6 +272,23 @@ func TestLaunch_InvalidLabel(t *testing.T) {
 	}
 }
 
+func TestLaunch_InvalidCapacity(t *testing.T) {
+	setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch",
+		"--workflow", "implement-ticket",
+		"--capacity", "bogus",
+		"TICKET-CAP"})
+
+	if err == nil {
+		t.Fatal("expected error for invalid capacity, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid capacity") {
+		t.Errorf("error %q does not mention invalid capacity", err.Error())
+	}
+}
+
 func TestLaunch_TimeoutAt_Regression(t *testing.T) {
 	t.Parallel()
 

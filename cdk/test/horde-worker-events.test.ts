@@ -65,12 +65,12 @@ describe("HordeWorker event backbone (#36)", () => {
     });
   });
 
-  it("routes run.terminal events on the horde bus to the drain lambda", () => {
+  it("routes run.terminal and run.requeued events on the horde bus to the drain lambda", () => {
     const t = synth();
     t.hasResourceProperties("AWS::Events::Rule", {
       EventPattern: {
         source: ["horde"],
-        "detail-type": ["run.terminal"],
+        "detail-type": ["run.terminal", "run.requeued"],
       },
     });
   });

@@ -521,13 +521,14 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
     },
     "HordeDrainEventRule74758369": {
       "Properties": {
-        "Description": "Drain the horde-test queue when a run reaches a terminal state",
+        "Description": "Drain the horde-test queue when a run reaches a terminal state or is re-queued after a Spot interruption",
         "EventBusName": {
           "Ref": "HordeRunEventBus2D36F50D",
         },
         "EventPattern": {
           "detail-type": [
             "run.terminal",
+            "run.requeued",
           ],
           "source": [
             "horde",
@@ -582,7 +583,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "17bba0c829021a304f77a0e217d0f468e1bbe19a6df00a7adb1f16b1c48dc096.zip",
+          "S3Key": "5812ae3462d472a200803b50084ab6e38145d30436b39828824ceefcfb0d012f.zip",
         },
         "Environment": {
           "Variables": {
@@ -1126,7 +1127,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
+          "S3Key": "9e5959807edbf703db3f5c736bc6a323eaeae4b36a390514ce43e3e7a82892b1.zip",
         },
         "Environment": {
           "Variables": {

@@ -625,11 +625,11 @@ export class HordeWorker extends Construct {
 
     this.drainEventRule = new events.Rule(this, "DrainEventRule", {
       ruleName: `horde-${slug}-drain`,
-      description: `Drain the horde-${slug} queue when a run reaches a terminal state`,
+      description: `Drain the horde-${slug} queue when a run reaches a terminal state or is re-queued after a Spot interruption`,
       eventBus: this.eventBus,
       eventPattern: {
         source: ["horde"],
-        detailType: ["run.terminal"],
+        detailType: ["run.terminal", "run.requeued"],
       },
     });
     this.drainEventRule.addTarget(new targets.LambdaFunction(this.drainLambda));

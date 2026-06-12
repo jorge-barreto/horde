@@ -220,7 +220,7 @@ async function emit(detailType: string, run: QueuedRun, extra: Record<string, un
   }
 }
 
-export const handler: Handler<EventBridgeEvent<"run.terminal", TerminalDetail>, { drained?: string; skipped?: string }> =
+export const handler: Handler<EventBridgeEvent<"run.terminal" | "run.requeued", TerminalDetail>, { drained?: string; skipped?: string }> =
   async (event) => {
     const repo = event.detail?.repo;
     if (!repo) {

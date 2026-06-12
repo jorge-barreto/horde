@@ -221,6 +221,36 @@ func TestResultsTokens(t *testing.T) {
 
 func ptrInt(i int) *int { return &i }
 
+func TestStatusV1IncludesCapacity(t *testing.T) {
+	t.Parallel()
+	r := &store.Run{ID: "j1", Capacity: store.CapacityOnDemand, ResumeCount: 3,
+		StartedAt: time.Now()}
+	v := statusToV1(r)
+	if v.Capacity != "on-demand" {
+		t.Errorf("Capacity = %q, want on-demand", v.Capacity)
+	}
+	if v.ResumeCount != 3 {
+		t.Errorf("ResumeCount = %d, want 3", v.ResumeCount)
+	}
+}
+
+func TestStatusV1OmitsCapacityAndResumeCountWhenDefault(t *testing.T) {
+	t.Parallel()
+	r := &store.Run{ID: "j2", StartedAt: time.Now()} // Capacity "", ResumeCount 0
+	v := statusToV1(r)
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, "capacity") {
+		t.Errorf("capacity key should be omitted for default capacity; got %s", s)
+	}
+	if strings.Contains(s, "resume_count") {
+		t.Errorf("resume_count key should be omitted for zero; got %s", s)
+	}
+}
+
 func TestLaunchQueuedV1Shape(t *testing.T) {
 	v := launchQueuedV1("run123", "T-1", "impl", "main", "high")
 	if v.Status != "queued" {

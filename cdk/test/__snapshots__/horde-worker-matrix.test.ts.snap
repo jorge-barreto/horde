@@ -405,6 +405,19 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -569,7 +582,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "17bba0c829021a304f77a0e217d0f468e1bbe19a6df00a7adb1f16b1c48dc096.zip",
         },
         "Environment": {
           "Variables": {
@@ -1123,6 +1136,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },
@@ -2040,6 +2054,19 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -2204,7 +2231,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "17bba0c829021a304f77a0e217d0f468e1bbe19a6df00a7adb1f16b1c48dc096.zip",
         },
         "Environment": {
           "Variables": {
@@ -2758,6 +2785,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },
@@ -3683,6 +3711,19 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -3847,7 +3888,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "17bba0c829021a304f77a0e217d0f468e1bbe19a6df00a7adb1f16b1c48dc096.zip",
         },
         "Environment": {
           "Variables": {
@@ -4401,6 +4442,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },
@@ -5530,6 +5572,19 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -5694,7 +5749,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "17bba0c829021a304f77a0e217d0f468e1bbe19a6df00a7adb1f16b1c48dc096.zip",
         },
         "Environment": {
           "Variables": {
@@ -6248,6 +6303,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },

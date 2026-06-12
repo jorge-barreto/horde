@@ -203,6 +203,7 @@ Resources:
       ClusterName: "horde-{{.Slug}}"
       CapacityProviders:
         - FARGATE
+        - FARGATE_SPOT
       Tags:
         - Key: Name
           Value: "horde-{{.Slug}}-cluster"

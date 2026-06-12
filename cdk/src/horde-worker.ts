@@ -202,6 +202,7 @@ export class HordeWorker extends Construct {
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc: this.vpc,
       clusterName: `horde-${slug}`,
+      enableFargateCapacityProviders: true,
     });
     cdk.Tags.of(this.cluster).add("Name", `horde-${slug}-cluster`);
 
@@ -506,6 +507,7 @@ export class HordeWorker extends Construct {
         RUNS_TABLE: this.runsTable.tableName,
         ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
         EVENT_BUS_NAME: this.eventBus.eventBusName,
+        MAX_RESUMES: String(props.maxSpotResumes ?? 5),
       },
       logGroup: new logs.LogGroup(this, "StatusLambdaLogGroup", {
         logGroupName: `/aws/lambda/horde-${slug}-status-updater`,

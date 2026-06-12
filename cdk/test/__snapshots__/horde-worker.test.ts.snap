@@ -405,6 +405,19 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -569,7 +582,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "17bba0c829021a304f77a0e217d0f468e1bbe19a6df00a7adb1f16b1c48dc096.zip",
         },
         "Environment": {
           "Variables": {
@@ -1123,6 +1136,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },

@@ -100,6 +100,13 @@ export interface HordeWorkerProps {
   readonly maxConcurrent?: number;
 
   /**
+   * Maximum automatic Spot resumes per run before it is left terminal
+   * instead of resumed (loop guard). Read by the status Lambda as MAX_RESUMES.
+   * @default 5
+   */
+  readonly maxSpotResumes?: number;
+
+  /**
    * Default per-run timeout in minutes when the caller does not pass one.
    * Written to SSM `default_timeout_minutes`.
    * @default 1440 (24 h, matches SPEC.md and the bootstrap CF stack;

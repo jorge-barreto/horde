@@ -1,4 +1,4 @@
-.PHONY: build install unit-test integration-test bootstrap-validate-test vet worker docker-build check e2e-up e2e-test e2e-down
+.PHONY: build install unit-test integration-test vet worker docker-build check e2e-up e2e-test e2e-down
 
 # Version metadata embedded via -ldflags. `version` falls back to the short
 # git describe (tag + offset + SHA) so dev builds are self-identifying;
@@ -32,8 +32,7 @@ unit-test:
 # via testing.Short()-style skips inside the suite.
 #
 # Unsets HORDE_E2E_AWS / HORDE_E2E_ECS so this target stays Docker-only
-# regardless of what .env has. AWS-backed tests live under e2e-* and
-# (for CloudFormation template validation) bootstrap-validate-test.
+# regardless of what .env has. AWS-backed tests live under e2e-*.
 integration-test:
 	@command -v docker >/dev/null 2>&1 || { \
 	  echo 'integration-test requires docker on PATH; install Docker or use make unit-test' >&2; \
@@ -41,13 +40,6 @@ integration-test:
 	}
 	@HORDE_E2E_AWS=0 HORDE_E2E_ECS=0 HORDE_E2E_CDK=0 \
 	  go test -count=1 -timeout 10m ./test/integration/
-
-# Free AWS-backed check: CloudFormation ValidateTemplate on the rendered
-# bootstrap template. Creates no resources, no account charges. Requires
-# a live SSO token and HORDE_E2E_AWS=1 (set in .env locally; never in CI).
-bootstrap-validate-test:
-	@$(E2E_ENV) && export HORDE_E2E_AWS=1 && \
-	  go test -v -count=1 -timeout 1m -run TestBootstrap_ValidateTemplate ./test/integration/
 
 vet:
 	go vet ./cmd/... ./internal/... ./test/...

@@ -451,7 +451,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
                         [
                           """,
                           {
-                            "Ref": "HordeVpcprivateSubnet1Subnet50085241",
+                            "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
                           },
                           """,
                         ],
@@ -463,7 +463,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
                         [
                           """,
                           {
-                            "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
+                            "Ref": "HordeVpcpublicSubnet2Subnet6A9C5AB6",
                           },
                           """,
                         ],
@@ -479,7 +479,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
                   "GroupId",
                 ],
               },
-              "","assign_public_ip":"DISABLED","log_group":"",
+              "","assign_public_ip":"ENABLED","log_group":"",
               {
                 "Ref": "HordeLogGroup1EE05984",
               },
@@ -576,7 +576,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
             "ARTIFACTS_BUCKET": {
               "Ref": "HordeArtifactsBucket1A7FD4A4",
             },
-            "ASSIGN_PUBLIC_IP": "DISABLED",
+            "ASSIGN_PUBLIC_IP": "ENABLED",
             "CLUSTER_ARN": {
               "Fn::GetAtt": [
                 "HordeClusterA7629518",
@@ -601,10 +601,10 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
                 ",",
                 [
                   {
-                    "Ref": "HordeVpcprivateSubnet1Subnet50085241",
+                    "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
                   },
                   {
-                    "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
+                    "Ref": "HordeVpcpublicSubnet2Subnet6A9C5AB6",
                   },
                 ],
               ],
@@ -1494,130 +1494,6 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       },
       "Type": "AWS::EC2::VPCGatewayAttachment",
     },
-    "HordeVpcprivateSubnet1DefaultRoute184FFD8B": {
-      "Properties": {
-        "DestinationCidrBlock": "0.0.0.0/0",
-        "NatGatewayId": {
-          "Ref": "HordeVpcpublicSubnet1NATGateway73FD7C1D",
-        },
-        "RouteTableId": {
-          "Ref": "HordeVpcprivateSubnet1RouteTableE564B7A0",
-        },
-      },
-      "Type": "AWS::EC2::Route",
-    },
-    "HordeVpcprivateSubnet1RouteTableAssociationE29E1B5E": {
-      "Properties": {
-        "RouteTableId": {
-          "Ref": "HordeVpcprivateSubnet1RouteTableE564B7A0",
-        },
-        "SubnetId": {
-          "Ref": "HordeVpcprivateSubnet1Subnet50085241",
-        },
-      },
-      "Type": "AWS::EC2::SubnetRouteTableAssociation",
-    },
-    "HordeVpcprivateSubnet1RouteTableE564B7A0": {
-      "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "TestStack/Horde/Vpc/privateSubnet1",
-          },
-        ],
-        "VpcId": {
-          "Ref": "HordeVpcB5939D5D",
-        },
-      },
-      "Type": "AWS::EC2::RouteTable",
-    },
-    "HordeVpcprivateSubnet1Subnet50085241": {
-      "Properties": {
-        "AvailabilityZone": "dummy1a",
-        "CidrBlock": "10.0.2.0/24",
-        "MapPublicIpOnLaunch": false,
-        "Tags": [
-          {
-            "Key": "aws-cdk:subnet-name",
-            "Value": "private",
-          },
-          {
-            "Key": "aws-cdk:subnet-type",
-            "Value": "Private",
-          },
-          {
-            "Key": "Name",
-            "Value": "TestStack/Horde/Vpc/privateSubnet1",
-          },
-        ],
-        "VpcId": {
-          "Ref": "HordeVpcB5939D5D",
-        },
-      },
-      "Type": "AWS::EC2::Subnet",
-    },
-    "HordeVpcprivateSubnet2DefaultRoute791A061F": {
-      "Properties": {
-        "DestinationCidrBlock": "0.0.0.0/0",
-        "NatGatewayId": {
-          "Ref": "HordeVpcpublicSubnet1NATGateway73FD7C1D",
-        },
-        "RouteTableId": {
-          "Ref": "HordeVpcprivateSubnet2RouteTableB22C6503",
-        },
-      },
-      "Type": "AWS::EC2::Route",
-    },
-    "HordeVpcprivateSubnet2RouteTableAssociationAAC23162": {
-      "Properties": {
-        "RouteTableId": {
-          "Ref": "HordeVpcprivateSubnet2RouteTableB22C6503",
-        },
-        "SubnetId": {
-          "Ref": "HordeVpcprivateSubnet2Subnet9297B1D5",
-        },
-      },
-      "Type": "AWS::EC2::SubnetRouteTableAssociation",
-    },
-    "HordeVpcprivateSubnet2RouteTableB22C6503": {
-      "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "TestStack/Horde/Vpc/privateSubnet2",
-          },
-        ],
-        "VpcId": {
-          "Ref": "HordeVpcB5939D5D",
-        },
-      },
-      "Type": "AWS::EC2::RouteTable",
-    },
-    "HordeVpcprivateSubnet2Subnet9297B1D5": {
-      "Properties": {
-        "AvailabilityZone": "dummy1b",
-        "CidrBlock": "10.0.3.0/24",
-        "MapPublicIpOnLaunch": false,
-        "Tags": [
-          {
-            "Key": "aws-cdk:subnet-name",
-            "Value": "private",
-          },
-          {
-            "Key": "aws-cdk:subnet-type",
-            "Value": "Private",
-          },
-          {
-            "Key": "Name",
-            "Value": "TestStack/Horde/Vpc/privateSubnet2",
-          },
-        ],
-        "VpcId": {
-          "Ref": "HordeVpcB5939D5D",
-        },
-      },
-      "Type": "AWS::EC2::Subnet",
-    },
     "HordeVpcpublicSubnet1DefaultRoute071AE970": {
       "DependsOn": [
         "HordeVpcVPCGWAEEB195C",
@@ -1632,42 +1508,6 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
         },
       },
       "Type": "AWS::EC2::Route",
-    },
-    "HordeVpcpublicSubnet1EIP9B0718C2": {
-      "Properties": {
-        "Domain": "vpc",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "TestStack/Horde/Vpc/publicSubnet1",
-          },
-        ],
-      },
-      "Type": "AWS::EC2::EIP",
-    },
-    "HordeVpcpublicSubnet1NATGateway73FD7C1D": {
-      "DependsOn": [
-        "HordeVpcpublicSubnet1DefaultRoute071AE970",
-        "HordeVpcpublicSubnet1RouteTableAssociation962A9F88",
-      ],
-      "Properties": {
-        "AllocationId": {
-          "Fn::GetAtt": [
-            "HordeVpcpublicSubnet1EIP9B0718C2",
-            "AllocationId",
-          ],
-        },
-        "SubnetId": {
-          "Ref": "HordeVpcpublicSubnet1Subnet246CEB9F",
-        },
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "TestStack/Horde/Vpc/publicSubnet1",
-          },
-        ],
-      },
-      "Type": "AWS::EC2::NatGateway",
     },
     "HordeVpcpublicSubnet1RouteTableAssociation962A9F88": {
       "Properties": {

@@ -88,14 +88,18 @@ describe.each(cells)("HordeWorker matrix — $name", ({ opts }) => {
     }
   });
 
-  it("never stamps a DeletionPolicy on a caller-provided bucket", () => {
+  it("never wires auto-delete or an extra bucket onto a caller-provided bucket", () => {
     const { template } = buildStack(opts);
     if (opts.withBucket) {
-      // When the caller supplies a bucket, the construct must not create its
-      // own ArtifactsBucket (and therefore never policies the caller's bucket).
+      // The construct's data-durability wiring (removalPolicy + autoDeleteObjects)
+      // lives only in the branch that CREATES the bucket. When the caller supplies
+      // one, the construct must touch neither: it must not add its own bucket, and
+      // it must never attach an auto-delete custom resource to the caller's bucket
+      // (it does not own that bucket's lifecycle). The provided bucket keeps
+      // whatever DeletionPolicy the caller set on it.
       const buckets = template.findResources("AWS::S3::Bucket");
-      const ours = Object.keys(buckets).filter((id) => id.startsWith("HordeArtifactsBucket"));
-      expect(ours).toHaveLength(0);
+      expect(Object.keys(buckets)).toHaveLength(1); // only ProvidedBucket, none of ours
+      template.resourceCountIs("Custom::S3AutoDeleteObjects", 0);
     }
   });
 

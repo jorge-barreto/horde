@@ -60,6 +60,11 @@ const gitSecret = new secretsmanager.Secret(stack, "GitToken", {
 
 const worker = new HordeWorker(stack, "Worker", {
   projectSlug: SLUG,
+  // E2E is ephemeral: data RETAIN-by-default would orphan the runs table +
+  // artifacts bucket (and a small cost) after every `make e2e-down`. Opt into
+  // DESTROY so teardown is clean; this also exercises the opt-out path live.
+  // Production consumers omit this prop and keep the RETAIN default.
+  dataRemovalPolicy: cdk.RemovalPolicy.DESTROY,
   // Canonical repo for run records. The e2e harness sets each worker's git
   // remote to the real horde repo (so the worker can clone + run horde's own
   // .orc/workflows), so the canonical host/path form is this.

@@ -88,6 +88,21 @@ describe.each(cells)("HordeWorker matrix — $name", ({ opts }) => {
     }
   });
 
+  it("never wires auto-delete or an extra bucket onto a caller-provided bucket", () => {
+    const { template } = buildStack(opts);
+    if (opts.withBucket) {
+      // The construct's data-durability wiring (removalPolicy + autoDeleteObjects)
+      // lives only in the branch that CREATES the bucket. When the caller supplies
+      // one, the construct must touch neither: it must not add its own bucket, and
+      // it must never attach an auto-delete custom resource to the caller's bucket
+      // (it does not own that bucket's lifecycle). The provided bucket keeps
+      // whatever DeletionPolicy the caller set on it.
+      const buckets = template.findResources("AWS::S3::Bucket");
+      expect(Object.keys(buckets)).toHaveLength(1); // only ProvidedBucket, none of ours
+      template.resourceCountIs("Custom::S3AutoDeleteObjects", 0);
+    }
+  });
+
   it("IAM policies never use wildcard resources for s3/ssm/dynamodb", () => {
     const { template } = buildStack(opts);
     const policies = {

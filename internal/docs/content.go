@@ -1265,12 +1265,31 @@ Config defaults
   ssmParameterPath          /horde/<projectSlug>/config
   networkMode               public (public subnets, no NAT, public IP;
                             'private' for private subnets behind a NAT)
+  dataRemovalPolicy         RETAIN (runs table + artifacts bucket survive
+                            'cdk destroy'; set DESTROY for ephemeral stacks)
+  pointInTimeRecovery       true (DynamoDB continuous backup on the runs table)
 
 The worker security group is egress-only either way (single 443 outbound,
 no ingress), so the public-mode public IP enables outbound only — nothing
 on the internet can open a connection to a task. Choose 'private' to keep
 tasks off public IPs (e.g. to reach private VPC resources, or to limit the
 blast radius of a future ingress rule).
+
+Data durability & teardown
+--------------------------
+
+The two data-bearing resources — the DynamoDB runs table (run history +
+GSIs) and the S3 artifacts bucket (per-run plans, test/review output, logs)
+— default to RemovalPolicy.RETAIN, so 'cdk destroy' tears down compute,
+networking, and log groups but leaves your run history and artifacts
+behind. The runs table also has point-in-time recovery on by default
+(35-day continuous backup). For an ephemeral/dev stack you want to fully
+clean up, set 'dataRemovalPolicy: RemovalPolicy.DESTROY' (which also enables
+the bucket's auto-delete so a non-empty bucket is emptied before removal)
+and optionally 'pointInTimeRecovery: false'. Only RETAIN and DESTROY are
+accepted — SNAPSHOT is rejected (S3 has no snapshot policy). A
+caller-provided 'artifactsBucket' is never re-policied by the construct.
+(CDK-only: the 'horde bootstrap' CloudFormation path does not expose these.)
 
 CDK vs. CloudFormation
 ----------------------
@@ -1332,7 +1351,12 @@ Backend selection via HORDE_E2E_ECS_BACKEND:
 Cost: in the default 'public' networkMode this stack has no NAT Gateway,
 so its idle cost is negligible; with 'networkMode: "private"' it runs its
 own NAT Gateway (~$32/mo idle) since it can't share infrastructure with the
-bootstrap CF stack. Always tear down when you're done.
+bootstrap CF stack. DynamoDB point-in-time recovery (on by default) adds a
+small continuous-backup charge scaled to the runs table size; set
+'pointInTimeRecovery: false' on a throwaway stack to avoid it. Note that
+with the default 'dataRemovalPolicy: RETAIN', tearing down the stack leaves
+the runs table + artifacts bucket (and their cost) behind — pass DESTROY
+for a fully self-cleaning e2e/dev stack. Always tear down when you're done.
 `
 
 const topicLabels = `Run Labels and List Filtering

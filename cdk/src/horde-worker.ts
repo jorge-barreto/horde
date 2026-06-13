@@ -177,6 +177,17 @@ export class HordeWorker extends Construct {
     const memoryLimitMiB = props.memoryMiB ?? 4096;
     const retention = toRetention(props.logRetentionDays ?? 30);
     const networkMode = props.networkMode ?? "public";
+    const dataRemovalPolicy = props.dataRemovalPolicy ?? cdk.RemovalPolicy.RETAIN;
+    // The DataRemovalPolicy type already excludes SNAPSHOT, but RemovalPolicy is
+    // a plain enum so a JS / `any`-typed caller can still slip it through. S3 has
+    // no snapshot policy (it would silently degrade to RETAIN for the bucket),
+    // so fail loudly at synth rather than ship a half-snapshot posture.
+    if ((dataRemovalPolicy as cdk.RemovalPolicy) === cdk.RemovalPolicy.SNAPSHOT) {
+      throw new Error(
+        "HordeWorker: dataRemovalPolicy SNAPSHOT is not supported — S3 buckets " +
+          "have no snapshot policy. Use RemovalPolicy.RETAIN (default) or DESTROY.",
+      );
+    }
 
     cdk.Tags.of(this).add("Name", `horde-${slug}`);
 
@@ -253,8 +264,11 @@ export class HordeWorker extends Construct {
         encryption: s3.BucketEncryption.S3_MANAGED,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         enforceSSL: true,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-        autoDeleteObjects: true,
+        removalPolicy: dataRemovalPolicy,
+        // Only auto-empty when we are actually destroying. With RETAIN,
+        // autoDeleteObjects is meaningless and CDK warns; coupling it to DESTROY
+        // keeps the two coherent and drops the custom resource from the default.
+        autoDeleteObjects: dataRemovalPolicy === cdk.RemovalPolicy.DESTROY,
       });
       cdk.Tags.of(bucket).add("Name", `horde-${slug}-artifacts`);
       this.artifactsBucket = bucket;
@@ -277,7 +291,10 @@ export class HordeWorker extends Construct {
       tableName: `horde-runs-${slug}`,
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy: dataRemovalPolicy,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: props.pointInTimeRecovery ?? true,
+      },
     });
     cdk.Tags.of(this.runsTable).add("Name", `horde-${slug}-runs`);
     this.runsTable.addGlobalSecondaryIndex({

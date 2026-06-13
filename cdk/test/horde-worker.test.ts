@@ -1,4 +1,4 @@
-import { App, Stack } from "aws-cdk-lib";
+import { App, Stack, RemovalPolicy } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
@@ -676,5 +676,80 @@ describe("HordeWorker networkMode", () => {
         },
       }),
     ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
+  });
+});
+
+describe("HordeWorker data durability (#62)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function synthWith(props: { dataRemovalPolicy?: RemovalPolicy; pointInTimeRecovery?: boolean }): Template {
+    const app = new App();
+    const stack = new Stack(app, "TestStack", {
+      env: { account: "111111111111", region: "us-east-1" },
+    });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "test",
+      repo: "github.com/example/test",
+      workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
+        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+      },
+      // Cast needed: the function accepts RemovalPolicy (superset of DataRemovalPolicy)
+      // so that the SNAPSHOT bypass test can slip through the type guard at runtime.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(props as any),
+    });
+    return Template.fromStack(stack);
+  }
+
+  it("defaults the runs table to RETAIN", () => {
+    synthWith({}).hasResource("AWS::DynamoDB::Table", {
+      DeletionPolicy: "Retain",
+      UpdateReplacePolicy: "Retain",
+    });
+  });
+
+  it("defaults the artifacts bucket to RETAIN", () => {
+    synthWith({}).hasResource("AWS::S3::Bucket", {
+      DeletionPolicy: "Retain",
+      UpdateReplacePolicy: "Retain",
+    });
+  });
+
+  it("enables point-in-time recovery on the runs table by default", () => {
+    synthWith({}).hasResourceProperties("AWS::DynamoDB::Table", {
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+    });
+  });
+
+  it("does not create an auto-delete custom resource by default", () => {
+    synthWith({}).resourceCountIs("Custom::S3AutoDeleteObjects", 0);
+  });
+
+  it("sets DESTROY on both data stores when dataRemovalPolicy is DESTROY", () => {
+    const t = synthWith({ dataRemovalPolicy: RemovalPolicy.DESTROY });
+    t.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Delete" });
+    t.hasResource("AWS::S3::Bucket", { DeletionPolicy: "Delete" });
+  });
+
+  it("creates the auto-delete custom resource when dataRemovalPolicy is DESTROY", () => {
+    synthWith({ dataRemovalPolicy: RemovalPolicy.DESTROY }).resourceCountIs(
+      "Custom::S3AutoDeleteObjects",
+      1,
+    );
+  });
+
+  it("disables PITR when pointInTimeRecovery is false", () => {
+    synthWith({ pointInTimeRecovery: false }).hasResourceProperties("AWS::DynamoDB::Table", {
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false },
+    });
+  });
+
+  it("throws at synth if a SNAPSHOT policy is forced through (JS-side bypass)", () => {
+    expect(() =>
+      synthWith({ dataRemovalPolicy: RemovalPolicy.SNAPSHOT as RemovalPolicy }),
+    ).toThrow(/SNAPSHOT is not supported/);
   });
 });

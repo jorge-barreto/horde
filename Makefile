@@ -1,17 +1,19 @@
 .PHONY: build install unit-test integration-test vet worker docker-build check e2e-up e2e-test e2e-down
 
-# Version metadata embedded via -ldflags. `version` falls back to the short
-# git describe (tag + offset + SHA) so dev builds are self-identifying;
-# release builds get the clean tag from goreleaser. `commit` and `buildDate`
-# are always from git / UTC now.
-# Match only CLI release tags (v*) so a CDK tag (cdk-v*) can't masquerade as the
-# CLI version — the 'v*' glob anchors at the start, so it never matches cdk-v*
-# (which starts with 'c'). Falls back to a bare commit SHA (via --always) before
-# the first v* tag, and to "dev" only outside a git repo.
-VERSION    := $(shell git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev)
-COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS    := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
+# Version metadata embedded via -ldflags. `version` is read from the CLI_VERSION
+# file (the source of truth; the same value tag-on-cli-bump.yml turns into a
+# v<version> release tag) and stamped as v<CLI_VERSION>, with a -g<sha>[-dirty]
+# suffix so dev builds stay self-identifying. Release binaries are built by
+# GoReleaser, which reads the clean v<version> from the pushed tag — not this
+# Makefile — so the released binary is stamped v<version> with no suffix.
+# `commit` and `buildDate` are always from git / UTC now.
+CLI_VERSION_BASE := $(shell cat CLI_VERSION 2>/dev/null || echo 0.0.0)
+GIT_SHA          := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+GIT_DIRTY        := $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo '-dirty')
+VERSION          := v$(CLI_VERSION_BASE)-g$(GIT_SHA)$(GIT_DIRTY)
+COMMIT           := $(GIT_SHA)
+BUILD_DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS          := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
 
 build:
 	go build -ldflags '$(LDFLAGS)' ./cmd/horde

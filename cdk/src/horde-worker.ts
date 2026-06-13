@@ -182,8 +182,7 @@ export class HordeWorker extends Construct {
     // a plain enum so a JS / `any`-typed caller can still slip it through. S3 has
     // no snapshot policy (it would silently degrade to RETAIN for the bucket),
     // so fail loudly at synth rather than ship a half-snapshot posture.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((dataRemovalPolicy as any) === cdk.RemovalPolicy.SNAPSHOT) {
+    if ((dataRemovalPolicy as cdk.RemovalPolicy) === cdk.RemovalPolicy.SNAPSHOT) {
       throw new Error(
         "HordeWorker: dataRemovalPolicy SNAPSHOT is not supported — S3 buckets " +
           "have no snapshot policy. Use RemovalPolicy.RETAIN (default) or DESTROY.",

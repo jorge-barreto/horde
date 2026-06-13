@@ -126,6 +126,26 @@ func TestTagOnCLIBumpWatchesVersionFile(t *testing.T) {
 	}
 }
 
+// Guards the tag-creation body of tag-on-cli-bump.yml. The path/branch trigger
+// (above) doesn't cover what the workflow actually pushes, so two silent-break
+// regressions could slip through: pushing a cdk-v* (or otherwise non-v*) tag —
+// which would never fire release-cli.yml — or authing the push with the default
+// GITHUB_TOKEN instead of RELEASE_TAG_PAT, which GitHub suppresses from
+// triggering downstream workflows (so the release would never run).
+func TestTagOnCLIBumpPushesVPrefixWithPAT(t *testing.T) {
+	b, err := os.ReadFile("../../.github/workflows/tag-on-cli-bump.yml")
+	if err != nil {
+		t.Fatalf("reading tag-on-cli-bump.yml: %v", err)
+	}
+	src := string(b)
+	if !strings.Contains(src, `tag="v$VERSION"`) {
+		t.Error(`tag-on-cli-bump.yml must push a v-prefixed tag (tag="v$VERSION"); a cdk-v*/other prefix would never fire release-cli.yml`)
+	}
+	if !strings.Contains(src, "secrets.RELEASE_TAG_PAT") {
+		t.Error("tag-on-cli-bump.yml must push the tag with RELEASE_TAG_PAT, not GITHUB_TOKEN (token-pushed tags don't trigger release-cli.yml)")
+	}
+}
+
 // Guards that the CLI release workflow triggers on plain v* tags (the prefix
 // the CLI now releases under — cdk keeps cdk-v*).
 func TestReleaseCLIWorkflowUsesVPrefix(t *testing.T) {

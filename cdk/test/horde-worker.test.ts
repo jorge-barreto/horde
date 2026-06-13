@@ -648,7 +648,7 @@ describe("HordeWorker networkMode", () => {
           GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
         },
       }),
-    ).toThrow(/no .* subnet/i);
+    ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
   });
 
   it("throws when a BYO VPC has no private-egress subnets in private mode", () => {
@@ -675,6 +675,6 @@ describe("HordeWorker networkMode", () => {
           GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
         },
       }),
-    ).toThrow(/no .* subnet/i);
+    ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
   });
 });

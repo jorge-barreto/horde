@@ -1127,7 +1127,7 @@ exports[`HordeWorker (5fh.3 skeleton) matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "9e5959807edbf703db3f5c736bc6a323eaeae4b36a390514ce43e3e7a82892b1.zip",
+          "S3Key": "98e920b255223c94d78946bd22176be56e001a9a9cd8b63702906136c69442a3.zip",
         },
         "Environment": {
           "Variables": {

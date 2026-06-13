@@ -342,17 +342,21 @@ export const handler: Handler<
   const maxResumes = Number(process.env.MAX_RESUMES ?? "5");
   if (detail.stopCode === "TerminationNotice" && resumeCount < maxResumes) {
     try {
-      // REMOVE instance_id (de-indexes the old task ARN from the by-instance
-      // GSI so late events for the dead task can't match) + started_at (re-set
-      // at drain). completed_at/exit_code are intentionally NOT touched: the
-      // re-queue path returns before the terminal write that would set them,
-      // so they're absent on a resuming run — nothing stale to clear.
+      // REMOVE instance_id de-indexes the dead task ARN from the by-instance
+      // GSI (sparse) so late events for the dead task can't match. started_at is
+      // RESET to the zero-time sentinel — NOT removed — because it is the by-repo
+      // GSI RANGE key: DynamoDB drops any item missing a GSI key attribute from
+      // that index, and both drainers find queued runs ONLY via the by-repo GSI,
+      // so removing started_at would silently lose the run. The drain re-sets it
+      // to the real launch time at claim. completed_at/exit_code are intentionally
+      // NOT touched: the re-queue path returns before the terminal write that
+      // would set them, so they're absent on a resuming run — nothing stale to clear.
       await ddb.send(
         new UpdateItemCommand({
           TableName: RUNS_TABLE,
           Key: { id: { S: runId } },
           UpdateExpression:
-            "SET #s = :queued, #prio = :highest, resume_count = :rc REMOVE instance_id, started_at",
+            "SET #s = :queued, #prio = :highest, resume_count = :rc, started_at = :zerotime REMOVE instance_id",
           ConditionExpression:
             "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited, :cancelled))",
           ExpressionAttributeNames: { "#s": "status", "#prio": "priority" },
@@ -360,6 +364,7 @@ export const handler: Handler<
             ":queued": { S: "queued" },
             ":highest": { S: "highest" },
             ":rc": { N: String(resumeCount + 1) },
+            ":zerotime": { S: "0001-01-01T00:00:00Z" },
             ":success": { S: "success" },
             ":failed": { S: "failed" },
             ":killed": { S: "killed" },

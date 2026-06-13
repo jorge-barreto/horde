@@ -88,7 +88,7 @@ var topics = []Topic{
 	{
 		Name:    "events",
 		Title:   "Run-Lifecycle Events",
-		Summary: "run.started / run.terminal / run.cost-threshold-exceeded on the EventBridge bus",
+		Summary: "run.started / run.terminal / run.requeued / run.cost-threshold-exceeded on the EventBridge bus",
 		Content: topicEvents,
 	},
 	{
@@ -1480,6 +1480,8 @@ EVENT TYPES (EventBridge DetailType, Source = "horde")
 
     run.started                    a run began executing
     run.terminal                   a run reached a terminal state
+    run.requeued                   a Spot-interrupted run was re-queued for
+                                   auto-resume (not terminal — a continuation)
     run.cost-threshold-exceeded    a drain was held by the spend cap
 
 DETAIL SHAPE (stable, versioned JSON)

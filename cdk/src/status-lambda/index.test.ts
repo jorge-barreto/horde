@@ -623,6 +623,15 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(requeue.ConditionExpression).toContain("attribute_not_exists(#s)");
     expect(requeue.ExpressionAttributeValues?.[":queued"]).toEqual({ S: "queued" });
     expect(requeue.ExpressionAttributeValues?.[":rc"]).toEqual({ N: "2" });
+    // started_at is the by-repo GSI range key — it must be RESET to the zero-time
+    // sentinel, NOT removed, or DynamoDB drops the re-queued run from the index
+    // the drain queries (silently losing the run). instance_id is the only REMOVE.
+    expect(requeue.UpdateExpression).toContain("started_at = :zerotime");
+    expect(requeue.UpdateExpression).toMatch(/REMOVE instance_id\b/);
+    expect(requeue.UpdateExpression).not.toMatch(/REMOVE[^]*started_at/);
+    expect(requeue.ExpressionAttributeValues?.[":zerotime"]).toEqual({
+      S: "0001-01-01T00:00:00Z",
+    });
     expect(r).toMatchObject({ requeued: "run-spot" });
   });
 

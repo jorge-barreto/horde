@@ -355,10 +355,14 @@ type LaunchV1 struct {
 	// Priority is set only for the "queued" status (the level the run was
 	// parked at). Omitted for launched/capped/duplicate.
 	Priority string `json:"priority,omitempty"`
+	// Capacity echoes the chosen Fargate capacity (spot|on-demand) for a
+	// launched or queued run. Omitted when empty (e.g. docker) so existing
+	// consumers/snapshots are unaffected.
+	Capacity string `json:"capacity,omitempty"`
 }
 
-func launchLaunchedV1(runID, ticket, workflow, branch string) LaunchV1 {
-	return LaunchV1{Status: "launched", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch}
+func launchLaunchedV1(runID, ticket, workflow, branch, capacity string) LaunchV1 {
+	return LaunchV1{Status: "launched", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Capacity: capacity}
 }
 
 func launchCappedV1(ticket, workflow, branch, reason string) LaunchV1 {
@@ -371,8 +375,8 @@ func launchDuplicateV1(ticket, workflow, branch, existingRunID, reason string) L
 
 // launchQueuedV1 reports a launch parked in the server-side backlog
 // (`--enqueue`). Exit 0 — a protocol-level outcome like capped/duplicate.
-func launchQueuedV1(runID, ticket, workflow, branch, priority string) LaunchV1 {
-	return LaunchV1{Status: "queued", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Priority: priority}
+func launchQueuedV1(runID, ticket, workflow, branch, priority, capacity string) LaunchV1 {
+	return LaunchV1{Status: "queued", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Priority: priority, Capacity: capacity}
 }
 
 // QueueListItemV1 / QueueListV1 are the `horde queue list --json` contract.

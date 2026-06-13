@@ -401,7 +401,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				// corrupt --json, but its own writes go to stderr only.
 				lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 				if jsonOut {
-					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority)))
+					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority), string(capacity)))
 				}
 				fmt.Printf("%s (queued, priority %s)\n", id, priority)
 				return nil
@@ -495,7 +495,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			}
 
 			if jsonOut {
-				return writeJSONTo(cmd.Writer, launchLaunchedV1(id, ticket, workflow, branch))
+				return writeJSONTo(cmd.Writer, launchLaunchedV1(id, ticket, workflow, branch, string(capacity)))
 			}
 			fmt.Println(id)
 			return nil
@@ -645,13 +645,18 @@ resumes any interrupted agent session. Override with explicit orc args:
 				return fmt.Errorf("updating instance ID: %w", err)
 			}
 
-			// Update run back to running with fresh timeout
+			// Update run back to running with fresh timeout. Reset ResumeCount to
+			// 0: a human-initiated retry is a fresh attempt and must get a fresh
+			// Spot auto-resume budget. Without this, a retried run that had already
+			// exhausted MAX_RESUMES would be re-killed on its first Spot reclaim.
 			runningStatus := store.StatusRunning
 			now := time.Now()
 			timeoutAt := now.Add(timeout)
+			zero := 0
 			if err := st.UpdateRun(ctx, runID, &store.RunUpdate{
-				Status:    &runningStatus,
-				TimeoutAt: &timeoutAt,
+				Status:      &runningStatus,
+				TimeoutAt:   &timeoutAt,
+				ResumeCount: &zero,
 			}); err != nil {
 				return fmt.Errorf("updating run status: %w", err)
 			}

@@ -356,8 +356,8 @@ type LaunchV1 struct {
 	// parked at). Omitted for launched/capped/duplicate.
 	Priority string `json:"priority,omitempty"`
 	// Capacity echoes the chosen Fargate capacity (spot|on-demand) for a
-	// launched or queued run. Omitted when empty (e.g. docker) so existing
-	// consumers/snapshots are unaffected.
+	// launched or queued run. Omitted only for runs with no stored capacity
+	// (pre-feature/legacy records) so existing consumers/snapshots are unaffected.
 	Capacity string `json:"capacity,omitempty"`
 }
 

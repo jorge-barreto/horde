@@ -74,6 +74,7 @@ beforeEach(() => {
   s3Mock.reset();
   ebMock.reset();
   delete process.env.EVENT_BUS_NAME;
+  delete process.env.MAX_RESUMES;
 });
 
 describe("status-lambda handler (5fh.16)", () => {
@@ -239,6 +240,7 @@ describe("status-lambda handler (5fh.16)", () => {
   });
 
   it("records the stop reason even when the status update is already terminal", async () => {
+    process.env.MAX_RESUMES = "5";
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-killed" } }] });
     // First two updates (stop-reason seed + nested) succeed; the third (status)
     // hits the terminal guard and is rejected — as it would for a synchronous

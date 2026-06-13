@@ -176,6 +176,7 @@ export class HordeWorker extends Construct {
     const cpu = props.cpu ?? 1024;
     const memoryLimitMiB = props.memoryMiB ?? 4096;
     const retention = toRetention(props.logRetentionDays ?? 30);
+    const networkMode = props.networkMode ?? "public";
 
     cdk.Tags.of(this).add("Name", `horde-${slug}`);
 
@@ -184,16 +185,21 @@ export class HordeWorker extends Construct {
     } else {
       const vpc = new ec2.Vpc(this, "Vpc", {
         maxAzs: 2,
-        natGateways: 1,
+        // 'public': no NAT, tasks egress directly via the IGW. 'private': one
+        // NAT Gateway fronting PRIVATE_WITH_EGRESS subnets.
+        natGateways: networkMode === "public" ? 0 : 1,
         vpcName: `horde-${slug}-vpc`,
-        subnetConfiguration: [
-          { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
-          {
-            name: "private",
-            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-            cidrMask: 24,
-          },
-        ],
+        subnetConfiguration:
+          networkMode === "public"
+            ? [{ name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 }]
+            : [
+                { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
+                {
+                  name: "private",
+                  subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                  cidrMask: 24,
+                },
+              ],
       });
       cdk.Tags.of(vpc).add("Name", `horde-${slug}-vpc`);
       this.vpc = vpc;
@@ -379,9 +385,18 @@ export class HordeWorker extends Construct {
     // SSM config parameter consumed by the horde CLI. JSON keys must match
     // `internal/config/ssm.go::HordeConfig` exactly.
     const ssmPath = props.ssmParameterPath ?? `/horde/${slug}/config`;
-    const privateSubnetIds = this.vpc.selectSubnets({
-      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-    }).subnetIds;
+    const subnetType =
+      networkMode === "public"
+        ? ec2.SubnetType.PUBLIC
+        : ec2.SubnetType.PRIVATE_WITH_EGRESS;
+    const selectedSubnetIds = this.vpc.selectSubnets({ subnetType }).subnetIds;
+    if (selectedSubnetIds.length === 0) {
+      throw new Error(
+        `HordeWorker networkMode '${networkMode}' requires ${subnetType} subnets ` +
+          `in the VPC, but none were found.`,
+      );
+    }
+    const assignPublicIp = networkMode === "public" ? "ENABLED" : "DISABLED";
     const maxConcurrent = props.maxConcurrent ?? 5;
     const defaultTimeoutMinutes = props.defaultTimeoutMinutes ?? 1440;
 
@@ -407,7 +422,7 @@ export class HordeWorker extends Construct {
 
     const subnetsJson = cdk.Fn.join("", [
       "[",
-      cdk.Fn.join(",", privateSubnetIds.map((id) => cdk.Fn.join("", ['"', id, '"']))),
+      cdk.Fn.join(",", selectedSubnetIds.map((id) => cdk.Fn.join("", ['"', id, '"']))),
       "]",
     ]);
     const configJson = cdk.Fn.join("", [
@@ -419,7 +434,9 @@ export class HordeWorker extends Construct {
       subnetsJson,
       ',"security_group":"',
       this.workerSecurityGroup.securityGroupId,
-      '","assign_public_ip":"DISABLED","log_group":"',
+      '","assign_public_ip":"',
+      assignPublicIp,
+      '","log_group":"',
       this.logGroup.logGroupName,
       '","log_stream_prefix":"ecs","artifacts_bucket":"',
       this.artifactsBucket.bucketName,
@@ -567,9 +584,9 @@ export class HordeWorker extends Construct {
       MAX_CONCURRENT: String(maxConcurrent),
       CLUSTER_ARN: this.cluster.clusterArn,
       TASK_DEF_ARN: this.taskDefinition.taskDefinitionArn,
-      SUBNETS: cdk.Fn.join(",", privateSubnetIds),
+      SUBNETS: cdk.Fn.join(",", selectedSubnetIds),
       SECURITY_GROUP: this.workerSecurityGroup.securityGroupId,
-      ASSIGN_PUBLIC_IP: "DISABLED", // matches the SSM config above
+      ASSIGN_PUBLIC_IP: assignPublicIp, // matches the SSM config above
       ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
     };
     if (props.maxSpendPerWindow !== undefined) {

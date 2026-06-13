@@ -1,4 +1,4 @@
-import type { HordeWorkerProps } from "../src";
+import type { HordeNetworkMode, HordeWorkerProps } from "../src";
 
 describe("HordeWorkerProps", () => {
   it("re-exports from index (compile-time check)", () => {
@@ -14,5 +14,11 @@ describe("HordeWorkerProps", () => {
       secrets: {} as never,
     };
     expect(_bad).toBeDefined();
+  });
+
+  it("accepts networkMode 'public' and 'private'", () => {
+    const a: HordeNetworkMode = "public";
+    const b: HordeNetworkMode = "private";
+    expect([a, b]).toEqual(["public", "private"]);
   });
 });

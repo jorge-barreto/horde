@@ -5,6 +5,9 @@ import type { IRepository } from "aws-cdk-lib/aws-ecr";
 import type { IBucket } from "aws-cdk-lib/aws-s3";
 import type { ISecret } from "aws-cdk-lib/aws-secretsmanager";
 
+/** Network posture for worker tasks. See `HordeWorkerProps.networkMode`. */
+export type HordeNetworkMode = "public" | "private";
+
 /**
  * Secrets injected into the worker container at runtime via ECS Secrets
  * Manager `valueFrom` (resolved by the task execution role at container start
@@ -70,9 +73,33 @@ export interface HordeWorkerProps {
 
   /**
    * VPC the Fargate tasks run in.
-   * @default — a new VPC with 2 private + 2 public subnets is created.
+   * @default — a new VPC. In `networkMode: 'public'` (the default) it has only
+   *   public subnets and no NAT Gateway; in `'private'` it adds
+   *   PRIVATE_WITH_EGRESS subnets and one NAT Gateway.
    */
   readonly vpc?: IVpc;
+
+  /**
+   * Network posture for the worker tasks.
+   *
+   * - `'public'` (default): tasks run in PUBLIC subnets with a public IPv4
+   *   address and reach the internet directly via the Internet Gateway — no
+   *   NAT Gateway is created (~$32/mo saved). The worker security group has no
+   *   ingress rules, so the public IP enables egress only; nothing on the
+   *   internet can open a connection to the task.
+   * - `'private'`: tasks run in PRIVATE_WITH_EGRESS subnets with no public IP,
+   *   reaching the internet through a NAT Gateway the construct creates. Choose
+   *   this to limit the blast radius of a future ingress rule, or when workers
+   *   must reach private VPC resources without an internet path.
+   *
+   * With a bring-your-own `vpc`, this selects which of that VPC's subnets to
+   * use; a synth-time error is raised if the VPC has no subnets of the chosen
+   * type. The default is `'public'` in all cases — supplying a VPC does not
+   * change it.
+   *
+   * @default 'public'
+   */
+  readonly networkMode?: HordeNetworkMode;
 
   /**
    * S3 bucket used to store run artifacts under `horde-runs/<runId>/`.

@@ -1180,8 +1180,11 @@ What it provisions
 
 Same surface as 'horde bootstrap' (CloudFormation flavor):
 
-  - VPC with public + private subnets and one NAT gateway (or BYO via
-    the 'vpc' prop)
+  - VPC sized by 'networkMode' (default 'public'): public subnets and
+    NO NAT gateway, with tasks on a public IP reaching the internet via
+    the internet gateway (~$32/mo saved). 'networkMode: "private"' adds
+    PRIVATE_WITH_EGRESS subnets and one NAT gateway instead. BYO via the
+    'vpc' prop (networkMode then selects which of its subnets to use).
   - ECS Fargate cluster + Fargate task definition (1 vCPU / 4 GB by
     default; tunable via 'cpu' / 'memoryMiB' props)
   - DynamoDB horde-runs-<slug> table with 4 GSIs (by-repo, by-ticket,
@@ -1253,6 +1256,14 @@ Config defaults
   defaultTimeoutMinutes     1440 (24 h)
   logRetentionDays          30
   ssmParameterPath          /horde/<projectSlug>/config
+  networkMode               public (public subnets, no NAT, public IP;
+                            'private' for private subnets behind a NAT)
+
+The worker security group is egress-only either way (single 443 outbound,
+no ingress), so the public-mode public IP enables outbound only — nothing
+on the internet can open a connection to a task. Choose 'private' to keep
+tasks off public IPs (e.g. to reach private VPC resources, or to limit the
+blast radius of a future ingress rule).
 
 CDK vs. CloudFormation
 ----------------------
@@ -1311,9 +1322,10 @@ Backend selection via HORDE_E2E_ECS_BACKEND:
     cdk              CDK-deployed stack. Requires TestECSCDK_Bringup
                      to have populated /tmp/horde-cdk-e2e-state.json.
 
-Cost: this stack runs its own NAT Gateway (~$32/mo idle) since it can't
-share infrastructure with the bootstrap CF stack. Always tear down when
-you're done.
+Cost: in the default 'public' networkMode this stack has no NAT Gateway,
+so its idle cost is negligible; with 'networkMode: "private"' it runs its
+own NAT Gateway (~$32/mo idle) since it can't share infrastructure with the
+bootstrap CF stack. Always tear down when you're done.
 `
 
 const topicLabels = `Run Labels and List Filtering

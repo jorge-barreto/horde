@@ -88,6 +88,17 @@ describe.each(cells)("HordeWorker matrix — $name", ({ opts }) => {
     }
   });
 
+  it("never stamps a DeletionPolicy on a caller-provided bucket", () => {
+    const { template } = buildStack(opts);
+    if (opts.withBucket) {
+      // When the caller supplies a bucket, the construct must not create its
+      // own ArtifactsBucket (and therefore never policies the caller's bucket).
+      const buckets = template.findResources("AWS::S3::Bucket");
+      const ours = Object.keys(buckets).filter((id) => id.startsWith("HordeArtifactsBucket"));
+      expect(ours).toHaveLength(0);
+    }
+  });
+
   it("IAM policies never use wildcard resources for s3/ssm/dynamodb", () => {
     const { template } = buildStack(opts);
     const policies = {

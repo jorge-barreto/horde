@@ -9,15 +9,12 @@ import (
 )
 
 // e2eFixtureBranch is the git branch the ECS worker checks out for tests whose
-// .orc workflow fixtures (env-echo, token-probe) are not yet on origin's
-// default branch. Override with HORDE_E2E_FIXTURE_BRANCH; defaults to the
-// feature branch these fixtures were committed to. Drop to "" once they land
-// on main.
+// .orc workflow fixtures (env-echo, token-probe) live. These fixtures landed on
+// main (the run-lifecycle-event-backbone work merged in #36/#55), so the default
+// is now "" — the worker checks out origin's default branch. Override with
+// HORDE_E2E_FIXTURE_BRANCH if the fixtures ever move to a feature branch again.
 func e2eFixtureBranch() string {
-	if b := os.Getenv("HORDE_E2E_FIXTURE_BRANCH"); b != "" {
-		return b
-	}
-	return "worktree-run-lifecycle-event-backbone"
+	return os.Getenv("HORDE_E2E_FIXTURE_BRANCH")
 }
 
 // TestECSPerLaunchEnv verifies `horde launch --env KEY=VALUE` (#22) injects the

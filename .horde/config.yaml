@@ -15,7 +15,7 @@ mounts:
 #   env: <NAME>          host env-var name (read from .env on docker)
 #   aws-secret: <NAME>   AWS Secrets Manager secret name (ECS) — caller
 #                        is responsible for creating the secret before
-#                        running `horde bootstrap deploy`
+#                        deploying the @horde.io/cdk stack
 #
 # Uncomment to add additional secrets:
 #

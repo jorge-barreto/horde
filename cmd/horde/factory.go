@@ -13,7 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/jorge-barreto/horde/internal/awscfg"
-	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/provider"
 	"github.com/jorge-barreto/horde/internal/store"
@@ -25,15 +24,12 @@ import (
 //  1. SSM override (--ssm-path / HORDE_SSM_PATH): used verbatim (escape hatch
 //     for custom deployments or projects sharing config across repos).
 //  2. Repo override (--repo / HORDE_REPO_URL): derive the slug from it the
-//     same way bootstrap/push do and return /horde/<slug>/config. Deterministic
-//     and filesystem-free — a malformed override falls back to DefaultSSMPath.
+//     same way push does and return /horde/<slug>/config. Deterministic and
+//     filesystem-free — a malformed override falls back to DefaultSSMPath.
 //  3. Discovery: if the working directory has a git remote, derive the slug
 //     from it. Any failure here is swallowed to the legacy global
 //     config.DefaultSSMPath (/horde/config) so docker-only users with no git
 //     and pre-slug deployments keep working.
-//
-// Slug derivation lives here (not on config.Resolver) because Slug is in the
-// bootstrap package, which imports config — config cannot import bootstrap.
 func resolveSSMPath(r *config.Resolver) string {
 	if r != nil && r.SSMOverride != "" {
 		return r.SSMOverride
@@ -58,7 +54,7 @@ func slugSSMPath(getRepo func() (string, error)) string {
 	if err != nil {
 		return config.DefaultSSMPath
 	}
-	slug, err := bootstrap.Slug(repo)
+	slug, err := config.Slug(repo)
 	if err != nil {
 		return config.DefaultSSMPath
 	}

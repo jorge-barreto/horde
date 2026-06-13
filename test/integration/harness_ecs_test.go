@@ -22,7 +22,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/jorge-barreto/horde/internal/awscfg"
-	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/jorge-barreto/horde/internal/runid"
 	"github.com/jorge-barreto/horde/internal/store"
@@ -424,21 +423,15 @@ func (d *ecsDriver) TearDown() {
 	}
 }
 
-// newECSHarness builds an ECS-backed harness against the deployed stack for
-// the horde repo. It skips unless -short is off and HORDE_E2E_ECS=1.
+// newECSHarness builds an ECS-backed harness against the CDK-deployed e2e
+// stack for the horde repo. It skips unless -short is off and HORDE_E2E_ECS=1.
 //
-// Backend selection via HORDE_E2E_ECS_BACKEND env var:
-//   - "" or "cf" (default): the CloudFormation bootstrap stack at the
-//     `jorge-barreto-horde` slug.
-//   - "cdk": the CDK-deployed e2e stack. Reads the SSM path from the state
-//     file written by TestECSCDK_Bringup. The workspace's git remote still
-//     points at the real horde repo so the worker can git-fetch; the SSM
-//     lookup is redirected via HORDE_SSM_PATH.
+// The SSM path is read from the state file written by TestECSCDK_Bringup. The
+// workspace's git remote still points at the real horde repo so the worker can
+// git-fetch; the SSM lookup is redirected via HORDE_SSM_PATH.
 //
-// The backend switch lets the entire TestECS_* suite run against either
-// stack with no other changes, giving symmetric coverage of every CLI
-// surface (launch/status/logs/kill/list/lifecycle/hydrate) against both
-// the CF and CDK deployments.
+// This drives the entire TestECS_* suite against the CDK stack, giving coverage
+// of every CLI surface (launch/status/logs/kill/list/lifecycle/hydrate).
 func newECSHarness(t *testing.T) *harness {
 	t.Helper()
 	if testing.Short() {
@@ -447,34 +440,17 @@ func newECSHarness(t *testing.T) *harness {
 	if os.Getenv("HORDE_E2E_ECS") != "1" {
 		t.Skip("ECS integration: HORDE_E2E_ECS != 1")
 	}
-	switch os.Getenv("HORDE_E2E_ECS_BACKEND") {
-	case "", "cf":
-		return newECSHarnessForRepo(t, ecsHarnessRepoURL)
-	case "cdk":
-		s, err := readCDKStateSoft()
-		if err != nil {
-			t.Skipf("ECS integration (backend=cdk): reading %s: %v (run TestECSCDK_Bringup first)", cdkE2EStateFile, err)
-		}
-		// Workspace remote = real horde (clonable); SSM path = CDK stack.
-		return newECSHarnessForRepoWithSSM(t, ecsHarnessRepoURL, s.SSMPath)
-	default:
-		t.Fatalf("unknown HORDE_E2E_ECS_BACKEND=%q (want \"cf\" or \"cdk\")", os.Getenv("HORDE_E2E_ECS_BACKEND"))
-		return nil
+	s, err := readCDKStateSoft()
+	if err != nil {
+		t.Skipf("ECS integration: reading %s: %v (run TestECSCDK_Bringup first)", cdkE2EStateFile, err)
 	}
-}
-
-// newECSHarnessForRepo is the same as newECSHarness but parameterized on the
-// repo URL whose slug derives the SSM config path. The CDK e2e tests use this
-// to point at a separate stack without re-implementing the harness setup.
-//
-// Caller is responsible for skip-gating; this function never skips.
-func newECSHarnessForRepo(t *testing.T, repoURL string) *harness {
-	return newECSHarnessForRepoWithSSM(t, repoURL, "")
+	// Workspace remote = real horde (clonable); SSM path = CDK stack.
+	return newECSHarnessForRepoWithSSM(t, ecsHarnessRepoURL, s.SSMPath)
 }
 
 // newECSHarnessForRepoWithSSM lets the caller override the SSM path used to
 // load runtime config. When ssmPathOverride is empty the path is derived
-// from repoURL via bootstrap.Slug (the production code path).
+// from repoURL via config.Slug (the production code path).
 //
 // CDK e2e uses an override so the workspace's git remote can stay set to a
 // real, clonable repo (so the worker can git-fetch) while SSM lookup still
@@ -522,8 +498,8 @@ func newECSHarnessForRepoWithSSM(t *testing.T, repoURL, ssmPathOverride string) 
 	}
 
 	// Load SSM config to discover cluster / runs table / log group. Derive
-	// the SSM path from the remote URL via bootstrap.Slug so we don't hard-
-	// code the project identity.
+	// the SSM path from the remote URL via config.Slug so we don't hard-code
+	// the project identity.
 	ctx := context.Background()
 	awsCfg, err := awscfg.Load(ctx, os.Getenv("AWS_PROFILE"))
 	if err != nil {
@@ -531,7 +507,7 @@ func newECSHarnessForRepoWithSSM(t *testing.T, repoURL, ssmPathOverride string) 
 	}
 	ssmPath := ssmPathOverride
 	if ssmPath == "" {
-		slug, err := bootstrap.Slug(repoURL)
+		slug, err := config.Slug(repoURL)
 		if err != nil {
 			t.Fatalf("deriving slug: %v", err)
 		}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -375,7 +376,7 @@ func TestPush_JSON(t *testing.T) {
 }
 
 // TestPush_SSMMissing verifies that a ParameterNotFound from SSM produces an
-// error that guides the user to run `horde bootstrap deploy`.
+// error that guides the user to deploy the @horde.io/cdk stack.
 func TestPush_SSMMissing(t *testing.T) {
 	dir := t.TempDir()
 	setupGitRepo(t, dir, "https://github.com/acme/widgets.git")
@@ -401,8 +402,8 @@ func TestPush_SSMMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when SSM parameter is missing")
 	}
-	if !strings.Contains(err.Error(), "horde bootstrap deploy") {
-		t.Errorf("error %q missing guidance substring %q", err.Error(), "horde bootstrap deploy")
+	if !strings.Contains(err.Error(), "@horde.io/cdk") {
+		t.Errorf("error %q missing guidance substring %q", err.Error(), "@horde.io/cdk")
 	}
 	// Make sure we didn't call login/tag/push after SSM failed.
 	for _, c := range docker.calls {
@@ -410,4 +411,24 @@ func TestPush_SSMMissing(t *testing.T) {
 			t.Errorf("unexpected docker %s call after SSM error", c.args[0])
 		}
 	}
+}
+
+// setupGitRepo initializes a git repo at dir with a configured origin remote.
+// Returns dir for convenience.
+func setupGitRepo(t *testing.T, dir, remoteURL string) string {
+	t.Helper()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_CONFIG_SYSTEM=/dev/null",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "-q")
+	run("git", "remote", "add", "origin", remoteURL)
+	return dir
 }

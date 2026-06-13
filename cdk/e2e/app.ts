@@ -77,8 +77,8 @@ const worker = new HordeWorker(stack, "Worker", {
   },
   // The full TestECS_* suite runs ~17 tests in parallel, each launching a
   // Fargate task. The construct default (5) rate-limits the suite; bump
-  // to 20 to match the bootstrap CF stack's e2e budget. Production
-  // consumers are expected to tune this per their own load.
+  // to 20 for the e2e budget. Production consumers are expected to tune
+  // this per their own load.
   maxConcurrent: 20,
   // Spend cap (#36). A GENEROUS cap that never gates the e2e suite (the
   // script workflows cost ~$0), present only so TestECSSpendCapConfigured can

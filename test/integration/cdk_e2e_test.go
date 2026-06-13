@@ -34,7 +34,7 @@ import (
 
 const (
 	cdkE2EStateFile = "/tmp/horde-cdk-e2e-state.json"
-	// Fake remote URL whose bootstrap.Slug derives to cdkE2ESlug. Set as the
+	// Fake remote URL whose config.Slug derives to cdkE2ESlug. Set as the
 	// origin of the temp project dirs so `horde push` and `horde launch`
 	// resolve to the CDK stack's SSM path.
 	cdkE2ERepoURL   = "https://github.com/jorge-barreto/horde-cdke2e.git"

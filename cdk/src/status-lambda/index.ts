@@ -10,11 +10,10 @@
  * auto-resume — can tell WHY a task stopped (e.g. stopCode "TerminationNotice"
  * for a Fargate spot interruption) without re-deriving it from logs.
  *
- * The Python lambda in internal/bootstrap/templates/stack.yaml.tmpl is a
- * transliteration of this handler and MUST be kept in lockstep — exit-code
- * mapping (0=success, 2=timed_out, 4=rate_limited, 5=killed, else failed),
- * the metadata stop-reason capture, and the terminal-state idempotency
- * guard. The TypeScript port is authoritative going forward.
+ * Exit-code mapping (0=success, 2=timed_out, 4=rate_limited, 5=killed, else
+ * failed), the metadata stop-reason capture, and the terminal-state
+ * idempotency guard are the contract the Go lazy-reconciliation path
+ * (internal/provider/ecs.go::Status) must agree with.
  */
 import type { EventBridgeEvent, Handler } from "aws-lambda";
 import {
@@ -38,7 +37,7 @@ const ARTIFACTS_BUCKET = process.env.ARTIFACTS_BUCKET ?? "";
 // from THIS container's exit code, never a sidecar's. Must stay equal to
 // WORKER_CONTAINER_NAME in ../horde-worker.ts — this Lambda is esbuild-bundled
 // standalone and cannot import construct code, so it keeps its own copy. The
-// Python lambda in internal/bootstrap/templates/stack.yaml.tmpl mirrors this.
+// Go const in internal/provider/ecs.go must also match.
 const WORKER_CONTAINER_NAME = "horde-worker";
 
 const ddb = new DynamoDBClient({});
@@ -148,8 +147,8 @@ interface TokenUsage {
 // fetchTokenUsage pulls per-run token totals from costs.json in S3 (best-effort,
 // mirrors fetchTotalCost). orc writes the token totals to costs.json today;
 // turns is summed across the per-phase array (orc has no run-total turns).
-// Attribute names written downstream match the Go store consts and the Python
-// lambda — a cross-language contract.
+// Attribute names written downstream match the Go store consts — a
+// cross-language contract.
 async function fetchTokenUsage(runId: string): Promise<TokenUsage | null> {
   const prefix = `horde-runs/${runId}/`;
   try {
@@ -168,10 +167,10 @@ async function fetchTokenUsage(runId: string): Promise<TokenUsage | null> {
       total_cache_read_input_tokens?: number;
       phases?: ReadonlyArray<{ turns?: number }>;
     };
-    // Coerce to an integer token count, kept in lockstep with the Python
-    // lambda's num(): accept a number or numeric string, truncate toward zero,
-    // reject booleans and anything non-finite -> 0. orc emits integers, so this
-    // only matters for malformed costs.json — but both backends must agree.
+    // Coerce to an integer token count: accept a number or numeric string,
+    // truncate toward zero, reject booleans and anything non-finite -> 0. orc
+    // emits integers, so this only matters for malformed costs.json — but the
+    // Go store must read the same values back.
     const num = (v: unknown): number => {
       if (typeof v === "boolean") return 0;
       const n = typeof v === "number" ? v : Number(v);
@@ -337,8 +336,7 @@ export const handler: Handler<
   // ID — workspace + session already synced to S3. Conditional on
   // not-already-terminal so a racing `horde kill` (UserInitiated, sets killed
   // synchronously) wins. UserInitiated never reaches this branch. At the cap we
-  // fall through to the normal terminal write below. CDK-only (the Python
-  // lambda has no queue to drain).
+  // fall through to the normal terminal write below.
   const maxResumes = Number(process.env.MAX_RESUMES ?? "5");
   if (detail.stopCode === "TerminationNotice" && resumeCount < maxResumes) {
     try {

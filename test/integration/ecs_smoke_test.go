@@ -49,8 +49,8 @@ const (
 )
 
 // TestECSSmoke is the ECS happy-path end-to-end test. It launches a 1-phase
-// script workflow against the pre-deployed CloudFormation stack, polls to
-// terminal, fetches logs, hydrates artifacts, and cleans up the DynamoDB row.
+// script workflow against the pre-deployed CDK stack, polls to terminal,
+// fetches logs, hydrates artifacts, and cleans up the DynamoDB row.
 func TestECSSmoke(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {

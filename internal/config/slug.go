@@ -1,13 +1,8 @@
-// Package bootstrap provides helpers for deriving identifiers used when
-// bootstrapping cloud resources for a horde project (e.g. CloudFormation
-// stack names, S3 bucket names, ECS cluster names).
-package bootstrap
+package config
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/jorge-barreto/horde/internal/config"
 )
 
 // MaxSlugLen caps the length of a project slug.
@@ -20,15 +15,14 @@ import (
 // for a small safety margin against future prefix changes.
 const MaxSlugLen = 30
 
-// Slug derives a CloudFormation-safe project slug from a git remote URL.
+// Slug derives a stable, DNS/AWS-safe project slug from a git remote URL.
 //
 // The slug is the repo path (everything after the host), lowercased, with
 // runs of non-alphanumeric characters collapsed to single '-' separators,
 // trimmed of leading/trailing '-', and truncated to MaxSlugLen.
 //
 // Slug does NOT guarantee the result starts with a letter — callers that
-// need that property (e.g. CloudFormation stack names) are expected to
-// prepend a fixed prefix such as "horde-".
+// need that property are expected to prepend a fixed prefix such as "horde-".
 //
 // Examples:
 //
@@ -41,12 +35,12 @@ func Slug(remoteURL string) (string, error) {
 	}
 
 	// Accept either a raw remote URL or a pre-normalized "host/path" form
-	// (config.RepoURL returns the latter). If the input has no scheme and
-	// no scp-style "git@host:" prefix but does contain a '/', assume it's
+	// (RepoURL returns the latter). If the input has no scheme and no
+	// scp-style "git@host:" prefix but does contain a '/', assume it's
 	// already normalized and skip re-normalization.
-	normalized, err := config.NormalizeRepoURL(remoteURL)
+	normalized, err := NormalizeRepoURL(remoteURL)
 	if err != nil {
-		if config.IsAlreadyNormalized(remoteURL) {
+		if IsAlreadyNormalized(remoteURL) {
 			normalized = remoteURL
 		} else {
 			return "", fmt.Errorf("deriving project slug: %w", err)

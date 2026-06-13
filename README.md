@@ -10,8 +10,8 @@ See [SPEC.md](SPEC.md) for the full design.
 
 - Go (1.24+) — only to build from source; the install script and Homebrew ship a prebuilt binary
 - Docker — required for local mode and for `horde push` (which builds the worker image)
-- AWS account with credentials configured (only for the v0.2 AWS path) — either [Path A](#path-a--cloudformation-bootstrap-no-cdk-required) or [Path B](#path-b--cdk-construct-teams-with-an-existing-cdk-app) below
-- Node.js 18+ (only for Path B, which uses CDK)
+- AWS account with credentials configured (only for the v0.2 AWS path) — provisioned with the [`@horde.io/cdk`](#quickstart-aws-v02) construct
+- Node.js 18+ (only for the AWS path, which uses CDK)
 
 ## Install
 
@@ -71,23 +71,11 @@ secrets:
     aws-secret: prepdesk/stripe-api-key
 ```
 
-Each entry's per-provider source is picked at launch time. The two canonical secrets (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) are auto-seeded; declare them only to override. ECS extras must already exist in Secrets Manager — `horde bootstrap init`/`deploy` wires the IAM grants and task-definition references but does not create the secrets themselves. Full schema: `horde docs config`.
+Each entry's per-provider source is picked at launch time. The two canonical secrets (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) are auto-seeded; declare them only to override. ECS extras must already exist in Secrets Manager — the `@horde.io/cdk` stack wires the IAM grants and task-definition references but does not create the secrets themselves. Full schema: `horde docs config`.
 
 ## Quickstart: AWS (v0.2)
 
-Stand up the cloud backend once, then every `horde launch` from the project runs on ECS Fargate. Two provisioning paths — pick one.
-
-### Path A — CloudFormation bootstrap (no CDK required)
-
-```bash
-horde bootstrap init                  # writes .horde/cloudformation.yaml
-horde bootstrap deploy                # prompts for CLAUDE_CODE_OAUTH_TOKEN + GIT_TOKEN, ~5 min cold
-horde push                            # build + upload worker image to ECR
-```
-
-In CI/headless contexts, set `CLAUDE_CODE_OAUTH_TOKEN` and `GIT_TOKEN` as environment variables instead of answering prompts. Attach the managed policy the stack exports (`horde-<slug>-cli-policy-arn`) to the IAM user or role that will run `horde launch`. Full flow: `horde docs bootstrap`.
-
-### Path B — CDK construct (teams with an existing CDK app)
+Stand up the cloud backend once with the [`@horde.io/cdk`](cdk/) construct, then every `horde launch` from the project runs on ECS Fargate.
 
 Use [`examples/cdk-consumer/`](examples/cdk-consumer/) as a starting point: copy the directory into a new CDK app (or merge `app.ts` into your existing stack), edit the `SLUG` constant to match your git remote (`owner-repo`, lowercased, non-alphanumerics → `-`), then:
 
@@ -198,16 +186,13 @@ deployment's SSM config regardless of `--repo`, so all runs share one bucket; us
 ### Teardown
 
 ```bash
-# Path A:
-horde bootstrap destroy
-
-# Path B (from the CDK app directory):
+# From the CDK app directory:
 npm run destroy
 ```
 
 ## Usage
 
-All commands require a provider. For local Docker mode, pass `--provider docker`. Omit the flag when an AWS stack (provisioned via `horde bootstrap` or the [`@horde.io/cdk`](cdk/) construct) is deployed — horde auto-detects via SSM.
+All commands require a provider. For local Docker mode, pass `--provider docker`. Omit the flag when an AWS stack (provisioned via the [`@horde.io/cdk`](cdk/) construct) is deployed — horde auto-detects via SSM.
 
 ```bash
 # Launch a run (--workflow is required)
@@ -281,7 +266,7 @@ make e2e-down          # always run when done with e2e
 
 Unit tests use fake Docker shell scripts — no real containers. Docker integration tests launch real Docker containers running real orc with script-only workflows against a real SQLite store. They exercise the full status detection chain: launch, timeout, kill, and external stop scenarios, and take ~1-2 minutes.
 
-ECS integration tests drive a real CloudFormation-deployed AWS stack end-to-end: launch, status, logs (CloudWatch), kill, list, hydrate (S3), concurrent runs, and timeout reconciliation. Gated by `HORDE_E2E_ECS=1` in `.env`; set `HORDE_E2E_ECS_KEEP=1` to reuse the bootstrap stack between runs. Full suite runs in ~2 minutes parallel. See `horde docs ecs-integration` for setup and cost notes.
+ECS integration tests drive a real `@horde.io/cdk`-deployed AWS stack end-to-end: launch, status, logs (CloudWatch), kill, list, hydrate (S3), concurrent runs, and timeout reconciliation. Deploy the stack with `make e2e-up`, run the suite with `make e2e-test`, then `make e2e-down` (gated by `HORDE_E2E_CDK=1` in `.env`). See `horde docs ecs-integration` for setup and cost notes.
 
 ## Run Data
 

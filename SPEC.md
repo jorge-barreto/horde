@@ -78,9 +78,9 @@ The horde CLI reads infrastructure config from SSM Parameter Store, then calls E
 The status Lambda:
 - Receives ECS task state change events filtered to the horde cluster
 - Extracts the task ARN and maps it to a run ID via DynamoDB query
-- Updates `status`, `exit_code`, `completed_at`, `total_cost_usd` (reads `run-result.json` from S3 if present), and token counts (`input_tokens`/`output_tokens`/`cache_creation_tokens`/`cache_read_tokens`/`turns`, read from `costs.json` in S3 if present) on terminal states (STOPPED). The exit code is read from the **worker** container (found by name, `horde-worker`), not the first container in the event — so sidecar containers can't be mistaken for the worker. The same by-name selection is applied in the Go provider's lazy reconciliation (`internal/provider/ecs.go`), the third place that derives run status from a container exit code.
+- Updates `status`, `exit_code`, `completed_at`, `total_cost_usd` (reads `run-result.json` from S3 if present), and token counts (`input_tokens`/`output_tokens`/`cache_creation_tokens`/`cache_read_tokens`/`turns`, read from `costs.json` in S3 if present) on terminal states (STOPPED). The exit code is read from the **worker** container (found by name, `horde-worker`), not the first container in the event — so sidecar containers can't be mistaken for the worker. The same by-name selection is applied in the Go provider's lazy reconciliation (`internal/provider/ecs.go`), the other place that derives run status from a container exit code.
 - Records the ECS stop reason (`stopCode`/`stoppedReason` from the event) into the run's `metadata` map as `stop_code`/`stop_reason`. This is diagnostic today and is the signal a future spot auto-resume keys off — a Fargate spot interruption surfaces as `stop_code == "TerminationNotice"`.
-- Is idempotent — CLI-driven updates and Lambda-driven updates converge to the same state. The CDK (`cdk/src/status-lambda/index.ts`) and bootstrap-CloudFormation (Python) implementations are kept in lockstep.
+- Is idempotent — CLI-driven updates and Lambda-driven updates converge to the same state. The status-sync Lambda lives in the CDK package (`cdk/src/status-lambda/index.ts`).
 
 ## CLI Commands
 
@@ -131,7 +131,7 @@ horde launch --workflow implement-ticket PROJ-123
 horde:
 - Resolves repo URL from the local git remote (`git remote get-url origin`)
 - Generates a run ID
-- **Concurrency check (v0.2):** Queries the store for active runs. If the count equals or exceeds `maxConcurrent`, launch is rejected with an error showing current active runs. No queuing — the user decides what to do. The docker provider uses a hard-coded ceiling of 100 (`defaultMaxConcurrentDocker` in `cmd/horde/factory.go`); the aws-ecs provider reads `max_concurrent` from the SSM config (default 20, set by the bootstrap stack).
+- **Concurrency check (v0.2):** Queries the store for active runs. If the count equals or exceeds `maxConcurrent`, launch is rejected with an error showing current active runs. No queuing — the user decides what to do. The docker provider uses a hard-coded ceiling of 100 (`defaultMaxConcurrentDocker` in `cmd/horde/factory.go`); the aws-ecs provider reads `max_concurrent` from the SSM config (default 20, set by the CDK stack).
 - **Duplicate ticket check:** Queries the store for active runs with the same ticket. If found, warns and requires `--force` to proceed.
 - Records the run in the store as `pending` (SQLite for docker, DynamoDB for ECS)
 - Starts the worker container (docker provider) or calls ECS RunTask (ECS provider)

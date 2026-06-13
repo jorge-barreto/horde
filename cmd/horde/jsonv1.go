@@ -74,6 +74,8 @@ type StatusV1 struct {
 	DurationSecs float64           `json:"duration_seconds"`
 	TotalCostUSD *float64          `json:"total_cost_usd,omitempty"`
 	Tokens       *TokensV1         `json:"tokens,omitempty"`
+	Capacity     string            `json:"capacity,omitempty"`
+	ResumeCount  int               `json:"resume_count,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	LaunchedBy   string            `json:"launched_by"`
 	StartedAt    string            `json:"started_at"`
@@ -110,6 +112,8 @@ type ListRunV1 struct {
 	DurationSecs float64           `json:"duration_seconds"`
 	TotalCostUSD *float64          `json:"total_cost_usd,omitempty"`
 	Tokens       *TokensV1         `json:"tokens,omitempty"`
+	Capacity     string            `json:"capacity,omitempty"`
+	ResumeCount  int               `json:"resume_count,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	LaunchedBy   string            `json:"launched_by"`
 	StartedAt    string            `json:"started_at"`
@@ -125,6 +129,8 @@ type ResultsV1 struct {
 	ExitCode          *int      `json:"exit_code,omitempty"`
 	TotalCostUSD      *float64  `json:"total_cost_usd,omitempty"`
 	Tokens            *TokensV1 `json:"tokens,omitempty"`
+	Capacity          string    `json:"capacity,omitempty"`
+	ResumeCount       int       `json:"resume_count,omitempty"`
 	TotalDuration     string    `json:"total_duration,omitempty"`
 	TotalDurationSecs *float64  `json:"total_duration_seconds,omitempty"`
 	Phases            []PhaseV1 `json:"phases,omitempty"`
@@ -162,6 +168,8 @@ func statusToV1(run *store.Run) StatusV1 {
 		DurationSecs: d.Seconds(),
 		TotalCostUSD: run.TotalCostUSD,
 		Tokens:       tokensToV1(run.Tokens),
+		Capacity:     string(run.Capacity),
+		ResumeCount:  run.ResumeCount,
 		Labels:       run.Labels,
 		LaunchedBy:   run.LaunchedBy,
 		StartedAt:    run.StartedAt.Format(time.RFC3339),
@@ -192,6 +200,8 @@ func listToV1(runs []*store.Run) ListV1 {
 			DurationSecs: s.DurationSecs,
 			TotalCostUSD: s.TotalCostUSD,
 			Tokens:       s.Tokens,
+			Capacity:     s.Capacity,
+			ResumeCount:  s.ResumeCount,
 			Labels:       s.Labels,
 			LaunchedBy:   s.LaunchedBy,
 			StartedAt:    s.StartedAt,
@@ -263,6 +273,8 @@ func fullResultsToV1(run *store.Run, result *fullRunResult) ResultsV1 {
 		ExitCode:      run.ExitCode,
 		TotalCostUSD:  result.TotalCostUSD,
 		Tokens:        resultsTokens(run, result),
+		Capacity:      string(run.Capacity),
+		ResumeCount:   run.ResumeCount,
 		TotalDuration: result.TotalDuration,
 		Partial:       false,
 	}
@@ -320,6 +332,8 @@ func partialResultsToV1(run *store.Run) ResultsV1 {
 		ExitCode:     run.ExitCode,
 		TotalCostUSD: run.TotalCostUSD,
 		Tokens:       tokensToV1(run.Tokens),
+		Capacity:     string(run.Capacity),
+		ResumeCount:  run.ResumeCount,
 		Partial:      true,
 	}
 }
@@ -341,10 +355,14 @@ type LaunchV1 struct {
 	// Priority is set only for the "queued" status (the level the run was
 	// parked at). Omitted for launched/capped/duplicate.
 	Priority string `json:"priority,omitempty"`
+	// Capacity echoes the chosen Fargate capacity (spot|on-demand) for a
+	// launched or queued run. Omitted only for runs with no stored capacity
+	// (pre-feature/legacy records) so existing consumers/snapshots are unaffected.
+	Capacity string `json:"capacity,omitempty"`
 }
 
-func launchLaunchedV1(runID, ticket, workflow, branch string) LaunchV1 {
-	return LaunchV1{Status: "launched", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch}
+func launchLaunchedV1(runID, ticket, workflow, branch, capacity string) LaunchV1 {
+	return LaunchV1{Status: "launched", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Capacity: capacity}
 }
 
 func launchCappedV1(ticket, workflow, branch, reason string) LaunchV1 {
@@ -357,8 +375,8 @@ func launchDuplicateV1(ticket, workflow, branch, existingRunID, reason string) L
 
 // launchQueuedV1 reports a launch parked in the server-side backlog
 // (`--enqueue`). Exit 0 — a protocol-level outcome like capped/duplicate.
-func launchQueuedV1(runID, ticket, workflow, branch, priority string) LaunchV1 {
-	return LaunchV1{Status: "queued", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Priority: priority}
+func launchQueuedV1(runID, ticket, workflow, branch, priority, capacity string) LaunchV1 {
+	return LaunchV1{Status: "queued", RunID: &runID, Ticket: ticket, Workflow: workflow, Branch: branch, Priority: priority, Capacity: capacity}
 }
 
 // QueueListItemV1 / QueueListV1 are the `horde queue list --json` contract.

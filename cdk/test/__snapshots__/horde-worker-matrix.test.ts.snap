@@ -405,6 +405,19 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -508,13 +521,14 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
     },
     "HordeDrainEventRule74758369": {
       "Properties": {
-        "Description": "Drain the horde-test queue when a run reaches a terminal state",
+        "Description": "Drain the horde-test queue when a run reaches a terminal state or is re-queued after a Spot interruption",
         "EventBusName": {
           "Ref": "HordeRunEventBus2D36F50D",
         },
         "EventPattern": {
           "detail-type": [
             "run.terminal",
+            "run.requeued",
           ],
           "source": [
             "horde",
@@ -569,7 +583,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "5812ae3462d472a200803b50084ab6e38145d30436b39828824ceefcfb0d012f.zip",
         },
         "Environment": {
           "Variables": {
@@ -1113,7 +1127,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
+          "S3Key": "cf29883092c87e919315a7ff85b947b55f40853020287ae20641d3e4ceb988ab.zip",
         },
         "Environment": {
           "Variables": {
@@ -1123,6 +1137,7 @@ exports[`HordeWorker matrix — default (no vpc, no bucket) matches the saved sn
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },
@@ -1880,6 +1895,19 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -1983,13 +2011,14 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
     },
     "HordeDrainEventRule74758369": {
       "Properties": {
-        "Description": "Drain the horde-test queue when a run reaches a terminal state",
+        "Description": "Drain the horde-test queue when a run reaches a terminal state or is re-queued after a Spot interruption",
         "EventBusName": {
           "Ref": "HordeRunEventBus2D36F50D",
         },
         "EventPattern": {
           "detail-type": [
             "run.terminal",
+            "run.requeued",
           ],
           "source": [
             "horde",
@@ -2044,7 +2073,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "5812ae3462d472a200803b50084ab6e38145d30436b39828824ceefcfb0d012f.zip",
         },
         "Environment": {
           "Variables": {
@@ -2588,7 +2617,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
+          "S3Key": "cf29883092c87e919315a7ff85b947b55f40853020287ae20641d3e4ceb988ab.zip",
         },
         "Environment": {
           "Variables": {
@@ -2598,6 +2627,7 @@ exports[`HordeWorker matrix — provided bucket matches the saved snapshot 1`] =
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },
@@ -3363,6 +3393,19 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -3466,13 +3509,14 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
     },
     "HordeDrainEventRule74758369": {
       "Properties": {
-        "Description": "Drain the horde-test queue when a run reaches a terminal state",
+        "Description": "Drain the horde-test queue when a run reaches a terminal state or is re-queued after a Spot interruption",
         "EventBusName": {
           "Ref": "HordeRunEventBus2D36F50D",
         },
         "EventPattern": {
           "detail-type": [
             "run.terminal",
+            "run.requeued",
           ],
           "source": [
             "horde",
@@ -3527,7 +3571,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "5812ae3462d472a200803b50084ab6e38145d30436b39828824ceefcfb0d012f.zip",
         },
         "Environment": {
           "Variables": {
@@ -4071,7 +4115,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
+          "S3Key": "cf29883092c87e919315a7ff85b947b55f40853020287ae20641d3e4ceb988ab.zip",
         },
         "Environment": {
           "Variables": {
@@ -4081,6 +4125,7 @@ exports[`HordeWorker matrix — provided vpc and bucket matches the saved snapsh
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },
@@ -5210,6 +5255,19 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       },
       "Type": "AWS::IAM::ManagedPolicy",
     },
+    "HordeCluster0369E2AA": {
+      "Properties": {
+        "CapacityProviders": [
+          "FARGATE",
+          "FARGATE_SPOT",
+        ],
+        "Cluster": {
+          "Ref": "HordeClusterA7629518",
+        },
+        "DefaultCapacityProviderStrategy": [],
+      },
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+    },
     "HordeClusterA7629518": {
       "Properties": {
         "ClusterName": "horde-test",
@@ -5313,13 +5371,14 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
     },
     "HordeDrainEventRule74758369": {
       "Properties": {
-        "Description": "Drain the horde-test queue when a run reaches a terminal state",
+        "Description": "Drain the horde-test queue when a run reaches a terminal state or is re-queued after a Spot interruption",
         "EventBusName": {
           "Ref": "HordeRunEventBus2D36F50D",
         },
         "EventPattern": {
           "detail-type": [
             "run.terminal",
+            "run.requeued",
           ],
           "source": [
             "horde",
@@ -5374,7 +5433,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "c4e9cf36cccb852b577a25f37bfce5f19431acd3453208885bc6f9f18ffe9f6b.zip",
+          "S3Key": "5812ae3462d472a200803b50084ab6e38145d30436b39828824ceefcfb0d012f.zip",
         },
         "Environment": {
           "Variables": {
@@ -5918,7 +5977,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
-          "S3Key": "63833c7a10d9a42d920ebc729ccbe16c26eef17f15f26fd50e436bb8096b4438.zip",
+          "S3Key": "cf29883092c87e919315a7ff85b947b55f40853020287ae20641d3e4ceb988ab.zip",
         },
         "Environment": {
           "Variables": {
@@ -5928,6 +5987,7 @@ exports[`HordeWorker matrix — provided vpc matches the saved snapshot 1`] = `
             "EVENT_BUS_NAME": {
               "Ref": "HordeRunEventBus2D36F50D",
             },
+            "MAX_RESUMES": "5",
             "RUNS_TABLE": {
               "Ref": "HordeRunsTableAC562C05",
             },

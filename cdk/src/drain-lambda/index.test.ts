@@ -53,7 +53,7 @@ function terminalEvent(detail: TerminalDetail): EventBridgeEvent<"run.terminal",
 }
 
 // A queued run item as returned from the by-repo GSI query.
-function queuedItem(id: string, priority: string, enqueuedAt: string) {
+function queuedItem(id: string, priority: string, enqueuedAt: string, capacity = "") {
   return {
     id: { S: id },
     repo: { S: "github.com/o/r" },
@@ -63,6 +63,7 @@ function queuedItem(id: string, priority: string, enqueuedAt: string) {
     status: { S: "queued" },
     priority: { S: priority },
     enqueued_at: { S: enqueuedAt },
+    ...(capacity ? { capacity: { S: capacity } } : {}),
   };
 }
 
@@ -110,6 +111,11 @@ it("claims the highest-priority oldest queued run, RunTasks it, and emits run.st
   expect(run).toHaveLength(1);
   expect(run[0].args[0].input.cluster).toBe("arn:cluster");
   expect(run[0].args[0].input.overrides?.containerOverrides?.[0].name).toBe("horde-worker");
+  // Default (no capacity field) uses FARGATE_SPOT, not launchType.
+  expect((run[0].args[0].input as any).launchType).toBeUndefined();
+  expect((run[0].args[0].input as any).capacityProviderStrategy).toEqual([
+    { capacityProvider: "FARGATE_SPOT", weight: 1 },
+  ]);
 
   const emitted = ebMock.commandCalls(PutEventsCommand);
   expect(emitted).toHaveLength(1);
@@ -152,4 +158,52 @@ it("tries the next candidate when the conditional claim loses a race", async () 
   // a failed, b claimed → RunTask for b.
   const run = ecsMock.commandCalls(RunTaskCommand);
   expect(run).toHaveLength(1);
+});
+
+it("uses FARGATE_SPOT strategy for a run with empty capacity", async () => {
+  setupQueries({ active: 0, queued: [queuedItem("q", "med", "2026-06-08T09:00:00Z", "")] });
+  ddbMock.on(UpdateItemCommand).resolves({});
+  ecsMock.on(RunTaskCommand).resolves({ tasks: [{ taskArn: "arn:task/q" }] });
+  ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0 });
+
+  await handler(terminalEvent({ version: 1, run_id: "done", repo: "github.com/o/r", status: "success" }), ctx, () => {});
+
+  const run = ecsMock.commandCalls(RunTaskCommand);
+  expect(run).toHaveLength(1);
+  expect((run[0].args[0].input as any).launchType).toBeUndefined();
+  expect((run[0].args[0].input as any).capacityProviderStrategy).toEqual([
+    { capacityProvider: "FARGATE_SPOT", weight: 1 },
+  ]);
+});
+
+it("uses FARGATE_SPOT strategy for a run with capacity=spot", async () => {
+  setupQueries({ active: 0, queued: [queuedItem("q", "med", "2026-06-08T09:00:00Z", "spot")] });
+  ddbMock.on(UpdateItemCommand).resolves({});
+  ecsMock.on(RunTaskCommand).resolves({ tasks: [{ taskArn: "arn:task/q" }] });
+  ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0 });
+
+  await handler(terminalEvent({ version: 1, run_id: "done", repo: "github.com/o/r", status: "success" }), ctx, () => {});
+
+  const run = ecsMock.commandCalls(RunTaskCommand);
+  expect(run).toHaveLength(1);
+  expect((run[0].args[0].input as any).launchType).toBeUndefined();
+  expect((run[0].args[0].input as any).capacityProviderStrategy).toEqual([
+    { capacityProvider: "FARGATE_SPOT", weight: 1 },
+  ]);
+});
+
+it("uses FARGATE strategy for a run with capacity=on-demand", async () => {
+  setupQueries({ active: 0, queued: [queuedItem("q", "med", "2026-06-08T09:00:00Z", "on-demand")] });
+  ddbMock.on(UpdateItemCommand).resolves({});
+  ecsMock.on(RunTaskCommand).resolves({ tasks: [{ taskArn: "arn:task/q" }] });
+  ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0 });
+
+  await handler(terminalEvent({ version: 1, run_id: "done", repo: "github.com/o/r", status: "success" }), ctx, () => {});
+
+  const run = ecsMock.commandCalls(RunTaskCommand);
+  expect(run).toHaveLength(1);
+  expect((run[0].args[0].input as any).launchType).toBeUndefined();
+  expect((run[0].args[0].input as any).capacityProviderStrategy).toEqual([
+    { capacityProvider: "FARGATE", weight: 1 },
+  ]);
 });

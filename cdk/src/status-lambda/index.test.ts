@@ -74,6 +74,7 @@ beforeEach(() => {
   s3Mock.reset();
   ebMock.reset();
   delete process.env.EVENT_BUS_NAME;
+  delete process.env.MAX_RESUMES;
 });
 
 describe("status-lambda handler (5fh.16)", () => {
@@ -133,7 +134,7 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(input.ExpressionAttributeValues?.[":ec"]).toEqual({ N: "0" });
     expect(input.ConditionExpression).toMatch(/attribute_not_exists\(#s\)/);
     expect(input.ConditionExpression).toMatch(
-      /NOT \(#s IN \(:success, :failed, :killed, :timed_out, :rate_limited\)\)/,
+      /NOT \(#s IN \(:success, :failed, :killed, :timed_out, :rate_limited, :cancelled\)\)/,
     );
   });
 
@@ -204,11 +205,13 @@ describe("status-lambda handler (5fh.16)", () => {
     );
 
     // Three updates, in order: (0) seed metadata with if_not_exists,
-    // (1) nested stop_code/stop_reason writes, (2) the guarded status update.
+    // (1) nested stop_code/stop_reason writes, (2) the re-queue update.
     // The seed and nested writes MUST be separate calls — DynamoDB rejects
     // referencing `metadata` and `metadata.x` in one expression. The stop
-    // reason is written BEFORE the status update so it lands even when the
-    // status guard skips (already-terminal).
+    // reason is written BEFORE the re-queue/status update so it lands even
+    // when the re-queue guard skips (already-terminal).
+    // NOTE: a TerminationNotice with resume_count=0 (item has no resume_count)
+    // now triggers the auto-resume re-queue branch, not the terminal write.
     const calls = ddbMock.commandCalls(UpdateItemCommand);
     expect(calls).toHaveLength(3);
 
@@ -229,13 +232,15 @@ describe("status-lambda handler (5fh.16)", () => {
       S: "Your Spot Task was interrupted",
     });
 
-    // The status update comes last and carries the terminal guard.
-    const statusUpd = calls[2].args[0].input;
-    expect(statusUpd.UpdateExpression).toContain("#s = :s");
-    expect(statusUpd.ConditionExpression).toContain("attribute_not_exists(#s)");
+    // The re-queue update comes last: sets status=queued, priority=highest,
+    // increments resume_count, and carries the not-already-terminal guard.
+    const requeue = calls[2].args[0].input;
+    expect(requeue.UpdateExpression).toContain(":queued");
+    expect(requeue.ConditionExpression).toContain("attribute_not_exists(#s)");
   });
 
   it("records the stop reason even when the status update is already terminal", async () => {
+    process.env.MAX_RESUMES = "5";
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-killed" } }] });
     // First two updates (stop-reason seed + nested) succeed; the third (status)
     // hits the terminal guard and is rejected — as it would for a synchronous
@@ -592,5 +597,130 @@ describe("status-lambda handler (5fh.16)", () => {
     );
 
     expect(ebMock.commandCalls(PutEventsCommand)).toHaveLength(0);
+  });
+
+  it("re-queues a Spot-interrupted run under the resume budget", async () => {
+    process.env.MAX_RESUMES = "5";
+    ddbMock.on(QueryCommand).resolves({
+      Items: [{ id: { S: "run-spot" }, repo: { S: "r" }, resume_count: { N: "1" } }],
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    const r = await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/spot",
+        stopCode: "TerminationNotice",
+        stoppedReason: "Your Spot Task was interrupted",
+        containers: [{ name: "horde-worker", exitCode: 5 }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    const calls = ddbMock.commandCalls(UpdateItemCommand);
+    const requeue = calls[calls.length - 1].args[0].input;
+    expect(requeue.UpdateExpression).toContain(":queued");
+    expect(requeue.ConditionExpression).toContain("attribute_not_exists(#s)");
+    expect(requeue.ExpressionAttributeValues?.[":queued"]).toEqual({ S: "queued" });
+    expect(requeue.ExpressionAttributeValues?.[":rc"]).toEqual({ N: "2" });
+    // started_at is the by-repo GSI range key — it must be RESET to the zero-time
+    // sentinel, NOT removed, or DynamoDB drops the re-queued run from the index
+    // the drain queries (silently losing the run). instance_id is the only REMOVE.
+    expect(requeue.UpdateExpression).toContain("started_at = :zerotime");
+    expect(requeue.UpdateExpression).toMatch(/REMOVE instance_id\b/);
+    expect(requeue.UpdateExpression).not.toMatch(/REMOVE[^]*started_at/);
+    expect(requeue.ExpressionAttributeValues?.[":zerotime"]).toEqual({
+      S: "0001-01-01T00:00:00Z",
+    });
+    expect(r).toMatchObject({ requeued: "run-spot" });
+  });
+
+  it("emits run.requeued after re-queuing a Spot-interrupted run when EVENT_BUS_NAME is set", async () => {
+    process.env.MAX_RESUMES = "5";
+    process.env.EVENT_BUS_NAME = "bus";
+    ddbMock.on(QueryCommand).resolves({
+      Items: [{ id: { S: "run-spot-emit" }, repo: { S: "github.com/o/r" }, resume_count: { N: "1" } }],
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+    ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0 });
+
+    const r = await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/spot-emit",
+        stopCode: "TerminationNotice",
+        stoppedReason: "Your Spot Task was interrupted",
+        containers: [{ name: "horde-worker", exitCode: 5 }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    expect(r).toMatchObject({ requeued: "run-spot-emit" });
+
+    const ebCalls = ebMock.commandCalls(PutEventsCommand);
+    expect(ebCalls).toHaveLength(1);
+    const entry = ebCalls[0].args[0].input.Entries?.[0];
+    expect(entry?.Source).toBe("horde");
+    expect(entry?.DetailType).toBe("run.requeued");
+    expect(entry?.EventBusName).toBe("bus");
+    const detail = JSON.parse(entry?.Detail ?? "{}");
+    expect(detail.version).toBe(1);
+    expect(detail.run_id).toBe("run-spot-emit");
+    expect(detail.repo).toBe("github.com/o/r");
+    expect(detail.resume_count).toBe(2);
+    expect(detail.status).toBe("queued");
+  });
+
+  it("does NOT re-queue past the resume budget (lands terminal instead)", async () => {
+    process.env.MAX_RESUMES = "5";
+    ddbMock.on(QueryCommand).resolves({
+      Items: [{ id: { S: "run-exhausted" }, repo: { S: "r" }, resume_count: { N: "5" } }],
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/spot",
+        stopCode: "TerminationNotice",
+        containers: [{ name: "horde-worker", exitCode: 5 }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    const calls = ddbMock.commandCalls(UpdateItemCommand);
+    const last = calls[calls.length - 1].args[0].input;
+    expect(last.ExpressionAttributeValues?.[":s"]).toEqual({ S: "killed" });
+    expect(last.UpdateExpression).not.toContain(":queued");
+  });
+
+  it("does NOT re-queue a UserInitiated stop (horde kill)", async () => {
+    process.env.MAX_RESUMES = "5";
+    ddbMock.on(QueryCommand).resolves({
+      Items: [{ id: { S: "run-killed" }, repo: { S: "r" }, resume_count: { N: "0" } }],
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
+
+    await handler(
+      event({
+        lastStatus: "STOPPED",
+        taskArn: "arn:task/killed",
+        stopCode: "UserInitiated",
+        containers: [{ name: "horde-worker", exitCode: 5 }],
+      }),
+      ctx,
+      () => {},
+    );
+
+    const calls = ddbMock.commandCalls(UpdateItemCommand);
+    const last = calls[calls.length - 1].args[0].input;
+    expect(last.UpdateExpression).not.toContain(":queued");
   });
 });

@@ -536,6 +536,27 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("CreateGetRun/CapacityResumeCount", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		r := conformanceRun("cap-1", "github.com/org/capr", "T-1", StatusRunning)
+		r.Capacity = CapacityOnDemand
+		r.ResumeCount = 2
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetRun(ctx, "cap-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Capacity != CapacityOnDemand {
+			t.Errorf("Capacity = %q, want on-demand", got.Capacity)
+		}
+		if got.ResumeCount != 2 {
+			t.Errorf("ResumeCount = %d, want 2", got.ResumeCount)
+		}
+	})
+
 	t.Run("UpdateRun/SingleField", func(t *testing.T) {
 		t.Parallel()
 		s := newStore(t)
@@ -802,6 +823,31 @@ func RunStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 		}
 		if !got.TimeoutAt.Equal(newTimeout) {
 			t.Errorf("TimeoutAt: got %v, want %v", got.TimeoutAt, newTimeout)
+		}
+	})
+
+	t.Run("UpdateRun/CapacityResumeCount", func(t *testing.T) {
+		t.Parallel()
+		s := newStore(t)
+		r := conformanceRun("cap-2", "github.com/org/capr2", "T-2", StatusQueued)
+		r.Capacity = CapacitySpot
+		if err := s.CreateRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		newCount := 1
+		newCap := CapacityOnDemand
+		if err := s.UpdateRun(ctx, "cap-2", &RunUpdate{ResumeCount: &newCount, Capacity: &newCap}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetRun(ctx, "cap-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ResumeCount != 1 {
+			t.Errorf("ResumeCount = %d, want 1", got.ResumeCount)
+		}
+		if got.Capacity != CapacityOnDemand {
+			t.Errorf("Capacity = %q, want on-demand", got.Capacity)
 		}
 	})
 

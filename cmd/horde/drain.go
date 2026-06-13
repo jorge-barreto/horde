@@ -203,6 +203,7 @@ func launchQueuedRun(lc lazyDrainComponents) func(context.Context, *store.Run) e
 			Mounts:         projCfg.ResolveMounts(lc.resolver.EnvFileDir()),
 			HomeDir:        lc.homeDir,
 			SecretEnvRemap: secretRemap,
+			Capacity:       string(run.Capacity),
 		})
 		if err != nil {
 			return err // drainOnce marks the run failed (not re-queued)

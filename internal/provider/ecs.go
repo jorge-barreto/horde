@@ -211,11 +211,17 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 		}
 	}
 
+	capProvider := "FARGATE_SPOT"
+	if opts.Capacity == string(store.CapacityOnDemand) {
+		capProvider = "FARGATE"
+	}
 	input := &ecs.RunTaskInput{
 		TaskDefinition: aws.String(p.config.TaskDefinitionARN),
 		Cluster:        aws.String(p.config.ClusterARN),
-		LaunchType:     ecstypes.LaunchTypeFargate,
-		Count:          aws.Int32(1),
+		CapacityProviderStrategy: []ecstypes.CapacityProviderStrategyItem{
+			{CapacityProvider: aws.String(capProvider), Weight: 1},
+		},
+		Count: aws.Int32(1),
 		NetworkConfiguration: &ecstypes.NetworkConfiguration{
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
 				Subnets:        p.config.Subnets,

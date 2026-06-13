@@ -221,8 +221,38 @@ func TestResultsTokens(t *testing.T) {
 
 func ptrInt(i int) *int { return &i }
 
+func TestStatusV1IncludesCapacity(t *testing.T) {
+	t.Parallel()
+	r := &store.Run{ID: "j1", Capacity: store.CapacityOnDemand, ResumeCount: 3,
+		StartedAt: time.Now()}
+	v := statusToV1(r)
+	if v.Capacity != "on-demand" {
+		t.Errorf("Capacity = %q, want on-demand", v.Capacity)
+	}
+	if v.ResumeCount != 3 {
+		t.Errorf("ResumeCount = %d, want 3", v.ResumeCount)
+	}
+}
+
+func TestStatusV1OmitsCapacityAndResumeCountWhenDefault(t *testing.T) {
+	t.Parallel()
+	r := &store.Run{ID: "j2", StartedAt: time.Now()} // Capacity "", ResumeCount 0
+	v := statusToV1(r)
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, "capacity") {
+		t.Errorf("capacity key should be omitted for default capacity; got %s", s)
+	}
+	if strings.Contains(s, "resume_count") {
+		t.Errorf("resume_count key should be omitted for zero; got %s", s)
+	}
+}
+
 func TestLaunchQueuedV1Shape(t *testing.T) {
-	v := launchQueuedV1("run123", "T-1", "impl", "main", "high")
+	v := launchQueuedV1("run123", "T-1", "impl", "main", "high", "spot")
 	if v.Status != "queued" {
 		t.Errorf("status = %q, want queued", v.Status)
 	}
@@ -231,5 +261,28 @@ func TestLaunchQueuedV1Shape(t *testing.T) {
 	}
 	if v.Priority != "high" {
 		t.Errorf("priority = %q, want high", v.Priority)
+	}
+	if v.Capacity != "spot" {
+		t.Errorf("capacity = %q, want spot", v.Capacity)
+	}
+}
+
+func TestLaunchLaunchedV1EchoesCapacity(t *testing.T) {
+	v := launchLaunchedV1("run123", "T-1", "impl", "main", "on-demand")
+	if v.Status != "launched" {
+		t.Errorf("status = %q, want launched", v.Status)
+	}
+	if v.Capacity != "on-demand" {
+		t.Errorf("capacity = %q, want on-demand", v.Capacity)
+	}
+
+	// Empty capacity (e.g. docker) is omitted from the JSON so existing
+	// consumers/snapshots are unaffected.
+	b, err := json.Marshal(launchLaunchedV1("run123", "T-1", "impl", "main", ""))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "capacity") {
+		t.Errorf("empty capacity should be omitted, got %s", b)
 	}
 }

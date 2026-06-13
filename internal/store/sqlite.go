@@ -27,7 +27,7 @@ const runColumns = `id, repo, ticket, branch, workflow, provider,
 	instance_id, metadata, labels, status, exit_code, launched_by,
 	started_at, completed_at, timeout_at, total_cost_usd,
 	input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns,
-	enqueued_at, priority`
+	enqueued_at, priority, capacity, resume_count`
 
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
@@ -75,7 +75,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		cache_read_tokens     INTEGER,
 		turns                 INTEGER,
 		enqueued_at    TEXT,
-		priority       TEXT NOT NULL DEFAULT ''
+		priority       TEXT NOT NULL DEFAULT '',
+		capacity       TEXT NOT NULL DEFAULT '',
+		resume_count   INTEGER NOT NULL DEFAULT 0
 	);`
 
 	if _, err := db.Exec(ddl); err != nil {
@@ -132,6 +134,8 @@ func ensureColumns(db *sql.DB) error {
 		{"turns", "INTEGER"},
 		{"enqueued_at", "TEXT"},
 		{"priority", "TEXT NOT NULL DEFAULT ''"},
+		{"capacity", "TEXT NOT NULL DEFAULT ''"},
+		{"resume_count", "INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, col := range additive {
 		if existing[col.name] {
@@ -199,8 +203,8 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 			instance_id, metadata, labels, status, exit_code, launched_by,
 			started_at, completed_at, timeout_at, total_cost_usd,
 			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, turns,
-			enqueued_at, priority
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			enqueued_at, priority, capacity, resume_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID,
 		run.Repo,
 		run.Ticket,
@@ -224,6 +228,8 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 		turns,
 		enqueuedAt,
 		string(run.Priority),
+		string(run.Capacity),
+		run.ResumeCount,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting run: %w", err)
@@ -261,6 +267,8 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, turns sql.NullInt64
 	var enqueuedAt sql.NullString
 	var priority string
+	var capacity string
+	var resumeCount sql.NullInt64
 
 	if err := scanner.Scan(
 		&run.ID,
@@ -286,12 +294,18 @@ func (s *SQLiteStore) scanRun(scanner interface{ Scan(dest ...any) error }) (*Ru
 		&turns,
 		&enqueuedAt,
 		&priority,
+		&capacity,
+		&resumeCount,
 	); err != nil {
 		return nil, fmt.Errorf("scanning run: %w", err)
 	}
 
 	run.Status = Status(status)
 	run.Priority = Priority(priority)
+	run.Capacity = Capacity(capacity)
+	if resumeCount.Valid {
+		run.ResumeCount = int(resumeCount.Int64)
+	}
 
 	if exitCode.Valid {
 		v := int(exitCode.Int64)
@@ -409,6 +423,14 @@ func (s *SQLiteStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 	if update.Priority != nil {
 		setClauses = append(setClauses, "priority = ?")
 		args = append(args, string(*update.Priority))
+	}
+	if update.Capacity != nil {
+		setClauses = append(setClauses, "capacity = ?")
+		args = append(args, string(*update.Capacity))
+	}
+	if update.ResumeCount != nil {
+		setClauses = append(setClauses, "resume_count = ?")
+		args = append(args, *update.ResumeCount)
 	}
 
 	if len(setClauses) == 0 {

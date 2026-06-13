@@ -70,11 +70,12 @@ type Result =
       readonly runId: string;
       readonly status: string;
       readonly exitCode: number | null;
-    };
+    }
+  | { readonly requeued: string };
 
 async function findRun(
   taskArn: string,
-): Promise<{ runId: string; repo: string; labels: Record<string, string> } | null> {
+): Promise<{ runId: string; repo: string; labels: Record<string, string>; resumeCount: number } | null> {
   const out = await ddb.send(
     new QueryCommand({
       TableName: RUNS_TABLE,
@@ -103,7 +104,9 @@ async function findRun(
       if (v && "S" in v && v.S !== undefined) labels[k] = v.S;
     }
   }
-  return { runId, repo, labels };
+  const rcAttr = items[0].resume_count;
+  const resumeCount = rcAttr && "N" in rcAttr ? Number(rcAttr.N ?? "0") : 0;
+  return { runId, repo, labels, resumeCount };
 }
 
 async function fetchTotalCost(runId: string): Promise<number | null> {
@@ -231,7 +234,7 @@ export const handler: Handler<
     console.log("status-lambda: skip, task not managed by horde", { taskArn });
     return { skipped: "task not managed by horde" };
   }
-  const { runId, repo, labels } = found;
+  const { runId, repo, labels, resumeCount } = found;
 
   // Status is the WORKER container's exit code, not the task's. With sidecars
   // in the task def the event's `containers` order is not guaranteed, so find
@@ -260,6 +263,7 @@ export const handler: Handler<
     ":killed": { S: "killed" },
     ":timed_out": { S: "timed_out" },
     ":rate_limited": { S: "rate_limited" },
+    ":cancelled": { S: "cancelled" },
   };
   const setExprs: string[] = ["#s = :s", "#ca = :ca"];
   if (exitCode !== null) {
@@ -327,6 +331,94 @@ export const handler: Handler<
     );
   }
 
+  // Spot auto-resume: a TerminationNotice means AWS reclaimed the task, not a
+  // failure. If the run is under its resume budget, re-queue it (status=queued,
+  // top priority, resume_count++) so the drain re-launches it with the same run
+  // ID — workspace + session already synced to S3. Conditional on
+  // not-already-terminal so a racing `horde kill` (UserInitiated, sets killed
+  // synchronously) wins. UserInitiated never reaches this branch. At the cap we
+  // fall through to the normal terminal write below. CDK-only (the Python
+  // lambda has no queue to drain).
+  const maxResumes = Number(process.env.MAX_RESUMES ?? "5");
+  if (detail.stopCode === "TerminationNotice" && resumeCount < maxResumes) {
+    try {
+      // REMOVE instance_id de-indexes the dead task ARN from the by-instance
+      // GSI (sparse) so late events for the dead task can't match. started_at is
+      // RESET to the zero-time sentinel — NOT removed — because it is the by-repo
+      // GSI RANGE key: DynamoDB drops any item missing a GSI key attribute from
+      // that index, and both drainers find queued runs ONLY via the by-repo GSI,
+      // so removing started_at would silently lose the run. The drain re-sets it
+      // to the real launch time at claim. completed_at/exit_code are intentionally
+      // NOT touched: the re-queue path returns before the terminal write that
+      // would set them, so they're absent on a resuming run — nothing stale to clear.
+      await ddb.send(
+        new UpdateItemCommand({
+          TableName: RUNS_TABLE,
+          Key: { id: { S: runId } },
+          UpdateExpression:
+            "SET #s = :queued, #prio = :highest, resume_count = :rc, started_at = :zerotime REMOVE instance_id",
+          ConditionExpression:
+            "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited, :cancelled))",
+          ExpressionAttributeNames: { "#s": "status", "#prio": "priority" },
+          ExpressionAttributeValues: {
+            ":queued": { S: "queued" },
+            ":highest": { S: "highest" },
+            ":rc": { N: String(resumeCount + 1) },
+            ":zerotime": { S: "0001-01-01T00:00:00Z" },
+            ":success": { S: "success" },
+            ":failed": { S: "failed" },
+            ":killed": { S: "killed" },
+            ":timed_out": { S: "timed_out" },
+            ":rate_limited": { S: "rate_limited" },
+            ":cancelled": { S: "cancelled" },
+          },
+        }),
+      );
+      console.log("status-lambda: re-queued Spot-interrupted run", {
+        runId,
+        resumeCount: resumeCount + 1,
+      });
+      // Emit run.requeued (NOT run.terminal — a re-queued run is a continuation,
+      // and run.terminal is a public contract external consumers rely on). The
+      // drain rule subscribes to run.requeued too; the Detail carries `repo` so
+      // the drain can find this repo's backlog. Best-effort, after the
+      // authoritative re-queue write — a failed PutEvents never reverses it.
+      const eventBusName = process.env.EVENT_BUS_NAME ?? "";
+      if (eventBusName) {
+        try {
+          await eb.send(
+            new PutEventsCommand({
+              Entries: [
+                {
+                  EventBusName: eventBusName,
+                  Source: "horde",
+                  DetailType: "run.requeued",
+                  Detail: JSON.stringify({
+                    version: 1,
+                    run_id: runId,
+                    repo,
+                    status: "queued",
+                    resume_count: resumeCount + 1,
+                    stop_code: detail.stopCode ?? "",
+                  }),
+                },
+              ],
+            }),
+          );
+        } catch (err) {
+          console.error("status-lambda: emit run.requeued failed (non-fatal)", { runId, err });
+        }
+      }
+      return { requeued: runId };
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        console.log("status-lambda: run already terminal, not re-queuing (kill race)", { runId });
+        return { skipped: "already terminal", runId };
+      }
+      throw err;
+    }
+  }
+
   // Status update, guarded so a duplicate/late event can't overwrite a
   // run that already reached a terminal state.
   try {
@@ -336,7 +428,7 @@ export const handler: Handler<
         Key: { id: { S: runId } },
         UpdateExpression: "SET " + setExprs.join(", "),
         ConditionExpression:
-          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited))",
+          "attribute_not_exists(#s) OR NOT (#s IN (:success, :failed, :killed, :timed_out, :rate_limited, :cancelled))",
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
       }),

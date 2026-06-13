@@ -134,6 +134,11 @@ Example `horde status --json` output:
 }
 ```
 
+On AWS, runs use Fargate Spot by default for the cost saving and resume
+automatically if Spot capacity is reclaimed (CDK deployments). Pin a run to
+guaranteed capacity with `horde launch <ticket> --capacity on-demand`. See
+`horde docs spot`.
+
 The `tokens` object (also on `horde list --json` per-run and `horde results --json`) reports per-run token usage; it is omitted when horde has no token data yet. `horde list --json` sums it into `summary.tokens`, so an orchestrator can derive a token burn rate over any window from one query. Docker reports tokens live during a run; ECS reports them at finalize.
 
 ### Programmatic launches (`--json`)

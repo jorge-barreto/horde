@@ -157,16 +157,16 @@ export class HordeWorker extends Construct {
 
   /**
    * Custom EventBridge bus carrying horde run-lifecycle events (run.started /
-   * run.terminal / run.cost-threshold-exceeded). The drain Lambda subscribes;
-   * external consumers (notifications, your own automation) can add their own
-   * rules. See `horde docs events`.
+   * run.terminal / run.requeued / run.cost-threshold-exceeded). The drain Lambda
+   * subscribes; external consumers (notifications, your own automation) can add
+   * their own rules. See `horde docs events`.
    */
   public readonly eventBus: events.EventBus;
 
-  /** Lambda that drains the queue on run.terminal (capacity + spend gated). */
+  /** Lambda that drains the queue on run.terminal / run.requeued (capacity + spend gated). */
   public readonly drainLambda: lambda.Function;
 
-  /** EventBridge rule routing run.terminal events to `drainLambda`. */
+  /** EventBridge rule routing run.terminal + run.requeued events to `drainLambda`. */
   public readonly drainEventRule: events.Rule;
 
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {
@@ -208,6 +208,7 @@ export class HordeWorker extends Construct {
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc: this.vpc,
       clusterName: `horde-${slug}`,
+      enableFargateCapacityProviders: true,
     });
     cdk.Tags.of(this.cluster).add("Name", `horde-${slug}-cluster`);
 
@@ -529,6 +530,7 @@ export class HordeWorker extends Construct {
         RUNS_TABLE: this.runsTable.tableName,
         ARTIFACTS_BUCKET: this.artifactsBucket.bucketName,
         EVENT_BUS_NAME: this.eventBus.eventBusName,
+        MAX_RESUMES: String(props.maxSpotResumes ?? 5),
       },
       logGroup: new logs.LogGroup(this, "StatusLambdaLogGroup", {
         logGroupName: `/aws/lambda/horde-${slug}-status-updater`,
@@ -646,11 +648,11 @@ export class HordeWorker extends Construct {
 
     this.drainEventRule = new events.Rule(this, "DrainEventRule", {
       ruleName: `horde-${slug}-drain`,
-      description: `Drain the horde-${slug} queue when a run reaches a terminal state`,
+      description: `Drain the horde-${slug} queue when a run reaches a terminal state or is re-queued after a Spot interruption`,
       eventBus: this.eventBus,
       eventPattern: {
         source: ["horde"],
-        detailType: ["run.terminal"],
+        detailType: ["run.terminal", "run.requeued"],
       },
     });
     this.drainEventRule.addTarget(new targets.LambdaFunction(this.drainLambda));

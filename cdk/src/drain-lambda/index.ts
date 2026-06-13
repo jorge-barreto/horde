@@ -43,6 +43,7 @@ interface QueuedRun {
   workflow: string;
   priority: string;
   enqueuedAt: string; // RFC3339; drain-order tiebreaker (oldest first)
+  capacity: string; // "spot" | "on-demand" | "" (empty => spot)
 }
 
 const PRIORITY_ORDINAL: Record<string, number> = {
@@ -110,6 +111,7 @@ async function listQueued(repo: string): Promise<QueuedRun[]> {
         workflow: s(item.workflow),
         priority: s(item.priority),
         enqueuedAt: s(item.enqueued_at),
+        capacity: s(item.capacity),
       });
     }
     startKey = out.LastEvaluatedKey as Record<string, AttributeValue> | undefined;
@@ -164,7 +166,12 @@ function runTaskInput(run: QueuedRun) {
   return {
     taskDefinition: process.env.TASK_DEF_ARN,
     cluster: process.env.CLUSTER_ARN,
-    launchType: "FARGATE" as const,
+    capacityProviderStrategy: [
+      {
+        capacityProvider: run.capacity === "on-demand" ? "FARGATE" : "FARGATE_SPOT",
+        weight: 1,
+      },
+    ],
     count: 1,
     networkConfiguration: {
       awsvpcConfiguration: {
@@ -213,7 +220,7 @@ async function emit(detailType: string, run: QueuedRun, extra: Record<string, un
   }
 }
 
-export const handler: Handler<EventBridgeEvent<"run.terminal", TerminalDetail>, { drained?: string; skipped?: string }> =
+export const handler: Handler<EventBridgeEvent<"run.terminal" | "run.requeued", TerminalDetail>, { drained?: string; skipped?: string }> =
   async (event) => {
     const repo = event.detail?.repo;
     if (!repo) {

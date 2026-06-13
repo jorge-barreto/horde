@@ -272,6 +272,23 @@ func TestLaunch_InvalidLabel(t *testing.T) {
 	}
 }
 
+func TestLaunch_InvalidCapacity(t *testing.T) {
+	setupLaunchEnv(t)
+	ctx := context.Background()
+
+	err := newApp().Run(ctx, []string{"horde", "--provider", "docker", "launch",
+		"--workflow", "implement-ticket",
+		"--capacity", "bogus",
+		"TICKET-CAP"})
+
+	if err == nil {
+		t.Fatal("expected error for invalid capacity, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid capacity") {
+		t.Errorf("error %q does not mention invalid capacity", err.Error())
+	}
+}
+
 func TestLaunch_TimeoutAt_Regression(t *testing.T) {
 	t.Parallel()
 
@@ -5524,6 +5541,70 @@ esac
 	}
 	if v.Ticket != "TICKET-1" {
 		t.Errorf("Ticket = %q, want TICKET-1", v.Ticket)
+	}
+}
+
+// TestRetry_ResetsResumeCount verifies a human-initiated retry grants a fresh
+// resume budget: a run that exhausted its Spot auto-resumes (ResumeCount=5,
+// killed) must come back with ResumeCount=0 after `horde retry`, or the first
+// Spot reclaim would immediately re-kill it (5 < 5 == false).
+func TestRetry_ResetsResumeCount(t *testing.T) {
+	dockerScript := `#!/bin/sh
+case "$1" in
+  image) echo "2099-01-01T00:00:00Z" ;;
+  inspect) echo '{"Running":false,"ExitCode":5,"StartedAt":"2026-01-01T00:00:00Z","FinishedAt":"2026-01-01T00:05:00Z"}' ;;
+  exec) exit 1 ;;
+  cp) exit 0 ;;
+  *) echo retryrcrun01container ;;
+esac
+`
+	env := setupLaunchEnv(t)
+	if err := os.WriteFile(filepath.Join(env.binDir, "docker"), []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("writing fake docker: %v", err)
+	}
+	ctx := context.Background()
+
+	dbPath := filepath.Join(filepath.Dir(env.projectDir), ".horde", "horde.db")
+	st, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("opening store: %v", err)
+	}
+	now := time.Now()
+	completedAt := now.Add(-1 * time.Minute)
+	runID := "retryrcrun01"
+	wsDir := filepath.Join(filepath.Dir(env.projectDir), ".horde", "workspaces", runID)
+	if err := os.MkdirAll(filepath.Join(wsDir, ".git"), 0o755); err != nil {
+		t.Fatalf("creating workspace: %v", err)
+	}
+	if err := st.CreateRun(ctx, &store.Run{
+		ID: runID, Repo: "github.com/test/repo", Ticket: "TICKET-1",
+		Workflow: "implement-ticket", Status: store.StatusKilled, Provider: "docker",
+		LaunchedBy: "someone", StartedAt: now.Add(-10 * time.Minute), CompletedAt: &completedAt,
+		TimeoutAt: now.Add(time.Hour), InstanceID: "oldcontainer", ResumeCount: 5,
+	}); err != nil {
+		t.Fatalf("pre-creating run: %v", err)
+	}
+	st.Close()
+
+	var buf bytes.Buffer
+	app := newApp()
+	setOutputs(app, &buf)
+	runErr := app.Run(ctx, []string{"horde", "--provider", "docker", "retry", runID})
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", runErr, buf.Bytes())
+	}
+
+	st2, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("re-opening store: %v", err)
+	}
+	defer st2.Close()
+	got, err := st2.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("loading run: %v", err)
+	}
+	if got.ResumeCount != 0 {
+		t.Errorf("ResumeCount after retry = %d, want 0", got.ResumeCount)
 	}
 }
 

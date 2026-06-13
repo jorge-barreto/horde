@@ -64,6 +64,12 @@ type LaunchOpts struct {
 	// AWS gives the secret precedence — so main.go warns on that collision.
 	// (issue #22)
 	ExtraEnv map[string]string
+
+	// Capacity selects the Fargate capacity provider for this launch
+	// ("spot" | "on-demand"). Empty defaults to spot. ECS-only; the docker
+	// provider ignores it. Carried across resume/retry so a run stays on the
+	// same kind of capacity.
+	Capacity string
 }
 
 // ValidateRunID rejects empty run IDs and IDs that would enable path

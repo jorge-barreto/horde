@@ -195,7 +195,7 @@ func TestNewSQLiteStore_CorrectColumns(t *testing.T) {
 		"instance_id", "metadata", "labels", "status", "exit_code", "launched_by",
 		"started_at", "completed_at", "timeout_at", "total_cost_usd",
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "turns",
-		"enqueued_at", "priority",
+		"enqueued_at", "priority", "capacity", "resume_count",
 	}
 
 	if len(cols) != len(want) {

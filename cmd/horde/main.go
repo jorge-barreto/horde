@@ -222,6 +222,10 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Name:  "priority",
 				Usage: "Queue priority for --enqueue: lowest|low|med|high|highest (default med). Higher drains first.",
 			},
+			&cli.StringFlag{
+				Name:  "capacity",
+				Usage: "Fargate capacity for this run: spot|on-demand (default spot). on-demand opts out of Spot reclaim. ECS-only; ignored on docker. Carried across retry/resume.",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ticket := cmd.Args().First()
@@ -248,6 +252,10 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 
 			enqueue := cmd.Bool("enqueue")
 			priority, err := store.ParsePriority(cmd.String("priority"))
+			if err != nil {
+				return err
+			}
+			capacity, err := store.ParseCapacity(cmd.String("capacity"))
 			if err != nil {
 				return err
 			}
@@ -381,6 +389,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 					Labels:     labels,
 					LaunchedBy: launchedBy,
 					Priority:   priority,
+					Capacity:   capacity,
 					EnqueuedAt: time.Now(),
 				}
 				if err := st.CreateRun(ctx, qrun); err != nil {
@@ -392,7 +401,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				// corrupt --json, but its own writes go to stderr only.
 				lazyDrainFromContext(ctx, prov, st, resolver, hordeCfg, repo, provName, homeDir, maxConcurrent, newEmitter(awsCfg, hordeCfg))
 				if jsonOut {
-					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority)))
+					return writeJSONTo(cmd.Writer, launchQueuedV1(id, ticket, workflow, branch, string(priority), string(capacity)))
 				}
 				fmt.Printf("%s (queued, priority %s)\n", id, priority)
 				return nil
@@ -409,6 +418,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				Status:     store.StatusPending,
 				Labels:     labels,
 				LaunchedBy: launchedBy,
+				Capacity:   capacity,
 				StartedAt:  now,
 				TimeoutAt:  now.Add(timeout),
 			}
@@ -453,6 +463,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,
 				ExtraEnv:       extraEnv,
+				Capacity:       string(capacity),
 			})
 			if err != nil {
 				failedStatus := store.StatusFailed
@@ -484,7 +495,7 @@ so a caller can branch on status. See 'horde docs json' for the contract.`,
 			}
 
 			if jsonOut {
-				return writeJSONTo(cmd.Writer, launchLaunchedV1(id, ticket, workflow, branch))
+				return writeJSONTo(cmd.Writer, launchLaunchedV1(id, ticket, workflow, branch, string(capacity)))
 			}
 			fmt.Println(id)
 			return nil
@@ -506,6 +517,9 @@ On Docker the preserved on-host workspace is reused in place. On ECS a
 fresh Fargate task is launched with the same run ID: the worker restores
 the agent session (~/.claude) and the full working tree (/workspace,
 including committed and uncommitted changes) from S3, then re-enters orc.
+
+The run's capacity (spot or on-demand) from the original launch is
+preserved — a retry runs on the same kind of Fargate capacity.
 
 By default, --resume is passed to orc so it preserves artifacts and
 resumes any interrupted agent session. Override with explicit orc args:
@@ -618,6 +632,7 @@ resumes any interrupted agent session. Override with explicit orc args:
 				HomeDir:        homeDir,
 				OrcArgs:        orcArgs,
 				SecretEnvRemap: secretRemap,
+				Capacity:       string(run.Capacity),
 			})
 			if err != nil {
 				return fmt.Errorf("relaunching container for retry: %w", err)
@@ -630,13 +645,18 @@ resumes any interrupted agent session. Override with explicit orc args:
 				return fmt.Errorf("updating instance ID: %w", err)
 			}
 
-			// Update run back to running with fresh timeout
+			// Update run back to running with fresh timeout. Reset ResumeCount to
+			// 0: a human-initiated retry is a fresh attempt and must get a fresh
+			// Spot auto-resume budget. Without this, a retried run that had already
+			// exhausted MAX_RESUMES would be re-killed on its first Spot reclaim.
 			runningStatus := store.StatusRunning
 			now := time.Now()
 			timeoutAt := now.Add(timeout)
+			zero := 0
 			if err := st.UpdateRun(ctx, runID, &store.RunUpdate{
-				Status:    &runningStatus,
-				TimeoutAt: &timeoutAt,
+				Status:      &runningStatus,
+				TimeoutAt:   &timeoutAt,
+				ResumeCount: &zero,
 			}); err != nil {
 				return fmt.Errorf("updating run status: %w", err)
 			}

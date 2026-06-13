@@ -56,12 +56,6 @@ var topics = []Topic{
 		Content: topicEnv,
 	},
 	{
-		Name:    "bootstrap",
-		Title:   "AWS Bootstrap",
-		Summary: "Provision AWS infrastructure via CloudFormation (bootstrap init/deploy/destroy)",
-		Content: topicBootstrap,
-	},
-	{
 		Name:    "ecs-integration",
 		Title:   "ECS Integration Tests",
 		Summary: "How to run the end-to-end ECS test suite against a real AWS account",
@@ -227,7 +221,7 @@ secrets (map, optional):
         aws-secret: <NAME>   The AWS Secrets Manager secret name (no
                              ARN) for the ECS provider. Caller is
                              responsible for creating the secret before
-                             running 'horde bootstrap deploy'.
+                             deploying the @horde.io/cdk stack.
 
     Two canonical secrets — CLAUDE_CODE_OAUTH_TOKEN and GIT_TOKEN —
     are auto-seeded with their default sources, so you do not need to
@@ -248,10 +242,10 @@ secrets (map, optional):
     container.
 
     ECS note: extra aws-secret entries are baked into the task
-    definition by 'horde bootstrap init' / 'horde bootstrap deploy';
-    redeploy the stack after editing this list. Fargate caps secret
-    references per task definition at roughly 16 — practical projects
-    will not hit this, but mention it for transparency.
+    definition by the @horde.io/cdk stack; redeploy the stack after
+    editing this list. Fargate caps secret references per task definition
+    at roughly 16 — practical projects will not hit this, but mention it
+    for transparency.
 
     Example:
 
@@ -481,8 +475,7 @@ What it uses:
       into the run's metadata
     - Secrets Manager for token injection
 
-Stand up the stack with 'horde bootstrap' (CloudFormation) or the
-@horde.io/cdk construct — see 'horde docs bootstrap' and 'horde docs cdk'.
+Stand up the stack with the @horde.io/cdk construct — see 'horde docs cdk'.
 
 Recoverable runs
 ----------------
@@ -945,106 +938,11 @@ If you installed via Homebrew:
 available. Set HORDE_NO_UPDATE_CHECK=1 to disable that check.
 `
 
-const topicBootstrap = `AWS Bootstrap
-=============
-
-For projects that don't already have CDK or other IaC, horde ships a
-self-contained CloudFormation path that provisions every AWS resource
-needed to run workflows on ECS Fargate: VPC, ECS cluster, DynamoDB table,
-S3 artifacts bucket, ECR repository, Secrets Manager secrets, IAM roles,
-a CloudWatch log group, an SSM config parameter, and an EventBridge rule
-plus inline Lambda that keeps run status in sync.
-
-Workflow
-
-  horde bootstrap init       # generates .horde/cloudformation.yaml
-  horde bootstrap deploy     # creates or updates the CloudFormation stack
-  horde push                 # tags and pushes horde-worker:latest to ECR
-  horde launch --provider aws-ecs --workflow implement-ticket TICKET-123
-  horde bootstrap destroy    # tears everything down
-
-Step 1 — horde bootstrap init
-
-Derives a project slug from the current git remote (e.g.
-github.com/jorge-barreto/horde → jorge-barreto-horde), renders the
-embedded CloudFormation template with that slug, and writes it to
-.horde/cloudformation.yaml. Prints a summary of resources. Refuses to
-overwrite an existing file unless --regenerate is passed.
-
-The generated template is inspectable and hand-editable. Commit it to
-version control — secrets are passed as NoEcho CloudFormation parameters
-at deploy time, never baked into the file on disk.
-
-Step 2 — horde bootstrap deploy
-
-Applies .horde/cloudformation.yaml to AWS under the stack name
-horde-<slug>. If the stack does not exist, it is created; otherwise it
-is updated in place. horde polls CloudFormation every 5 seconds and
-streams each new stack event as
-  <timestamp> <LogicalResourceId> <ResourceStatus> <ResourceStatusReason>
-until the stack reaches CREATE_COMPLETE or UPDATE_COMPLETE. Rollback
-and *_FAILED terminal statuses produce an error. If UpdateStack reports
-"No updates are to be performed" (template + parameters match the live
-stack), horde treats it as success.
-
-Deploy needs two secrets, passed as NoEcho CloudFormation parameters
-(ClaudeCodeOauthToken, GitToken). It never logs or echoes them:
-  - Interactive: when stdin is a TTY, horde prompts with hidden input.
-  - Headless / CI: when stdin is not a TTY, horde reads CLAUDE_CODE_OAUTH_TOKEN
-    and GIT_TOKEN from the environment (or from .env in the project root).
-    Missing either is a hard error.
-
-The stack creates IAM roles with fixed names, so deploy passes
-CAPABILITY_NAMED_IAM automatically and tags the stack with horde-slug.
-
-First-time deploys take roughly 15 minutes (the NAT gateway and ECS
-cluster dominate); subsequent updates that only touch in-place resources
-typically finish in 1–3 minutes.
-
-When deploy completes it prints the SSM config parameter path,
-/horde/<slug>/config, which holds the stack's runtime outputs consumed
-by the ECS provider.
-
-Step 3 — horde push
-
-Tags the local horde-worker:latest image with the ECR repository URI
-discovered from the SSM config parameter and pushes it to ECR. horde
-push calls ecr:GetAuthorizationToken via the AWS SDK and pipes the
-decoded password into 'docker login --password-stdin' — there is no
-dependency on the AWS CLI. Requires that horde-worker:latest is built
-locally first (a 'horde launch' under the docker provider, or 'make
-docker-build', produces it); push errors out with guidance if it is
-missing. The image is pushed as <ecr-repo-uri>:latest, and the sha256
-digest parsed from the push output is echoed back for verification.
-
-Step 4 — horde bootstrap destroy
-
-Deletes the horde-<slug> CloudFormation stack and waits for deletion to
-complete. Refuses if pending or running runs exist in DynamoDB (horde
-checks the store first; kill the active runs before destroying). Prompts
-for confirmation — the user must type the full stack name. Pass --force
-to skip the confirmation in scripts.
-
-If the DynamoDB store is unreachable (credentials stale, table deleted
-from a prior partial destroy), destroy warns and proceeds rather than
-blocking on an unreachable dependency.
-
-Naming and cost notes
-
-- All resources are named horde-<slug>-* and will coexist with other
-  CloudFormation stacks from different projects.
-- The stack includes one NAT gateway (~$32/month standalone, plus data
-  transfer). The rest is pay-per-request or per-invocation — near-zero
-  when idle.
-- Private-subnet topology is the default (assign_public_ip=DISABLED).
-  Tasks reach GitHub, Anthropic, and other public APIs through the NAT.
-`
-
 const topicECSIntegration = `ECS Integration Tests
 =====================
 
 The ECS integration suite (test/integration/ecs_*_test.go) runs every
-horde feature end-to-end against a real CloudFormation stack: launch,
+horde feature end-to-end against a real @horde.io/cdk stack: launch,
 status, logs, kill, list, hydrate, retry with session + workspace
 restore from S3, ECS stop-reason capture, concurrent runs, and
 timeout/finalize reconciliation. Each test drives a full Fargate task
@@ -1058,8 +956,7 @@ Prerequisites
 
        AWS_PROFILE=<your-profile>
        AWS_REGION=us-east-1
-       HORDE_E2E_ECS=1
-       HORDE_E2E_ECS_KEEP=1
+       HORDE_E2E_CDK=1
        CLAUDE_CODE_OAUTH_TOKEN=<from 'claude setup-token'>
        GIT_TOKEN=<a GitHub PAT>
 
@@ -1068,53 +965,45 @@ Prerequisites
 
 Gate flags
 
+HORDE_E2E_CDK=1
+    Required to deploy and tear down the CDK stack (make e2e-up / e2e-down).
+    Set in .env locally; never in CI.
+
 HORDE_E2E_ECS=1
-    Required. Without it the ECS tests skip and the test suite runs
-    only docker-backed integration tests.
-
-HORDE_E2E_ECS_KEEP=1
-    Keep the bootstrap stack alive after the test suite exits. Default
-    behavior (unset) destroys the stack at TestMain exit; keeping it
-    cuts the next run's turnaround from ~3 minutes to under 10 seconds.
-    When you're actively iterating, set this.
-
-Running the suite
-
-Parallel (recommended; ~2 minutes wall-clock for 17 tests):
-    go test -count=1 -timeout 30m -run 'TestECS' ./test/integration/ -v
-
-Individual test:
-    go test -count=1 -timeout 10m -run TestECSSmoke ./test/integration/ -v
+    Required to run the ECS tests themselves. Without it the ECS tests
+    skip and the suite runs only docker-backed integration tests. 'make
+    e2e-test' sets it (plus HORDE_E2E_ECS_BACKEND=cdk) for you.
 
 Stack lifecycle
 
-On each 'go test' invocation with HORDE_E2E_ECS=1 the suite's TestMain:
-    1. Regenerates .horde/cloudformation.yaml via 'horde bootstrap init --regenerate'.
-    2. Runs 'horde bootstrap deploy' (no-op when stack exists and is current).
-    3. Runs 'horde push' (no-op when ECR digest matches local image).
-    4. Runs the tests.
-    5. If HORDE_E2E_ECS_KEEP is unset, runs 'horde bootstrap destroy --force'.
+The CDK stack is managed explicitly via Make targets, not by TestMain.
+Run them in order (each reads AWS creds + HORDE_E2E_CDK=1 from .env):
 
-Manually teardown when you're done iterating:
-    horde bootstrap destroy
+    make e2e-up      # deploy the @horde.io/cdk stack, populate Secrets
+                     # Manager, push the worker image (~5 min cold, ~2 warm)
+    make e2e-test    # run the full TestECS_* suite against the deployed stack
+    make e2e-down    # destroy the stack — ALWAYS run this when done
+
+The stack persists between e2e-test runs, so iterating is fast: deploy
+once with e2e-up, run e2e-test as many times as you like, then e2e-down.
+Under the hood e2e-up/down run TestECSCDK_Bringup / TestECSCDK_Teardown,
+which write the stack's SSM path to a state file the ECS tests read.
 
 Cost
 
-The stack's idle cost is dominated by one NAT gateway (~$0.045/hour +
-data-transfer-per-GB). Fargate tasks cost ~$0.05/hour for 1 vCPU / 4 GB
-while running; each test's task runs for ~90 seconds. A typical full
-run with the stack kept alive for an hour and 20 task launches totals
-well under $0.10.
-
-Destroying the stack between iterations avoids NAT idle cost at the
-expense of a ~3-minute redeploy on the next run.
+The stack is pay-per-request / per-invocation with no NAT gateway
+(public-subnet topology), so idle cost is near-zero. Fargate tasks cost
+~$0.05/hour for 1 vCPU / 4 GB while running; each test's task runs for
+~90 seconds. A typical full run with the stack kept alive for an hour
+and 20 task launches totals well under $0.10. Always 'make e2e-down'
+when finished so nothing lingers.
 
 Concurrency
 
 The stack's SSM config sets max_concurrent=20, allowing up to 20
-Fargate tasks at once. All ECS tests call t.Parallel(), so the 17-test
-suite finishes in ~2 minutes wall-clock. Lowering max_concurrent also
-requires rebuilding the template and redeploying.
+Fargate tasks at once. All ECS tests call t.Parallel(), so the suite
+finishes in a few minutes wall-clock. Lowering max_concurrent requires
+redeploying the CDK stack.
 
 Recoverable-run coverage
 
@@ -1140,10 +1029,9 @@ What's NOT tested end-to-end
 const topicCDK = `CDK Construct (@horde.io/cdk)
 ==========================
 
-Teams that already use AWS CDK can import the @horde.io/cdk npm package and
-provision every AWS resource horde needs from inside their own CDK app.
-This is the alternative to 'horde bootstrap' (which uses CloudFormation
-directly).
+The @horde.io/cdk npm package provisions every AWS resource horde needs
+to run workflows on ECS Fargate. Import it into your own CDK app (or a
+standalone one) — it is the supported way to stand up the horde stack.
 
 Install
 -------
@@ -1185,8 +1073,6 @@ Usage
 What it provisions
 ------------------
 
-Same surface as 'horde bootstrap' (CloudFormation flavor):
-
   - VPC sized by 'networkMode' (default 'public'): public subnets and
     NO NAT gateway, with tasks on a public IP reaching the internet via
     the internet gateway (~$32/mo saved). 'networkMode: "private"' adds
@@ -1218,8 +1104,7 @@ EventBridge bus, the status Lambda emitting run.terminal after each terminal
 write, and a drain Lambda that starts the next queued run when a slot frees.
 This enables 'horde launch --enqueue' and the 'horde queue' commands (aws-ecs
 only). Subscribe your own rules to the bus to react to runs — see
-'horde docs events'. The backbone is CDK-only; 'horde bootstrap' does not
-provision it.
+'horde docs events'.
 
 Optional realized spend cap:
 
@@ -1251,8 +1136,7 @@ Each entry is a CDK ContainerDefinitionOptions. The construct defaults
 hard dependency) and routes logging to the worker log group. Run status is
 always the worker container's exit code, never a sidecar's. 'memoryMiB' is
 the task ceiling shared across containers; set per-container 'memoryLimitMiB'
-to cap a sidecar. CDK-only — 'horde bootstrap' and '--provider docker' do
-not provision sidecars.
+to cap a sidecar. The '--provider docker' path does not provision sidecars.
 
 Config defaults
 ---------------
@@ -1289,16 +1173,15 @@ the bucket's auto-delete so a non-empty bucket is emptied before removal)
 and optionally 'pointInTimeRecovery: false'. Only RETAIN and DESTROY are
 accepted — SNAPSHOT is rejected (S3 has no snapshot policy). A
 caller-provided 'artifactsBucket' is never re-policied by the construct.
-(CDK-only: the 'horde bootstrap' CloudFormation path does not expose these.)
 
-CDK vs. CloudFormation
-----------------------
+Runtime config contract
+-----------------------
 
-Use 'horde bootstrap' if you don't already use CDK and want a single
-'horde bootstrap deploy' command. Use @horde.io/cdk if you have an existing
-CDK app and want the construct in your own pipeline. Both produce the
-same SSM JSON shape (internal/config/ssm.go::HordeConfig), so the CLI
-can't tell them apart.
+The construct writes an SSM parameter at /horde/<projectSlug>/config
+whose JSON shape (internal/config/ssm.go::HordeConfig) is what the CLI
+reads to discover the cluster, runs table, log group, and ECR repo. The
+CLI only ever sees this SSM contract — it has no knowledge of how the
+stack was deployed.
 
 End-to-end verification
 -----------------------
@@ -1329,34 +1212,31 @@ Full-suite verification (recommended before shipping a release)
 Smoke alone exercises one happy-path workflow. To run every ECS test
 ('TestECSLaunch*', 'TestECSStatus*', 'TestECSLogs*', 'TestECSKill*',
 'TestECSList*', 'TestECSLifecycle*', 'TestECSHydrate*') against the CDK
-stack, set HORDE_E2E_ECS_BACKEND=cdk in addition to HORDE_E2E_ECS=1:
+stack, the simplest route is the Make targets (see 'horde docs
+ecs-integration'):
+
+    make e2e-up      # deploy the stack + push the worker image
+    make e2e-test    # run the full TestECS_* suite against it
+    make e2e-down    # destroy the stack
+
+Equivalently, by hand: bring the stack up, run the suite with
+HORDE_E2E_ECS=1 and HORDE_E2E_ECS_BACKEND=cdk (the gate the ECS tests
+read to find the deployed stack's SSM path), then tear it down:
 
     HORDE_E2E_CDK=1 go test -v -timeout 20m -run TestECSCDK_Bringup    ./test/integration/
     HORDE_E2E_ECS=1 HORDE_E2E_ECS_BACKEND=cdk go test -v -timeout 30m \
         -run TestECS -skip TestECSSmoke ./test/integration/
     HORDE_E2E_CDK=1 go test -v -timeout 15m -run TestECSCDK_Teardown   ./test/integration/
 
-This runs every CLI surface (launch/status/logs/kill/list/hydrate/
-lifecycle) through the CDK-deployed stack, giving symmetric coverage
-with the CF bootstrap path. 'TestECSSmoke' is skipped because it
-hardcodes the CF slug internally; all other TestECS_* tests honor the
-backend switch.
-
-Backend selection via HORDE_E2E_ECS_BACKEND:
-
-    (unset) or cf    Default. CloudFormation bootstrap stack.
-    cdk              CDK-deployed stack. Requires TestECSCDK_Bringup
-                     to have populated /tmp/horde-cdk-e2e-state.json.
-
 Cost: in the default 'public' networkMode this stack has no NAT Gateway,
 so its idle cost is negligible; with 'networkMode: "private"' it runs its
-own NAT Gateway (~$32/mo idle) since it can't share infrastructure with the
-bootstrap CF stack. DynamoDB point-in-time recovery (on by default) adds a
-small continuous-backup charge scaled to the runs table size; set
-'pointInTimeRecovery: false' on a throwaway stack to avoid it. Note that
-with the default 'dataRemovalPolicy: RETAIN', tearing down the stack leaves
-the runs table + artifacts bucket (and their cost) behind — pass DESTROY
-for a fully self-cleaning e2e/dev stack. Always tear down when you're done.
+own NAT Gateway (~$32/mo idle). DynamoDB point-in-time recovery (on by
+default) adds a small continuous-backup charge scaled to the runs table
+size; set 'pointInTimeRecovery: false' on a throwaway stack to avoid it.
+Note that with the default 'dataRemovalPolicy: RETAIN', tearing down the
+stack leaves the runs table + artifacts bucket (and their cost) behind —
+pass DESTROY for a fully self-cleaning e2e/dev stack. Always tear down
+when you're done.
 `
 
 const topicLabels = `Run Labels and List Filtering
@@ -1590,7 +1470,4 @@ Each automatic resume increments the run's resume_count. After MAX_RESUMES
 (default 5, configurable via the CDK construct's maxSpotResumes prop) the run
 is left terminal ("killed") instead of resumed; recover it manually with
 'horde retry'. A 'horde kill' (stopCode "UserInitiated") is never auto-resumed.
-
-CloudFormation bootstrap deployments register Spot but do NOT auto-resume
-(no queue): a reclaimed run lands "killed"; run 'horde retry' to resume it.
 `

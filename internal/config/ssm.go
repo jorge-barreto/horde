@@ -123,7 +123,7 @@ type HordeConfig struct {
 	RunsTable             string   `json:"runs_table"`
 	// EcrRepoURI is the URI of the project's ECR repository (without a tag),
 	// e.g. "123456789012.dkr.ecr.us-east-1.amazonaws.com/horde-myproj".
-	// Populated by the bootstrap CloudFormation stack and consumed by
+	// Populated by the deployed @horde.io/cdk stack and consumed by
 	// `horde push` to discover where to push the worker image.
 	EcrRepoURI string `json:"ecr_repo_uri"`
 	// Repo is the canonical repository identifier for runs in this deployment,

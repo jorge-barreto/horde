@@ -115,8 +115,8 @@ sidecar's — even an essential sidecar that exits non-zero. `memoryMiB` sizes t
 whole task; sidecars share that ceiling unless you set a per-container
 `memoryLimitMiB`. The name `horde-worker` is reserved and rejected at synth time.
 
-> Sidecars are a CDK-construct feature. The `horde bootstrap` (CloudFormation)
-> path and the local `--provider docker` runner do not provision sidecars.
+> Sidecars are a CDK-construct feature. The local `--provider docker` runner
+> does not provision sidecars.
 
 ## Development
 

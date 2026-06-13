@@ -18,12 +18,12 @@ const (
 	SecretGitToken             = "GIT_TOKEN"
 )
 
-// canonicalAWSSecretName returns the bootstrap-stack Secrets Manager name
-// for a canonical secret of the given project slug. Mirrors the names
-// hardcoded in internal/bootstrap/templates/stack.yaml.tmpl. The slug is
-// not known at config-load time, so the auto-seeded ECS source uses the
-// short name "horde-worker/<lower>" as a placeholder; the bootstrap
-// renderer treats the two canonicals specially anyway.
+// canonicalAWSSecretName returns the Secrets Manager name the deployed
+// stack uses for a canonical secret of the given project slug. Mirrors the
+// names the @horde.io/cdk construct provisions. The slug is not known at
+// config-load time, so the auto-seeded ECS source uses the short name
+// "horde-worker/<lower>" as a placeholder; the two canonicals are treated
+// specially anyway.
 func canonicalAWSSecretName(name string) string {
 	return "horde-worker/" + strings.ToLower(strings.ReplaceAll(name, "_", "-"))
 }
@@ -48,10 +48,10 @@ type SecretSource struct {
 type SecretSpec map[string]SecretSource
 
 // DefaultSecrets returns the two canonical secrets with their default
-// sources: read from .env on docker, and from the bootstrap stack's
-// Secrets Manager entries on ECS. The bootstrap renderer recognizes the
-// canonical names and wires them through stack-managed CF parameters; the
-// AWSSecret field here is informational for ValidateForProvider only.
+// sources: read from .env on docker, and from the deployed stack's
+// Secrets Manager entries on ECS. The @horde.io/cdk construct provisions
+// the canonical names; the AWSSecret field here is informational for
+// ValidateForProvider only.
 func DefaultSecrets() SecretSpec {
 	return SecretSpec{
 		SecretClaudeCodeOauthToken: {
@@ -127,9 +127,9 @@ func (s SecretSpec) EnvKeys() []string {
 }
 
 // ExtraAWSSecretNames returns the Secrets Manager names referenced by
-// non-canonical entries. The bootstrap renderer uses this to add IAM
-// grants and task-definition Secrets entries beyond the two canonicals.
-// Returned slice is sorted for deterministic template output.
+// non-canonical entries — the extra secrets a deployment must grant the
+// task role and reference in the task definition beyond the two canonicals.
+// Returned slice is sorted for deterministic output.
 func (s SecretSpec) ExtraAWSSecretNames() []ExtraAWSSecret {
 	var out []ExtraAWSSecret
 	for name, src := range s {

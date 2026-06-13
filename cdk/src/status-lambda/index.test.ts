@@ -360,10 +360,10 @@ describe("status-lambda handler (5fh.16)", () => {
     expect(update.ExpressionAttributeValues?.[":tn"]).toEqual({ N: "5" });
   });
 
-  it("coerces malformed token values consistently (lockstep with the Python lambda's num())", async () => {
-    // orc emits integers; this pins the agreed coercion for malformed input so
-    // the TS and Python lambdas can't silently diverge: numeric string -> int,
-    // float -> truncated, bool/garbage -> 0.
+  it("coerces malformed token values consistently", async () => {
+    // orc emits integers; this pins the coercion for malformed input so the
+    // values the Go store reads back can't silently diverge: numeric string ->
+    // int, float -> truncated, bool/garbage -> 0.
     ddbMock.on(QueryCommand).resolves({ Items: [{ id: { S: "run-coerce" } }] });
     ddbMock.on(UpdateItemCommand).resolves({});
     s3Mock.on(ListObjectsV2Command).resolves({

@@ -162,8 +162,8 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 	// Secret env vars (CLAUDE_CODE_OAUTH_TOKEN, GIT_TOKEN, and any extras
 	// declared in .horde/config.yaml's secrets: block) are not passed
 	// here. They live on the task definition's `secrets:` array, which
-	// is set at deploy time by the bootstrap CF template / @horde.io/cdk
-	// construct. RunTask cannot add secrets per launch — only environment
+	// is set at deploy time by the @horde.io/cdk construct. RunTask cannot
+	// add secrets per launch — only environment
 	// overrides — so opts.SecretEnvRemap is intentionally ignored on ECS.
 	// Per-launch opts.ExtraEnv IS passed (as environment overrides below),
 	// but for the same reason it cannot override a task-definition secret of
@@ -333,8 +333,8 @@ func (p *ECSProvider) Status(ctx context.Context, instanceID string) (*InstanceS
 	// Status is the WORKER container's exit code, not the task's. With sidecars
 	// in the task def the container order is not guaranteed, so find the worker
 	// by name; fall back to the first container for legacy single-container
-	// tasks whose response omits the name. Mirrors the status Lambdas
-	// (cdk/src/status-lambda/index.ts and the bootstrap template's Python port).
+	// tasks whose response omits the name. Mirrors the status Lambda
+	// (cdk/src/status-lambda/index.ts).
 	if worker := workerContainer(task.Containers); worker != nil && worker.ExitCode != nil {
 		exitCode := int(*worker.ExitCode)
 		status.ExitCode = &exitCode

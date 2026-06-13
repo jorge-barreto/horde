@@ -19,10 +19,9 @@ import type { HordeWorkerProps } from "./horde-worker-props";
  * Lambda derives run status from THIS container's exit code (never a sidecar's),
  * and the horde CLI's ECS provider uses it to build the CloudWatch log-stream
  * path and target env overrides at launch. It is therefore a cross-language
- * contract — not a configurable prop. Three other places must stay equal to it:
- * the standalone copy in `./status-lambda/index.ts`, `const containerName` in
- * `internal/provider/ecs.go`, and the container `Name` in
- * `internal/bootstrap/templates/stack.yaml.tmpl`.
+ * contract — not a configurable prop. Two other places must stay equal to it:
+ * the standalone copy in `./status-lambda/index.ts` and `const containerName`
+ * in `internal/provider/ecs.go`.
  */
 export const WORKER_CONTAINER_NAME = "horde-worker";
 
@@ -325,9 +324,7 @@ export class HordeWorker extends Construct {
     // the bucket. Read+List are needed because the worker entrypoint runs
     // `aws s3 sync s3://${ARTIFACTS_BUCKET}/horde-runs/${RUN_ID}/sessions/`
     // (docker/entrypoint.sh) to restore prior agent session state — the
-    // sync calls ListObjectsV2 (s3:ListBucket) and GetObject. Mirrors the
-    // task-role IAM in internal/bootstrap/templates/stack.yaml.tmpl so the
-    // CDK and CloudFormation onboarding paths stay in lockstep.
+    // sync calls ListObjectsV2 (s3:ListBucket) and GetObject.
     this.taskRole.addToPolicy(
       new iam.PolicyStatement({
         sid: "ArtifactsWrite",

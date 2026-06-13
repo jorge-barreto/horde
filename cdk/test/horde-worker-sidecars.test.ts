@@ -136,8 +136,8 @@ describe("worker container name (lockstep with Go provider + Python Lambda)", ()
       ]),
     });
     // Guards against an accidental rename that would silently break the
-    // status-Lambda filter, the Go ECS provider's log-stream path, and the
-    // bootstrap CFN template — all of which hardcode this string.
+    // status-Lambda filter and the Go ECS provider's log-stream path — both
+    // of which hardcode this string.
     expect(WORKER_CONTAINER_NAME).toBe("horde-worker");
   });
 });

@@ -26,8 +26,7 @@ export type DataRemovalPolicy = RemovalPolicy.RETAIN | RemovalPolicy.DESTROY;
  * — never via plain env vars).
  *
  * The two canonical entries (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) are
- * required and match the keys baked into the bootstrap CloudFormation
- * template. Extra entries are added via the index signature — each becomes
+ * required. Extra entries are added via the index signature — each becomes
  * an additional task-definition `secrets:` entry with an IAM grant on
  * both the task role and the execution role. Caller must reference an
  * existing Secrets Manager secret (typically via
@@ -171,8 +170,7 @@ export interface HordeWorkerProps {
   /**
    * Default per-run timeout in minutes when the caller does not pass one.
    * Written to SSM `default_timeout_minutes`.
-   * @default 1440 (24 h, matches SPEC.md and the bootstrap CF stack;
-   *   the bead description's "60" is a typo).
+   * @default 1440 (24 h, matches SPEC.md).
    */
   readonly defaultTimeoutMinutes?: number;
 
@@ -185,9 +183,8 @@ export interface HordeWorkerProps {
   /**
    * Path of the SSM String parameter the construct writes config JSON to.
    * @default `/horde/<projectSlug>/config` — slug-namespaced to allow multiple
-   *   horde stacks per AWS account (matches the bootstrap CF template at
-   *   `.horde/cloudformation.yaml`). The Go consumer accepts any path the
-   *   CLI is pointed at.
+   *   horde stacks per AWS account. The Go consumer accepts any path the CLI
+   *   is pointed at.
    */
   readonly ssmParameterPath?: string;
 

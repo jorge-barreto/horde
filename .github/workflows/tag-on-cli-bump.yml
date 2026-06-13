@@ -1,0 +1,68 @@
+name: tag-on-cli-bump
+
+# When a push to main changes the CLI_VERSION file, create and push a matching
+# v<version> tag. That tag push is what drives release-cli.yml (GoReleaser).
+# Mirror of tag-on-bump.yml (which does the same for cdk/package.json -> cdk-v*).
+# Without this, a CLI version bump can merge and sit unreleased.
+#
+# The tag MUST be pushed with a PAT (secret RELEASE_TAG_PAT), not the default
+# GITHUB_TOKEN: GitHub deliberately suppresses workflow triggers for refs pushed
+# by GITHUB_TOKEN, so a token-pushed tag would never fire release-cli.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "CLI_VERSION"
+
+concurrency:
+  group: tag-on-cli-bump
+  cancel-in-progress: false
+
+jobs:
+  tag-on-cli-bump:
+    name: tag-on-cli-bump
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # tag push is authed via the PAT, not GITHUB_TOKEN
+    steps:
+      # fetch-depth 2 so HEAD~1 (the pre-merge parent) is available for the
+      # version diff. Squash-merge to main means HEAD~1 is the correct "before".
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.RELEASE_TAG_PAT }}
+
+      - id: bump
+        name: Detect version bump
+        run: |
+          new=$(tr -d '[:space:]' < CLI_VERSION)
+          if git cat-file -e HEAD~1:CLI_VERSION 2>/dev/null; then
+            old=$(git show HEAD~1:CLI_VERSION | tr -d '[:space:]')
+          else
+            old=""
+          fi
+          echo "old=$old new=$new"
+          if [ "$old" = "$new" ]; then
+            echo "version unchanged ($new) — nothing to tag."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$new" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists on origin — skipping."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release horde CLI $VERSION"
+          git push origin "$tag"
+          echo "Pushed $tag — release-cli.yml will build the CLI release."

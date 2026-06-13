@@ -1,4 +1,4 @@
-import type { Duration } from "aws-cdk-lib";
+import type { Duration, RemovalPolicy } from "aws-cdk-lib";
 import type { IVpc } from "aws-cdk-lib/aws-ec2";
 import type { ContainerDefinitionOptions, ContainerImage } from "aws-cdk-lib/aws-ecs";
 import type { IRepository } from "aws-cdk-lib/aws-ecr";
@@ -7,6 +7,15 @@ import type { ISecret } from "aws-cdk-lib/aws-secretsmanager";
 
 /** Network posture for worker tasks. See `HordeWorkerProps.networkMode`. */
 export type HordeNetworkMode = "public" | "private";
+
+/**
+ * RemovalPolicy values valid for HordeWorker's data stores. Only RETAIN and
+ * DESTROY are permitted — SNAPSHOT is excluded because S3 buckets have no
+ * snapshot policy, so a single shared SNAPSHOT value would snapshot the
+ * DynamoDB table while silently degrading to RETAIN for the artifacts bucket
+ * (a "half-snapshot" surprise — exactly the silent-data-loss class this fixes).
+ */
+export type DataRemovalPolicy = RemovalPolicy.RETAIN | RemovalPolicy.DESTROY;
 
 /**
  * Secrets injected into the worker container at runtime via ECS Secrets
@@ -106,6 +115,29 @@ export interface HordeWorkerProps {
    * @default — a new SSE-S3 bucket with secure-transport policy is created.
    */
   readonly artifactsBucket?: IBucket;
+
+  /**
+   * RemovalPolicy applied to the two DATA-bearing resources: the DynamoDB runs
+   * table and the S3 artifacts bucket. These hold durable run history and run
+   * artifacts, so the default is RETAIN — `cdk destroy` tears down compute but
+   * leaves your data behind. Set DESTROY for ephemeral/dev stacks you want to
+   * fully clean up; that also flips the bucket's autoDeleteObjects on so the
+   * delete succeeds on a non-empty bucket. The worker/Lambda log groups are
+   * always DESTROY (logs are ephemeral) regardless of this setting. Only
+   * applies to resources the construct creates — a caller-provided
+   * `artifactsBucket` keeps whatever policy the caller set on it.
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly dataRemovalPolicy?: DataRemovalPolicy;
+
+  /**
+   * Enable DynamoDB point-in-time recovery on the runs table — 35-day
+   * continuous backup with per-second restore. Cheap insurance for a history
+   * table; guards the bad-write / accidental-delete failure that RETAIN (a
+   * teardown guard) does not.
+   * @default true
+   */
+  readonly pointInTimeRecovery?: boolean;
 
   /**
    * Fargate task CPU units (1024 = 1 vCPU).

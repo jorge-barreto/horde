@@ -1,4 +1,5 @@
-import type { HordeNetworkMode, HordeWorkerProps } from "../src";
+import { RemovalPolicy } from "aws-cdk-lib";
+import type { DataRemovalPolicy, HordeNetworkMode, HordeWorkerProps } from "../src";
 
 describe("HordeWorkerProps", () => {
   it("re-exports from index (compile-time check)", () => {
@@ -20,5 +21,26 @@ describe("HordeWorkerProps", () => {
     const a: HordeNetworkMode = "public";
     const b: HordeNetworkMode = "private";
     expect([a, b]).toEqual(["public", "private"]);
+  });
+
+  it("accepts RETAIN and DESTROY as DataRemovalPolicy", () => {
+    const a: DataRemovalPolicy = RemovalPolicy.RETAIN;
+    const b: DataRemovalPolicy = RemovalPolicy.DESTROY;
+    expect([a, b]).toEqual([RemovalPolicy.RETAIN, RemovalPolicy.DESTROY]);
+  });
+
+  it("rejects SNAPSHOT as DataRemovalPolicy (compile-time)", () => {
+    // @ts-expect-error – SNAPSHOT is not a valid DataRemovalPolicy
+    const bad: DataRemovalPolicy = RemovalPolicy.SNAPSHOT;
+    expect(bad).toBeDefined();
+  });
+
+  it("accepts dataRemovalPolicy and pointInTimeRecovery props", () => {
+    const partial: Pick<HordeWorkerProps, "dataRemovalPolicy" | "pointInTimeRecovery"> = {
+      dataRemovalPolicy: RemovalPolicy.DESTROY,
+      pointInTimeRecovery: false,
+    };
+    expect(partial.dataRemovalPolicy).toBe(RemovalPolicy.DESTROY);
+    expect(partial.pointInTimeRecovery).toBe(false);
   });
 });

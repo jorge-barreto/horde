@@ -62,7 +62,7 @@ func TestGet_NotFound(t *testing.T) {
 }
 
 func TestQueueAndEventsTopicsExist(t *testing.T) {
-	for _, name := range []string{"queue", "events"} {
+	for _, name := range []string{"queue", "events", "spot"} {
 		topic, err := Get(name)
 		if err != nil {
 			t.Errorf("Get(%q): %v", name, err)

@@ -91,6 +91,12 @@ var topics = []Topic{
 		Summary: "run.started / run.terminal / run.cost-threshold-exceeded on the EventBridge bus",
 		Content: topicEvents,
 	},
+	{
+		Name:    "spot",
+		Title:   "Fargate Spot and Auto-Resume",
+		Summary: "Spot-by-default, --capacity, and automatic resume on interruption",
+		Content: topicSpot,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -517,7 +523,8 @@ Successful runs cannot be retried. timed_out and rate_limited are
 distinct from failed precisely so a caller (or a future auto-resume
 loop) can tell a recoverable interruption apart from a genuine failure;
 all four are treated identically by retry, list filters, and
-IsTerminal().
+IsTerminal(). On Fargate Spot, an interrupted run is re-queued and
+resumed automatically — see 'horde docs spot'.
 
 Retry
 -----
@@ -1457,6 +1464,9 @@ Realized-only caveat: cost is known only when a run finishes, so in-flight runs
 count as $0 until then and a burst can overshoot the cap before any report cost.
 The concurrency limit (max_concurrent) is the real blast-radius backstop. Live
 enforcement is a future enhancement.
+
+Spot-interrupted runs are re-queued at top priority and drained the same way —
+see 'horde docs spot'.
 `
 
 const topicEvents = `Run-Lifecycle Events
@@ -1514,4 +1524,35 @@ EMISSION SEMANTICS
 Events are best-effort and emitted AFTER the authoritative DynamoDB write — the
 store is the source of truth; an event is a notification of truth. A failed
 publish is logged and never reverses a run's recorded state.
+`
+
+const topicSpot = `horde and Fargate Spot
+
+ECS runs launch on Fargate Spot by default for the cost saving. Spot capacity
+can be reclaimed by AWS at any time; horde makes runs survive that.
+
+Per-launch capacity
+  horde launch <ticket> --capacity spot        # default
+  horde launch <ticket> --capacity on-demand   # opt out of reclaim
+
+Capacity is stored on the run and reused on retry and auto-resume, so a run
+stays on the kind of capacity it started on. Both providers are always
+registered on the cluster; you only pay for the tasks that run.
+
+Auto-resume (aws-ecs, CDK deployments)
+When Spot reclaims a task, ECS stops it with stopCode "TerminationNotice".
+The worker has already synced its workspace, agent session, and artifacts to
+S3 (the same snapshot 'horde retry' uses). The status updater then RE-QUEUES
+the run at top priority instead of failing it, and emits a run.requeued event;
+the queue drain re-launches it with the same run ID under the normal
+concurrency and spend caps, and orc resumes where it left off.
+
+Loop guard
+Each automatic resume increments the run's resume_count. After MAX_RESUMES
+(default 5, configurable via the CDK construct's maxSpotResumes prop) the run
+is left terminal ("killed") instead of resumed; recover it manually with
+'horde retry'. A 'horde kill' (stopCode "UserInitiated") is never auto-resumed.
+
+CloudFormation bootstrap deployments register Spot but do NOT auto-resume
+(no queue): a reclaimed run lands "killed"; run 'horde retry' to resume it.
 `

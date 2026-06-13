@@ -46,6 +46,34 @@ writing or querying run records, so every CI runner and dev box launching
 against this stack writes to the same `by-repo` bucket — no drift from local
 git remote variations (with vs. without `.git`, https vs. ssh).
 
+## Data durability & teardown
+
+`HordeWorker` provisions two **data-bearing** resources — the DynamoDB runs
+table (run history + GSIs) and the S3 artifacts bucket (per-run plans, test/
+review output, logs). They default to `RemovalPolicy.RETAIN`, so a `cdk destroy`
+(or a `cdk deploy` that replaces them) tears down compute, networking, and log
+groups but **leaves your run history and artifacts behind**. The runs table also
+has point-in-time recovery enabled by default (35-day continuous backup), which
+guards accidental writes/deletes that RETAIN alone does not.
+
+For an ephemeral or dev stack you want to fully clean up, opt into destruction:
+
+```ts
+import { RemovalPolicy } from "aws-cdk-lib";
+
+new HordeWorker(stack, "Horde", {
+  // ...required props...
+  dataRemovalPolicy: RemovalPolicy.DESTROY, // table + bucket deleted on `cdk destroy`
+  pointInTimeRecovery: false,               // optional: skip PITR for throwaway stacks
+});
+```
+
+`dataRemovalPolicy: DESTROY` also enables the bucket's auto-delete so a non-empty
+bucket is emptied before removal. Only `RETAIN` and `DESTROY` are accepted
+(`SNAPSHOT` is rejected — S3 has no snapshot policy). A **caller-provided**
+`artifactsBucket` is never re-policied by the construct; it keeps whatever policy
+you set on it. Log groups are always removed on teardown regardless of this prop.
+
 ## Sidecar containers
 
 Some projects need an auxiliary service alongside the worker for the duration of

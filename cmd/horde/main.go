@@ -41,9 +41,9 @@ var (
 
 func main() {
 	// Merge .env from cwd into the process environment (real env wins). This
-	// lets commands like `horde bootstrap deploy` pick up CLAUDE_CODE_OAUTH_TOKEN
-	// and GIT_TOKEN directly from the project's .env without the caller having
-	// to `source` it. A missing .env is a silent no-op.
+	// lets commands like `horde launch` pick up CLAUDE_CODE_OAUTH_TOKEN and
+	// GIT_TOKEN directly from the project's .env without the caller having to
+	// `source` it. A missing .env is a silent no-op.
 	if cwd, err := os.Getwd(); err == nil {
 		if err := config.ApplyDotEnvToProcess(cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
@@ -154,7 +154,6 @@ detailed documentation.`,
 			queueCmd(),
 			cleanCmd(),
 			shellCmd(),
-			bootstrapCmd(),
 			pushCmd(),
 			updateCmd(),
 			versionCmd(),
@@ -175,7 +174,7 @@ and runs orc. Prints the run ID on success. Use --force to launch even
 if a run with the same ticket is already active.
 
 Concurrency: docker provider caps active runs at 100 (pending + running);
-aws-ecs uses the bootstrap stack's max_concurrent (default 20). Hitting
+aws-ecs uses the deployed stack's max_concurrent (default 20). Hitting
 the cap fails with "max concurrent runs reached (N/N)" — wait for or
 kill some runs before launching more.
 
@@ -1445,7 +1444,7 @@ func secretCollisionsOnECS(provName string, spec config.SecretSpec, extraEnv map
 // spec references. Returns the (possibly empty) envPath, the merged spec,
 // and a non-canonical "container-name -> host-env-name" remap for the
 // docker provider; the ECS provider gets nil remap (its task definition
-// is baked at bootstrap time).
+// is baked into the deployed stack).
 func resolveSecretsForLaunch(provName string, r *config.Resolver) (envPath string, spec config.SecretSpec, remap map[string]string, err error) {
 	cfg, err := r.ProjectConfig()
 	if err != nil {

@@ -15,7 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/jorge-barreto/horde/internal/awscfg"
-	"github.com/jorge-barreto/horde/internal/bootstrap"
 	"github.com/jorge-barreto/horde/internal/config"
 	"github.com/urfave/cli/v3"
 )
@@ -75,7 +74,7 @@ func defaultPushDeps() pushDeps {
 			return ecr.NewFromConfig(cfg)
 		},
 		docker: execDockerRunner{},
-		slug:   bootstrap.Slug,
+		slug:   config.Slug,
 	}
 }
 
@@ -87,9 +86,9 @@ func pushCmdWith(deps pushDeps) *cli.Command {
 		Usage: "Tag and push the local worker image to the project's ECR repository",
 		Description: `push tags the local horde-worker:latest image with the project's ECR
 repository URI (discovered via SSM at /horde/<slug>/config) and pushes
-it to ECR. Requires that 'horde bootstrap deploy' has already created
-the ECR repository, and that horde-worker:latest has been built locally
-(via 'horde launch' or 'make docker-build').
+it to ECR. Requires that the @horde.io/cdk stack has already been deployed
+(creating the ECR repository), and that horde-worker:latest has been built
+locally (via 'horde launch' or 'make docker-build'). See 'horde docs cdk'.
 
 Authenticates to ECR by calling GetAuthorizationToken via the AWS SDK
 and piping the decoded password to 'docker login --password-stdin' —
@@ -130,12 +129,12 @@ func runPush(ctx context.Context, cmd *cli.Command, deps pushDeps) error {
 	if err != nil {
 		var notFound *config.NotFoundError
 		if errors.As(err, &notFound) {
-			return fmt.Errorf("ssm parameter %q not found: run 'horde bootstrap deploy' to create the project's ECR repository and SSM config", ssmPath)
+			return fmt.Errorf("ssm parameter %q not found: deploy the @horde.io/cdk stack to create the project's ECR repository and SSM config (see 'horde docs cdk')", ssmPath)
 		}
 		return fmt.Errorf("reading horde config: %s", config.Diagnostic(err))
 	}
 	if cfg.EcrRepoURI == "" {
-		return fmt.Errorf("ssm parameter %q is missing ecr_repo_uri; re-run 'horde bootstrap deploy' to regenerate the config", ssmPath)
+		return fmt.Errorf("ssm parameter %q is missing ecr_repo_uri; re-deploy the @horde.io/cdk stack to regenerate the config (see 'horde docs cdk')", ssmPath)
 	}
 
 	// 4. Authenticate to ECR via the SDK and `docker login --password-stdin`.

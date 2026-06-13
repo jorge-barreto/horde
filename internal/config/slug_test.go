@@ -1,4 +1,4 @@
-package bootstrap
+package config
 
 import (
 	"strings"
@@ -43,11 +43,11 @@ func TestSlug(t *testing.T) {
 
 func TestSlug_GitSuffixIdempotent(t *testing.T) {
 	t.Parallel()
-	// The bucket-key fix layers config.CanonicalRepo (which strips .git) under
-	// the SSM path derivation, which feeds Slug. Slug must already be
-	// idempotent w.r.t. the .git suffix so the canonical and raw forms resolve
-	// to the same SSM path / resource names — otherwise dev and CI launches
-	// would target different stacks. This locks that property.
+	// The bucket-key fix layers CanonicalRepo (which strips .git) under the SSM
+	// path derivation, which feeds Slug. Slug must already be idempotent w.r.t.
+	// the .git suffix so the canonical and raw forms resolve to the same SSM
+	// path / resource names — otherwise dev and CI launches would target
+	// different stacks. This locks that property.
 	withGit, err := Slug("github.com/org/repo.git")
 	if err != nil {
 		t.Fatalf("Slug(.git) error: %v", err)

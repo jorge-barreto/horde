@@ -3,6 +3,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { HordeWorker } from "../src";
 
 function synth() {
@@ -342,7 +343,7 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
     ]) {
       expect(valueStr).toContain(`\\"${key}\\"`);
     }
-    expect(valueStr).toContain('\\"DISABLED\\"');
+    expect(valueStr).toContain('\\"ENABLED\\"');
     expect(valueStr).toContain('\\"ecs\\"');
     expect(valueStr).toContain('\\"max_concurrent\\":5');
     expect(valueStr).toContain('\\"default_timeout_minutes\\":1440');
@@ -567,5 +568,113 @@ describe("HordeWorker status-sync (5fh.12/13/14)", () => {
       expect(a).not.toMatch(/^ssm:/);
       expect(a).not.toMatch(/^secretsmanager:/);
     }
+  });
+});
+
+function synthWithProps(extra: Record<string, unknown>): Template {
+  const app = new App();
+  const stack = new Stack(app, "TestStack", {
+    env: { account: "111111111111", region: "us-east-1" },
+  });
+  const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+  new HordeWorker(stack, "Horde", {
+    projectSlug: "test",
+    repo: "github.com/example/test",
+    workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+    ecrRepository: repo,
+    secrets: {
+      CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
+      GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+    },
+    ...extra,
+  });
+  return Template.fromStack(stack);
+}
+
+describe("HordeWorker networkMode", () => {
+  it("defaults to public: no NAT Gateway and assign_public_ip ENABLED", () => {
+    const t = synthWithProps({});
+    t.resourceCountIs("AWS::EC2::NatGateway", 0);
+    const params = t.findResources("AWS::SSM::Parameter");
+    const cfg = Object.values(params).find((p) => p.Properties.Name === "/horde/test/config");
+    if (!cfg) throw new Error("expected /horde/test/config parameter");
+    expect(JSON.stringify(cfg.Properties.Value)).toContain('\\"assign_public_ip\\":\\"');
+    expect(JSON.stringify(cfg.Properties.Value)).toContain('\\"ENABLED\\"');
+  });
+
+  it("public mode sets the drain Lambda ASSIGN_PUBLIC_IP env to ENABLED", () => {
+    const t = synthWithProps({});
+    t.hasResourceProperties("AWS::Lambda::Function", {
+      Environment: { Variables: Match.objectLike({ ASSIGN_PUBLIC_IP: "ENABLED" }) },
+    });
+  });
+
+  it("private mode creates one NAT Gateway and sets assign_public_ip DISABLED", () => {
+    const t = synthWithProps({ networkMode: "private" });
+    t.resourceCountIs("AWS::EC2::NatGateway", 1);
+    const params = t.findResources("AWS::SSM::Parameter");
+    const cfg = Object.values(params).find((p) => p.Properties.Name === "/horde/test/config");
+    if (!cfg) throw new Error("expected /horde/test/config parameter");
+    expect(JSON.stringify(cfg.Properties.Value)).toContain('\\"DISABLED\\"');
+  });
+
+  it("private mode sets the drain Lambda ASSIGN_PUBLIC_IP env to DISABLED", () => {
+    const t = synthWithProps({ networkMode: "private" });
+    t.hasResourceProperties("AWS::Lambda::Function", {
+      Environment: { Variables: Match.objectLike({ ASSIGN_PUBLIC_IP: "DISABLED" }) },
+    });
+  });
+
+  it("throws when a BYO VPC has no public subnets in public mode", () => {
+    const app = new App();
+    const stack = new Stack(app, "S", { env: { account: "111111111111", region: "us-east-1" } });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    const vpc = new ec2.Vpc(stack, "PrivateOnlyVpc", {
+      maxAzs: 1,
+      natGateways: 0,
+      subnetConfiguration: [
+        { name: "isolated", subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
+      ],
+    });
+    expect(() =>
+      new HordeWorker(stack, "Horde", {
+        projectSlug: "test",
+        repo: "github.com/example/test",
+        workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+        ecrRepository: repo,
+        vpc,
+        secrets: {
+          CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
+          GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+        },
+      }),
+    ).toThrow(/no .* subnet/i);
+  });
+
+  it("throws when a BYO VPC has no private-egress subnets in private mode", () => {
+    const app = new App();
+    const stack = new Stack(app, "S", { env: { account: "111111111111", region: "us-east-1" } });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    const vpc = new ec2.Vpc(stack, "PublicOnlyVpc", {
+      maxAzs: 1,
+      natGateways: 0,
+      subnetConfiguration: [
+        { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
+      ],
+    });
+    expect(() =>
+      new HordeWorker(stack, "Horde", {
+        projectSlug: "test",
+        repo: "github.com/example/test",
+        workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+        ecrRepository: repo,
+        vpc,
+        networkMode: "private",
+        secrets: {
+          CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
+          GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+        },
+      }),
+    ).toThrow(/no .* subnet/i);
   });
 });

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -19,7 +20,9 @@ import (
 type workflowTriggers struct {
 	On struct {
 		Push struct {
-			Tags []string `yaml:"tags"`
+			Tags     []string `yaml:"tags"`
+			Branches []string `yaml:"branches"`
+			Paths    []string `yaml:"paths"`
 		} `yaml:"push"`
 	} `yaml:"on"`
 }
@@ -35,6 +38,21 @@ func readWorkflowTags(t *testing.T, path string) []string {
 		t.Fatalf("unmarshalling %s: %v", path, err)
 	}
 	return w.On.Push.Tags
+}
+
+// readWorkflowPush decodes a workflow's full push trigger (tags, branches,
+// paths) so tests can assert path-filtered branch triggers, not just tag globs.
+func readWorkflowPush(t *testing.T, path string) (tags, branches, paths []string) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	var w workflowTriggers
+	if err := yaml.Unmarshal(b, &w); err != nil {
+		t.Fatalf("unmarshalling %s: %v", path, err)
+	}
+	return w.On.Push.Tags, w.On.Push.Branches, w.On.Push.Paths
 }
 
 // Guards the release-tag prefix contract: CDK publishes on cdk-v* tags, the
@@ -53,13 +71,58 @@ func TestPublishWorkflowUsesCDKPrefix(t *testing.T) {
 	}
 }
 
-func TestMakefileDescribesCLIPrefix(t *testing.T) {
+// The CLI version is sourced from the CLI_VERSION file (not git tags), and the
+// Makefile stamps it as a v-prefixed string so the CLI version stays distinct
+// from the cdk-v* prefix. Guards both halves of that contract.
+func TestMakefileReadsCLIVersionFile(t *testing.T) {
 	b, err := os.ReadFile("../../Makefile")
 	if err != nil {
 		t.Fatalf("reading Makefile: %v", err)
 	}
-	if !strings.Contains(string(b), "--match 'v*'") {
-		t.Error("Makefile VERSION must describe against v* tags only")
+	src := string(b)
+	if !strings.Contains(src, "cat CLI_VERSION") {
+		t.Error("Makefile VERSION must read the CLI_VERSION file")
+	}
+	// Whitespace-insensitive: the VERSION assignment must stamp a v-prefixed
+	// string built from CLI_VERSION_BASE (keeps the CLI version distinct from
+	// the cdk-v* prefix). Matches `VERSION := v$(CLI_VERSION_BASE)...` with any
+	// run of spaces around `:=`.
+	if !regexp.MustCompile(`VERSION\s*:=\s*v\$\(CLI_VERSION_BASE\)`).MatchString(src) {
+		t.Error("Makefile must stamp a v-prefixed version from CLI_VERSION (keeps CLI distinct from cdk-v*)")
+	}
+}
+
+// The CLI_VERSION file is the source of truth tag-on-cli-bump.yml turns into a
+// v<version> tag; it must contain a bare semver with no leading v.
+func TestCLIVersionFileIsBareSemver(t *testing.T) {
+	b, err := os.ReadFile("../../CLI_VERSION")
+	if err != nil {
+		t.Fatalf("reading CLI_VERSION: %v", err)
+	}
+	v := strings.TrimSpace(string(b))
+	if strings.HasPrefix(v, "v") {
+		t.Errorf("CLI_VERSION must be bare semver with no leading 'v'; got %q", v)
+	}
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(v) {
+		t.Errorf("CLI_VERSION must be MAJOR.MINOR.PATCH; got %q", v)
+	}
+}
+
+// tag-on-cli-bump.yml is the CLI analog of tag-on-bump.yml: it must watch the
+// CLI_VERSION file on main so a bump auto-pushes the v<version> release tag.
+func TestTagOnCLIBumpWatchesVersionFile(t *testing.T) {
+	_, branches, paths := readWorkflowPush(t, "../../.github/workflows/tag-on-cli-bump.yml")
+	if len(branches) != 1 || branches[0] != "main" {
+		t.Errorf("tag-on-cli-bump.yml must trigger on push to [main]; got branches=%#v", branches)
+	}
+	foundPath := false
+	for _, p := range paths {
+		if p == "CLI_VERSION" {
+			foundPath = true
+		}
+	}
+	if !foundPath {
+		t.Errorf("tag-on-cli-bump.yml must filter on the CLI_VERSION path; got paths=%#v", paths)
 	}
 }
 

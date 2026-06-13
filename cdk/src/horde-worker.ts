@@ -157,16 +157,16 @@ export class HordeWorker extends Construct {
 
   /**
    * Custom EventBridge bus carrying horde run-lifecycle events (run.started /
-   * run.terminal / run.cost-threshold-exceeded). The drain Lambda subscribes;
-   * external consumers (notifications, your own automation) can add their own
-   * rules. See `horde docs events`.
+   * run.terminal / run.requeued / run.cost-threshold-exceeded). The drain Lambda
+   * subscribes; external consumers (notifications, your own automation) can add
+   * their own rules. See `horde docs events`.
    */
   public readonly eventBus: events.EventBus;
 
-  /** Lambda that drains the queue on run.terminal (capacity + spend gated). */
+  /** Lambda that drains the queue on run.terminal / run.requeued (capacity + spend gated). */
   public readonly drainLambda: lambda.Function;
 
-  /** EventBridge rule routing run.terminal events to `drainLambda`. */
+  /** EventBridge rule routing run.terminal + run.requeued events to `drainLambda`. */
   public readonly drainEventRule: events.Rule;
 
   constructor(scope: Construct, id: string, props: HordeWorkerProps) {

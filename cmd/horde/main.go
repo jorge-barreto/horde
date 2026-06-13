@@ -518,6 +518,9 @@ fresh Fargate task is launched with the same run ID: the worker restores
 the agent session (~/.claude) and the full working tree (/workspace,
 including committed and uncommitted changes) from S3, then re-enters orc.
 
+The run's capacity (spot or on-demand) from the original launch is
+preserved — a retry runs on the same kind of Fargate capacity.
+
 By default, --resume is passed to orc so it preserves artifacts and
 resumes any interrupted agent session. Override with explicit orc args:
   horde retry abc123 -- --retry implement

@@ -127,7 +127,7 @@ describe("HordeWorker sidecars (#7)", () => {
   });
 });
 
-describe("worker container name (lockstep with Go provider + Python Lambda)", () => {
+describe("worker container name (lockstep with Go provider)", () => {
   it("synthesizes the worker container with Name equal to WORKER_CONTAINER_NAME", () => {
     const t = synthWith(undefined);
     t.hasResourceProperties("AWS::ECS::TaskDefinition", {

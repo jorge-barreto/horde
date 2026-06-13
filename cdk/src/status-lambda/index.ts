@@ -147,8 +147,8 @@ interface TokenUsage {
 // fetchTokenUsage pulls per-run token totals from costs.json in S3 (best-effort,
 // mirrors fetchTotalCost). orc writes the token totals to costs.json today;
 // turns is summed across the per-phase array (orc has no run-total turns).
-// Attribute names written downstream match the Go store consts and the Python
-// lambda — a cross-language contract.
+// Attribute names written downstream match the Go store consts — a
+// cross-language contract.
 async function fetchTokenUsage(runId: string): Promise<TokenUsage | null> {
   const prefix = `horde-runs/${runId}/`;
   try {
@@ -336,8 +336,7 @@ export const handler: Handler<
   // ID — workspace + session already synced to S3. Conditional on
   // not-already-terminal so a racing `horde kill` (UserInitiated, sets killed
   // synchronously) wins. UserInitiated never reaches this branch. At the cap we
-  // fall through to the normal terminal write below. CDK-only (the Python
-  // lambda has no queue to drain).
+  // fall through to the normal terminal write below.
   const maxResumes = Number(process.env.MAX_RESUMES ?? "5");
   if (detail.stopCode === "TerminationNotice" && resumeCount < maxResumes) {
     try {

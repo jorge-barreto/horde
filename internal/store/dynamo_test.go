@@ -1157,6 +1157,37 @@ func TestDynamoStore_UpdateRun_StatusReservedWord(t *testing.T) {
 	}
 }
 
+func TestDynamoStore_UpdateRun_CapacityReservedWord(t *testing.T) {
+	t.Parallel()
+	// "capacity" is a DynamoDB reserved word, so UpdateRun must alias it via
+	// ExpressionAttributeNames (like status/priority) — a bare "capacity = :x"
+	// SET clause is rejected by real DynamoDB with a ValidationException. The
+	// mock/fake clients don't enforce reserved words, so this guards the alias
+	// directly.
+	var capturedInput *dynamodb.UpdateItemInput
+	mock := &mockDynamoClient{
+		updateItemFunc: func(_ context.Context, params *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+			capturedInput = params
+			return &dynamodb.UpdateItemOutput{}, nil
+		},
+	}
+	store := newTestDynamoStore(mock, "runs-table")
+	cap := CapacityOnDemand
+	err := store.UpdateRun(context.Background(), "run-1", &RunUpdate{Capacity: &cap})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedInput.ExpressionAttributeNames["#cap"] != AttrCapacity {
+		t.Errorf("ExpressionAttributeNames[\"#cap\"] = %q, want %q", capturedInput.ExpressionAttributeNames["#cap"], AttrCapacity)
+	}
+	if !strings.Contains(*capturedInput.UpdateExpression, "#cap") {
+		t.Errorf("UpdateExpression %q should contain %q", *capturedInput.UpdateExpression, "#cap")
+	}
+	if strings.Contains(*capturedInput.UpdateExpression, " capacity ") || strings.Contains(*capturedInput.UpdateExpression, "capacity =") {
+		t.Errorf("UpdateExpression %q should not contain bare reserved word %q", *capturedInput.UpdateExpression, "capacity")
+	}
+}
+
 func TestDynamoStore_UpdateRun_NoFieldsSet_GetItemError(t *testing.T) {
 	t.Parallel()
 	mock := &mockDynamoClient{

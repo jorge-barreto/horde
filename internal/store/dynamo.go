@@ -430,7 +430,9 @@ func (s *DynamoStore) UpdateRun(ctx context.Context, id string, update *RunUpdat
 		exprAttrValues[":prio"] = &types.AttributeValueMemberS{Value: string(*update.Priority)}
 	}
 	if update.Capacity != nil {
-		setClauses = append(setClauses, "capacity = :cap")
+		// "capacity" is a DynamoDB reserved word; alias it.
+		setClauses = append(setClauses, "#cap = :cap")
+		exprAttrNames["#cap"] = AttrCapacity
 		exprAttrValues[":cap"] = &types.AttributeValueMemberS{Value: string(*update.Capacity)}
 	}
 	if update.ResumeCount != nil {

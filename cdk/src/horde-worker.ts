@@ -389,11 +389,13 @@ export class HordeWorker extends Construct {
       networkMode === "public"
         ? ec2.SubnetType.PUBLIC
         : ec2.SubnetType.PRIVATE_WITH_EGRESS;
+    const subnetTypeName =
+      networkMode === "public" ? "PUBLIC" : "PRIVATE_WITH_EGRESS";
     const selectedSubnetIds = this.vpc.selectSubnets({ subnetType }).subnetIds;
     if (selectedSubnetIds.length === 0) {
       throw new Error(
-        `HordeWorker networkMode '${networkMode}' requires ${subnetType} subnets ` +
-          `in the VPC, but none were found.`,
+        `HordeWorker networkMode '${networkMode}' requires ` +
+          `ec2.SubnetType.${subnetTypeName} subnets in the VPC, but none were found.`,
       );
     }
     const assignPublicIp = networkMode === "public" ? "ENABLED" : "DISABLED";

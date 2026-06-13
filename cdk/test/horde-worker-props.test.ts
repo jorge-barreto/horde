@@ -35,6 +35,12 @@ describe("HordeWorkerProps", () => {
     expect(bad).toBeDefined();
   });
 
+  it("rejects RETAIN_ON_UPDATE_OR_DELETE as DataRemovalPolicy (compile-time)", () => {
+    // @ts-expect-error – only RETAIN and DESTROY are valid DataRemovalPolicy values
+    const bad: DataRemovalPolicy = RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE;
+    expect(bad).toBeDefined();
+  });
+
   it("accepts dataRemovalPolicy and pointInTimeRecovery props", () => {
     const partial: Pick<HordeWorkerProps, "dataRemovalPolicy" | "pointInTimeRecovery"> = {
       dataRemovalPolicy: RemovalPolicy.DESTROY,

@@ -14,6 +14,9 @@ export type HordeNetworkMode = "public" | "private";
  * snapshot policy, so a single shared SNAPSHOT value would snapshot the
  * DynamoDB table while silently degrading to RETAIN for the artifacts bucket
  * (a "half-snapshot" surprise — exactly the silent-data-loss class this fixes).
+ * RETAIN_ON_UPDATE_OR_DELETE is likewise excluded — its create-rollback
+ * destroy semantics are surprising for a data store; RETAIN/DESTROY are the
+ * only two postures this construct offers.
  */
 export type DataRemovalPolicy = RemovalPolicy.RETAIN | RemovalPolicy.DESTROY;
 

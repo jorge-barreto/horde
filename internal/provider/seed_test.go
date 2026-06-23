@@ -101,3 +101,52 @@ func TestSeedWorkspace_NonGitSourceErrors(t *testing.T) {
 		t.Fatal("expected error for non-git source, got nil")
 	}
 }
+
+// TestSeedWorkspace_SkipsNestedGitRepo verifies that an untracked nested git
+// repository (e.g. a vendored sub-repo or a cloned examples/ directory) does
+// not cause SeedWorkspaceFromWorkingTree to fail. git ls-files emits the
+// nested repo's directory entry (e.g. "nested/") as a single path when
+// --others is used; prior to the fix, os.Stat returned a directory FileInfo
+// and copyRegularFile failed with "copy_file_range: is a directory". The fix
+// uses os.Lstat and skips any non-regular entry.
+func TestSeedWorkspace_SkipsNestedGitRepo(t *testing.T) {
+	src := seedFixture(t)
+
+	// Create an untracked nested git repo inside the fixture.
+	nestedDir := filepath.Join(src, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nestedFile := filepath.Join(nestedDir, "file.txt")
+	if err := os.WriteFile(nestedFile, []byte("nested content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initCmd := exec.Command("git", "init", "-q")
+	initCmd.Dir = nestedDir
+	initCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init nested: %v\n%s", err, out)
+	}
+
+	dest := t.TempDir()
+
+	// Must not error — the nested repo gitlink must be skipped gracefully.
+	if err := provider.SeedWorkspaceFromWorkingTree(context.Background(), src, dest); err != nil {
+		t.Fatalf("seed with nested git repo: %v", err)
+	}
+
+	// The nested/ directory should not have been copied as a file (or at all).
+	if _, err := os.Stat(filepath.Join(dest, "nested")); !os.IsNotExist(err) {
+		t.Errorf("nested/ should not be present in dest; stat err = %v", err)
+	}
+
+	// Regular files from the outer repo must still be present.
+	if b, _ := os.ReadFile(filepath.Join(dest, "committed.txt")); string(b) != "v2-uncommitted" {
+		t.Errorf("committed.txt = %q, want uncommitted bytes", b)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "untracked.txt")); err != nil {
+		t.Errorf("untracked.txt missing: %v", err)
+	}
+}

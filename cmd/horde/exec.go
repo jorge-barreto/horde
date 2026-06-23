@@ -171,6 +171,7 @@ With --json, output is a single JSON object with a status field
 
 			projCfg, err := resolver.ProjectConfig()
 			if err != nil {
+				markFailed(ctx, st, id)
 				return err
 			}
 			result, err := prov.Launch(ctx, provider.LaunchOpts{

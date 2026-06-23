@@ -14,18 +14,18 @@ import (
 // initialised with the orc workflow files from the test-repo fixture committed,
 // giving the container the .orc/workflows/* tree it needs without a git remote.
 //
-// Note: newHarness places a nested git repo at worker/test-repo/ (for the
-// Docker test image). That nested .git makes git treat it as a gitlink
-// (mode 160000), which SeedWorkspaceFromWorkingTree would try to copy as a
-// regular file and fail. We unstage it so it is not included in the seed.
+// newHarness places a nested git repo at worker/test-repo/ (for the Docker
+// test image). git ls-files emits it as the directory entry "worker/" (a
+// gitlink boundary). SeedWorkspaceFromWorkingTree now skips non-regular
+// entries, so the nested repo is tolerated gracefully — this test also serves
+// as an end-to-end cover for that nested-repo case.
 func newLocalExecHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 
 	repoRoot := h.repoRoot
 	// Copy only the .orc/ subtree from the fixture — that is all the worker
-	// needs for `orc validate`. Copying the whole fixture would pull in the
-	// worker/test-repo nested git repo, which breaks the seed path (gitlink).
+	// needs for `orc validate`.
 	orcSrc := filepath.Join(repoRoot, "test", "fixtures", "test-repo", ".orc")
 	orcDst := filepath.Join(h.workDir, ".orc")
 	if err := copyDir(orcSrc, orcDst); err != nil {
@@ -33,11 +33,9 @@ func newLocalExecHarness(t *testing.T) *harness {
 	}
 
 	// Stage the .orc tree and commit. The worker/ directory created by
-	// newHarness contains a nested git repo at worker/test-repo/.git that
-	// must not be included in the seed: git treats it as a gitlink (mode
-	// 160000) if staged, and as untracked files if unstaged — both break
-	// SeedWorkspaceFromWorkingTree. Adding a .gitignore entry for worker/
-	// keeps it completely out of the working tree enumeration.
+	// newHarness contains a nested git repo at worker/test-repo/.git; the
+	// seed skips its gitlink entry automatically, so no .gitignore crutch is
+	// needed.
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command(args[0], args[1:]...)
@@ -46,11 +44,7 @@ func newLocalExecHarness(t *testing.T) *harness {
 			t.Fatalf("command %v failed: %v\n%s", args, err, out)
 		}
 	}
-	// Write .gitignore to exclude the worker/ directory from the seed.
-	if err := os.WriteFile(filepath.Join(h.workDir, ".gitignore"), []byte("worker/\n"), 0o644); err != nil {
-		t.Fatalf("writing .gitignore: %v", err)
-	}
-	run("git", "add", ".orc", ".gitignore")
+	run("git", "add", ".orc")
 	run("git", "commit", "-m", "add orc workflows for exec test")
 
 	return h

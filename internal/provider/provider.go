@@ -47,6 +47,12 @@ type LaunchOpts struct {
 	HomeDir  string   // home directory for workspace path resolution
 	OrcArgs  []string // extra orc flags passed through via -- (opaque)
 
+	// OrcSubcommand selects the orc subcommand the worker runs (e.g. "eval",
+	// "validate"). Empty means the default `orc run` construction. Passed to
+	// the worker as ORC_SUBCMD; the entrypoint injects the run-only flags
+	// (-w/--auto/--no-color) only for the run subcommand. Used by `horde exec`.
+	OrcSubcommand string
+
 	// SecretEnvRemap declares container-env-var-name -> host-env-var-name
 	// pairs that the docker provider must inject beyond what --env-file
 	// covers. The provider passes "-e <containerName>" to docker run so

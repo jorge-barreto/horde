@@ -2543,6 +2543,59 @@ func TestReadTokenUsage_MalformedCostsFallsThrough(t *testing.T) {
 	}
 }
 
+func TestDockerLaunch_OrcSubcommandSetsEnv(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	containerID := strings.Repeat("f", 64)
+	dir := t.TempDir()
+	script := fmt.Sprintf("printf '%%s\\n' \"$@\" > %s\necho '%s'\n", argsFile, containerID)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Launch(context.Background(), LaunchOpts{
+		Repo: "example.com/r", Ticket: "T-1", RunID: "rid1",
+		OrcSubcommand: "eval",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	joined := strings.Join(args, " ")
+	want := "-e ORC_SUBCMD=eval"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("expected %q in argv, got: %v", want, args)
+	}
+}
+
+func TestDockerLaunch_NoOrcSubcommandOmitsEnv(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	containerID := strings.Repeat("g", 64)
+	dir := t.TempDir()
+	script := fmt.Sprintf("printf '%%s\\n' \"$@\" > %s\necho '%s'\n", argsFile, containerID)
+	writeFakeDocker(t, dir, script)
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := NewDockerProvider().Launch(context.Background(), LaunchOpts{
+		Repo: "example.com/r", Ticket: "T-1", RunID: "rid2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	for i, a := range args {
+		if a == "-e" && i+1 < len(args) && strings.HasPrefix(args[i+1], "ORC_SUBCMD=") {
+			t.Fatalf("ORC_SUBCMD should be omitted when unset, got: %v", args)
+		}
+	}
+}
+
 func TestReadTokenUsage_RunResultFallback(t *testing.T) {
 	home := t.TempDir()
 	run := &store.Run{ID: "run123", Workflow: "implement-ticket", Ticket: "PROJ-1"}

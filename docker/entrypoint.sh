@@ -55,7 +55,13 @@ if [ -d /workspace/.git ]; then
     # or restored from S3 for ECS). Skip clone, go straight to running orc.
     cd /workspace
 else
-    # First run — clone the repo.
+    # First run — clone the repo. A non-run subcommand reaching here (no
+    # pre-seeded /workspace/.git) still needs REPO_URL: the early guard is
+    # gated on ORC_SUBCMD=run, so re-check here for the clone path.
+    if [ -z "${REPO_URL:-}" ]; then
+        echo "ERROR: REPO_URL not set (required to clone)" >&2
+        exit 3
+    fi
     # Use init+fetch instead of clone — volume mounts may pre-create /workspace/.
     mkdir -p /workspace
     cd /workspace || { echo "ERROR: cd /workspace failed" >&2; exit 3; }

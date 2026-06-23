@@ -66,6 +66,15 @@ With --json, output is a single JSON object with a status field
 			timeout := cmd.Duration("timeout")
 			jsonOut := cmd.Bool("json")
 
+			// --local is docker-only; reject an explicit aws-ecs request before
+			// the (expensive) AWS/SSM/Dynamo bring-up. Auto-detect (no --provider)
+			// still needs the resolution, so the in-Action gate below remains.
+			if local && cmd.String("provider") == "aws-ecs" {
+				if err := execLocalAllowed("aws-ecs"); err != nil {
+					return err
+				}
+			}
+
 			prov, st, maxConcurrent, provName, awsCfg, hordeCfg, cleanup, err := initProviderAndStore(ctx, cmd)
 			if err != nil {
 				return err
@@ -102,12 +111,11 @@ With --json, output is a single JSON object with a status field
 			resolver := newResolver(cmd)
 			repo, err := resolveCanonicalRepo(hordeCfg, resolver)
 			if err != nil {
-				// On the --local path there may be no git remote. The worker
-				// entrypoint has an EARLY guard `if [ -z "${REPO_URL:-}" ]` that
-				// fires before the skip-clone branch, so even a --local run must
-				// launch with a non-empty Repo/REPO_URL. Substitute a synthetic
-				// key derived from the working-directory name so the run is
-				// scoped to this project without requiring a remote.
+				// On the --local path there may be no git remote. Run.Repo is
+				// the store/scoping key (the repo column partitioning run history
+				// and horde list), so a no-remote --local run needs a non-empty
+				// synthetic bucket key to keep runs grouped by project. The
+				// working-directory name serves as that synthetic key.
 				if local {
 					repo = "local/" + filepath.Base(cwd)
 				} else {
@@ -159,10 +167,12 @@ With --json, output is a single JSON object with a status field
 				if local {
 					wsDir := provider.WorkspacePath(homeDir, id)
 					if err := os.MkdirAll(wsDir, 0o777); err != nil {
+						os.RemoveAll(wsDir) // don't leave a partial tree for retry to resume against
 						markFailed(ctx, st, id)
 						return fmt.Errorf("creating workspace: %w", err)
 					}
 					if err := provider.SeedWorkspaceFromWorkingTree(ctx, cwd, wsDir); err != nil {
+						os.RemoveAll(wsDir) // don't leave a partial tree for retry to resume against
 						markFailed(ctx, st, id)
 						return fmt.Errorf("seeding local workspace: %w", err)
 					}

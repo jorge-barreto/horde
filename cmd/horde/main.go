@@ -144,6 +144,7 @@ detailed documentation.`,
 		},
 		Commands: []*cli.Command{
 			launchCmd(),
+			execCmd(),
 			retryCmd(),
 			statusCmd(),
 			logsCmd(),

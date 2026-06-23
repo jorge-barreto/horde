@@ -73,12 +73,21 @@ else
     fi
 fi
 
-# Build orc command
-ORC_ARGS="--auto --no-color"
-if [ -n "${WORKFLOW:-}" ]; then
-    ORC_CMD="orc run -w $WORKFLOW $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+# Build orc command. ORC_SUBCMD selects the orc subcommand (default "run").
+# The run-only flags (-w / --auto / --no-color) are injected ONLY for `run`;
+# other subcommands (eval, validate, test, …) get exactly what horde passed
+# in ORC_EXTRA_ARGS — horde owns their full argv. For `run`, the construction
+# below is byte-identical to the historical one.
+ORC_SUBCMD="${ORC_SUBCMD:-run}"
+if [ "$ORC_SUBCMD" = "run" ]; then
+    ORC_ARGS="--auto --no-color"
+    if [ -n "${WORKFLOW:-}" ]; then
+        ORC_CMD="orc run -w $WORKFLOW $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+    else
+        ORC_CMD="orc run $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+    fi
 else
-    ORC_CMD="orc run $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+    ORC_CMD="orc $ORC_SUBCMD ${ORC_EXTRA_ARGS:-}"
 fi
 
 # ECS path: sync session state and artifacts through S3 so retries can

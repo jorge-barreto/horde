@@ -234,6 +234,44 @@ EOF
     fi
 }
 
+# -- Test 12: ORC_SUBCMD=eval -> `orc eval`, no run-only flags injected
+t12_subcmd_eval() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case --report" \
+        run_entrypoint)
+    if grep -q "^orc eval my-case --report" "$tmp/log" \
+        && ! grep -qE "orc eval.*( -w | --auto| --no-color)" "$tmp/log"; then
+        pass "ORC_SUBCMD=eval runs orc eval with no run-only flags"
+    else
+        fail "ORC_SUBCMD=eval: wrong orc args; log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 13: ORC_SUBCMD unset -> identical to today's `orc run` construction
+t13_subcmd_unset_is_run() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok WORKFLOW=plan \
+        run_entrypoint)
+    if grep -q "^orc run -w plan T-1 --auto --no-color" "$tmp/log"; then
+        pass "ORC_SUBCMD unset reproduces orc run construction"
+    else
+        fail "ORC_SUBCMD unset: not the run path; log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 14: ORC_SUBCMD=run -> same as unset (explicit run is still the run path)
+t14_subcmd_run_explicit() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok WORKFLOW=plan \
+        ORC_SUBCMD=run run_entrypoint)
+    if grep -q "^orc run -w plan T-1 --auto --no-color" "$tmp/log"; then
+        pass "ORC_SUBCMD=run is the run path"
+    else
+        fail "ORC_SUBCMD=run: not the run path; log=$(cat "$tmp/log")"
+    fi
+}
+
 t1_missing_repo_url
 t2_missing_ticket
 t3_missing_git_token
@@ -245,5 +283,8 @@ t8_no_bucket_no_aws
 t9_bucket_triggers_uploads
 t10_exit_code_propagated
 t11_sigterm_exit_code
+t12_subcmd_eval
+t13_subcmd_unset_is_run
+t14_subcmd_run_explicit
 
 exit "$FAIL"

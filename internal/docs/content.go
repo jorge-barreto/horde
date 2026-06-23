@@ -1555,7 +1555,7 @@ See 'horde docs hydrate' to pull the artifacts locally for offline inspection.
 
 Under --json, stdout carries a single JSON object:
 
-    {"status":"launched","run_id":"a1b2c3d4e5f6","orc_argv":["eval","my-case","--report"],"local":true}
+    {"status":"launched","run_id":"a1b2c3d4e5f6","orc_args":["eval","my-case","--report"],"local":true}
 
 Status is "launched" on success or "capped" when at the concurrency limit
 (exit 0 for both; branch on "status"). See 'horde docs json'.

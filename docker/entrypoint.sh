@@ -1,10 +1,16 @@
 #!/bin/bash
 set -uo pipefail
 
-# Explicit guards before set -u would trip with exit 1: horde uses exit 3
-# to distinguish setup errors from run failures when mapping status.
-if [ -z "${REPO_URL:-}" ]; then echo "ERROR: REPO_URL not set" >&2; exit 3; fi
-if [ -z "${TICKET:-}" ]; then echo "ERROR: TICKET not set" >&2; exit 3; fi
+# ORC_SUBCMD selects the orc subcommand (default "run"). REPO_URL and TICKET
+# are required only for `orc run` (the clone + ticket-driven run path); a
+# non-run subcommand (eval/validate/test via `horde exec`) needs neither —
+# it executes against an already-seeded/cloned workspace and takes its own
+# args. GIT_TOKEN is always required (git credential helper).
+ORC_SUBCMD="${ORC_SUBCMD:-run}"
+if [ "$ORC_SUBCMD" = "run" ]; then
+    if [ -z "${REPO_URL:-}" ]; then echo "ERROR: REPO_URL not set" >&2; exit 3; fi
+    if [ -z "${TICKET:-}" ]; then echo "ERROR: TICKET not set" >&2; exit 3; fi
+fi
 if [ -z "${GIT_TOKEN:-}" ]; then echo "ERROR: GIT_TOKEN not set" >&2; exit 3; fi
 
 # GIT_ASKPASS is set in the Dockerfile for container-wide availability.

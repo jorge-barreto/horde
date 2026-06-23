@@ -272,6 +272,36 @@ t14_subcmd_run_explicit() {
     fi
 }
 
+# -- Test 15: ORC_SUBCMD=eval with empty TICKET -> no exit 3, reaches orc eval
+# Gate test: non-run subcommands must NOT be blocked by the TICKET guard.
+t15_subcmd_eval_no_ticket_ok() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET= GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case" \
+        run_entrypoint)
+    local rc=$?
+    if [ "$rc" -ne 3 ] && grep -q "^orc eval my-case" "$tmp/log"; then
+        pass "ORC_SUBCMD=eval with empty TICKET reaches orc eval (no guard trip)"
+    else
+        fail "ORC_SUBCMD=eval empty TICKET: rc=$rc log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 16: ORC_SUBCMD=eval with empty REPO_URL -> no exit 3, reaches orc eval
+# Gate test: non-run subcommands must NOT be blocked by the REPO_URL guard.
+t16_subcmd_eval_no_repo_url_ok() {
+    local tmp
+    tmp=$(REPO_URL= TICKET=T-1 GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case" \
+        run_entrypoint)
+    local rc=$?
+    if [ "$rc" -ne 3 ] && grep -q "^orc eval my-case" "$tmp/log"; then
+        pass "ORC_SUBCMD=eval with empty REPO_URL reaches orc eval (no guard trip)"
+    else
+        fail "ORC_SUBCMD=eval empty REPO_URL: rc=$rc log=$(cat "$tmp/log")"
+    fi
+}
+
 t1_missing_repo_url
 t2_missing_ticket
 t3_missing_git_token
@@ -286,5 +316,7 @@ t11_sigterm_exit_code
 t12_subcmd_eval
 t13_subcmd_unset_is_run
 t14_subcmd_run_explicit
+t15_subcmd_eval_no_ticket_ok
+t16_subcmd_eval_no_repo_url_ok
 
 exit "$FAIL"

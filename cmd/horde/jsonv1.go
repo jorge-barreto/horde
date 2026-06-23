@@ -338,6 +338,25 @@ func partialResultsToV1(run *store.Run) ResultsV1 {
 	}
 }
 
+// ExecV1 is the `horde exec --json` contract. orc_args is the opaque argv
+// passed after `--`. status is launched|capped (error uses the ErrorV1
+// envelope). local reflects whether the run was seeded from the working tree.
+type ExecV1 struct {
+	Status  string   `json:"status"`
+	RunID   *string  `json:"run_id"`
+	OrcArgs []string `json:"orc_args"`
+	Local   bool     `json:"local"`
+	Reason  string   `json:"reason,omitempty"`
+}
+
+func execLaunchedV1(runID string, orcArgs []string, local bool) ExecV1 {
+	return ExecV1{Status: "launched", RunID: &runID, OrcArgs: orcArgs, Local: local}
+}
+
+func execCappedV1(orcArgs []string, local bool, reason string) ExecV1 {
+	return ExecV1{Status: "capped", OrcArgs: orcArgs, Local: local, Reason: reason}
+}
+
 // LaunchV1 is the stable JSON contract for `horde launch --json`. The Status
 // enum (launched|capped|duplicate|error) lets programmatic callers branch
 // without grepping stderr wording. RunID and ExistingRunID are pointers so

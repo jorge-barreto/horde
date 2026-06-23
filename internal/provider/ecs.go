@@ -194,6 +194,12 @@ func (p *ECSProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchResul
 			Value: aws.String(strings.Join(opts.OrcArgs, " ")),
 		})
 	}
+	if opts.OrcSubcommand != "" {
+		env = append(env, ecstypes.KeyValuePair{
+			Name:  aws.String("ORC_SUBCMD"),
+			Value: aws.String(opts.OrcSubcommand),
+		})
+	}
 	// Per-launch env vars (horde launch --env KEY=VALUE), as environment
 	// overrides. Sorted for deterministic ordering. See the secret-precedence
 	// caveat in the function-level comment above.

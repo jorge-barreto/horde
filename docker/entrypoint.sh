@@ -1,10 +1,16 @@
 #!/bin/bash
 set -uo pipefail
 
-# Explicit guards before set -u would trip with exit 1: horde uses exit 3
-# to distinguish setup errors from run failures when mapping status.
-if [ -z "${REPO_URL:-}" ]; then echo "ERROR: REPO_URL not set" >&2; exit 3; fi
-if [ -z "${TICKET:-}" ]; then echo "ERROR: TICKET not set" >&2; exit 3; fi
+# ORC_SUBCMD selects the orc subcommand (default "run"). REPO_URL and TICKET
+# are required only for `orc run` (the clone + ticket-driven run path); a
+# non-run subcommand (eval/validate/test via `horde exec`) needs neither —
+# it executes against an already-seeded/cloned workspace and takes its own
+# args. GIT_TOKEN is always required (git credential helper).
+ORC_SUBCMD="${ORC_SUBCMD:-run}"
+if [ "$ORC_SUBCMD" = "run" ]; then
+    if [ -z "${REPO_URL:-}" ]; then echo "ERROR: REPO_URL not set" >&2; exit 3; fi
+    if [ -z "${TICKET:-}" ]; then echo "ERROR: TICKET not set" >&2; exit 3; fi
+fi
 if [ -z "${GIT_TOKEN:-}" ]; then echo "ERROR: GIT_TOKEN not set" >&2; exit 3; fi
 
 # GIT_ASKPASS is set in the Dockerfile for container-wide availability.
@@ -49,7 +55,13 @@ if [ -d /workspace/.git ]; then
     # or restored from S3 for ECS). Skip clone, go straight to running orc.
     cd /workspace
 else
-    # First run — clone the repo.
+    # First run — clone the repo. A non-run subcommand reaching here (no
+    # pre-seeded /workspace/.git) still needs REPO_URL: the early guard is
+    # gated on ORC_SUBCMD=run, so re-check here for the clone path.
+    if [ -z "${REPO_URL:-}" ]; then
+        echo "ERROR: REPO_URL not set (required to clone)" >&2
+        exit 3
+    fi
     # Use init+fetch instead of clone — volume mounts may pre-create /workspace/.
     mkdir -p /workspace
     cd /workspace || { echo "ERROR: cd /workspace failed" >&2; exit 3; }
@@ -73,12 +85,21 @@ else
     fi
 fi
 
-# Build orc command
-ORC_ARGS="--auto --no-color"
-if [ -n "${WORKFLOW:-}" ]; then
-    ORC_CMD="orc run -w $WORKFLOW $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+# Build orc command. ORC_SUBCMD selects the orc subcommand (default "run").
+# The run-only flags (-w / --auto / --no-color) are injected ONLY for `run`;
+# other subcommands (eval, validate, test, …) get exactly what horde passed
+# in ORC_EXTRA_ARGS — horde owns their full argv. For `run`, the construction
+# below is byte-identical to the historical one.
+ORC_SUBCMD="${ORC_SUBCMD:-run}"
+if [ "$ORC_SUBCMD" = "run" ]; then
+    ORC_ARGS="--auto --no-color"
+    if [ -n "${WORKFLOW:-}" ]; then
+        ORC_CMD="orc run -w $WORKFLOW $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+    else
+        ORC_CMD="orc run $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+    fi
 else
-    ORC_CMD="orc run $TICKET $ORC_ARGS ${ORC_EXTRA_ARGS:-}"
+    ORC_CMD="orc $ORC_SUBCMD ${ORC_EXTRA_ARGS:-}"
 fi
 
 # ECS path: sync session state and artifacts through S3 so retries can

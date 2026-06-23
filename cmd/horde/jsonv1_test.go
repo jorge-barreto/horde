@@ -267,6 +267,20 @@ func TestLaunchQueuedV1Shape(t *testing.T) {
 	}
 }
 
+func TestExecLaunchedV1_Marshal(t *testing.T) {
+	v := execLaunchedV1("rid9", []string{"eval", "my-case"}, true)
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{`"status":"launched"`, `"run_id":"rid9"`, `"local":true`, `"eval"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+}
+
 func TestLaunchLaunchedV1EchoesCapacity(t *testing.T) {
 	v := launchLaunchedV1("run123", "T-1", "impl", "main", "on-demand")
 	if v.Status != "launched" {

@@ -135,6 +135,9 @@ func (p *DockerProvider) Launch(ctx context.Context, opts LaunchOpts) (*LaunchRe
 	if len(opts.OrcArgs) > 0 {
 		args = append(args, "-e", "ORC_EXTRA_ARGS="+strings.Join(opts.OrcArgs, " "))
 	}
+	if opts.OrcSubcommand != "" {
+		args = append(args, "-e", "ORC_SUBCMD="+opts.OrcSubcommand)
+	}
 	if opts.EnvFile != "" {
 		args = append(args, "--env-file", opts.EnvFile)
 	}

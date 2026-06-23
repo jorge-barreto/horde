@@ -91,6 +91,12 @@ var topics = []Topic{
 		Summary: "Spot-by-default, --capacity, and automatic resume on interruption",
 		Content: topicSpot,
 	},
+	{
+		Name:    "exec",
+		Title:   "Running Arbitrary orc Subcommands (horde exec)",
+		Summary: "General orc passthrough for eval, validate, test, … with optional local-source seeding",
+		Content: topicExec,
+	},
 }
 
 const topicQuickstart = `Quick Start
@@ -1442,6 +1448,117 @@ EMISSION SEMANTICS
 Events are best-effort and emitted AFTER the authoritative DynamoDB write — the
 store is the source of truth; an event is a notification of truth. A failed
 publish is logged and never reverses a run's recorded state.
+`
+
+const topicExec = `Running Arbitrary orc Subcommands (horde exec)
+===============================================
+
+'horde exec' runs any orc subcommand — eval, validate, test, or anything else
+— in a worker container and tracks the result as a horde run. It is the
+general passthrough; 'horde launch' is the specialized path for 'orc run'
+(workflow/ticket identity, duplicate guard, structured result capture).
+
+Synopsis
+--------
+
+    horde exec [--local] [--json] [--timeout D] -- <orc-subcommand> [orc-args...]
+
+Everything after -- is the full opaque orc argv. horde does not parse orc's
+verb set — it passes the args through unchanged. The first arg is the orc
+subcommand; subsequent args are its flags and arguments.
+
+Examples:
+
+    horde exec -- eval my-case --report
+    horde exec -- validate my-workflow
+    horde exec --local -- eval my-case --report
+    horde exec --json -- eval my-case
+
+There is NO positional subcommand before --; '--' is the separator. A missing
+-- or empty orc argv is a usage error.
+
+--local: local-source seeding (docker only)
+-------------------------------------------
+
+Without --local, exec clones the repo (same as launch). This works on both
+providers and records the run in the normal store (local SQLite on docker,
+shared DynamoDB on aws-ecs).
+
+With --local, exec seeds the run's workspace directly from the current working
+tree before launching the container:
+
+  - Copies tracked files including uncommitted edits.
+  - Copies untracked files, respecting .gitignore (so .env, node_modules,
+    and build artifacts are NOT dragged in).
+  - Copies .git so the container sees a proper git repo.
+  - Does NOT bind-mount or mutate $PWD — the run operates on a snapshot copy
+    at ~/.horde/workspaces/<run-id>/, the same per-run workspace model every
+    other horde command uses.
+  - Recorded only in local SQLite history (~/.horde/horde.db). No AWS needed
+    — just Docker + your .env + your working tree.
+  - Requires no git remote. If no remote is found, a synthetic local key
+    is used so the run still groups in 'horde list'; it proceeds rather than
+    erroring.
+
+--local is Docker-only. On aws-ecs it returns an error:
+
+    --local requires the docker provider; on aws-ecs use a committed source
+    (it has no host working tree to seed from)
+
+This is by design, not a limitation: an uncommitted local run belongs in
+private local history, not in the team's shared DynamoDB. Run against ECS to
+evaluate committed cases; use --local for working-tree iteration.
+
+Typical eval-tuning loop
+------------------------
+
+    # Edit a rubric or prompt, then run eval without committing or pushing:
+    horde exec --local -- eval my-case --report
+
+    # Check logs (run id is printed on stdout):
+    horde logs <run-id> --follow
+
+    # When done, hydrate to get the .orc/ tree locally:
+    horde hydrate <run-id> --into /tmp/eval-out
+
+Read scores from the streamed logs and from the copied-back report file under
+.orc/. horde copies the whole .orc/ tree as opaque artifacts — there is no
+eval-score parsing in v1.
+
+Relationship to horde launch
+-----------------------------
+
+    horde launch <ticket> --workflow <wf> [-- orc-args]
+
+launch is specialized for 'orc run': requires --workflow, enforces a
+(workflow, ticket) duplicate guard, injects --auto and --no-color, and
+writes structured results. Use launch for production orc runs.
+
+    horde exec [--local] -- <subcommand> [args]
+
+exec is the general passthrough for everything else. No --workflow required,
+no duplicate guard, no run-only flag injection. horde exec run -- … would
+work technically but is a strictly less-helpful launch — use launch for
+orc run.
+
+Result capture
+--------------
+
+horde copies back the whole .orc/ tree (audit/ and artifacts/) as opaque
+artifacts, the same mechanism launch uses. No eval-score parsing in v1 — read
+scores from the run logs and from the copied-back .orc/artifacts/ report file.
+
+See 'horde docs hydrate' to pull the artifacts locally for offline inspection.
+
+--json
+------
+
+Under --json, stdout carries a single JSON object:
+
+    {"status":"launched","run_id":"a1b2c3d4e5f6","orc_args":["eval","my-case","--report"],"local":true}
+
+Status is "launched" on success or "capped" when at the concurrency limit
+(exit 0 for both; branch on "status"). See 'horde docs json'.
 `
 
 const topicSpot = `horde and Fargate Spot

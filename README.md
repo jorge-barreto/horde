@@ -234,6 +234,27 @@ The first `horde launch` builds the worker Docker image automatically. Subsequen
 
 `horde retry` resumes a run that ended in a recoverable state — `failed`, `killed`, `timed_out` (orc phase timeout), or `rate_limited` (Anthropic limit). On Docker the preserved local workspace is reused in place. On ECS a fresh Fargate task launches with the same run ID and restores what the worker synced to S3 before the task was reaped: the agent session (`~/.claude`), the full working tree (`/workspace`, including committed and uncommitted changes), and the artifacts/audit — so orc resumes where it left off.
 
+## Running arbitrary orc subcommands (`horde exec`)
+
+`horde launch` is the opinionated `orc run` path (workflow, ticket identity, duplicate guard). `horde exec` is the general passthrough for every other orc subcommand — `eval`, `validate`, `test`, anything else.
+
+```bash
+# Run orc eval against the committed tree (works on docker and aws-ecs):
+horde exec -- eval my-case --report
+
+# Run against your local working tree, including uncommitted edits (docker only):
+horde exec --local -- eval my-case --report
+
+# Stream logs while it runs:
+horde logs <run-id> --follow
+```
+
+Everything after `--` is the full opaque orc argv; horde does not interpret it. There is no positional subcommand before `--`.
+
+`--local` seeds the run's workspace from the current working tree — tracked files, uncommitted edits, and untracked files — respecting `.gitignore`, without bind-mounting or mutating `$PWD`. The run is recorded only in local SQLite history (`~/.horde/horde.db`); no AWS or git remote required. On `aws-ecs`, `--local` is an error (uncommitted-source runs belong in private local history, not shared DynamoDB).
+
+horde copies back the whole `.orc/` tree as opaque artifacts. Read eval scores from the streamed logs or from the copied-back report file; use `horde hydrate <run-id> --into <dir>` to pull artifacts locally for `orc improve` / `orc doctor`. See `horde docs exec`.
+
 ## Worker Image
 
 horde uses a two-layer Docker image system:

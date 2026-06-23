@@ -44,6 +44,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Superpowers process artifacts (brainstorming specs, implementation plans,
+# review findings) — local working notes, not version-controlled.
+docs/superpowers/
+
 # CDK
 cdk/node_modules/
 cdk/lib/**/*.js

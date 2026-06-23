@@ -234,6 +234,95 @@ EOF
     fi
 }
 
+# -- Test 12: ORC_SUBCMD=eval -> `orc eval`, no run-only flags injected
+t12_subcmd_eval() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case --report" \
+        run_entrypoint)
+    if grep -q "^orc eval my-case --report" "$tmp/log" \
+        && ! grep -qE "orc eval.*( -w | --auto| --no-color)" "$tmp/log"; then
+        pass "ORC_SUBCMD=eval runs orc eval with no run-only flags"
+    else
+        fail "ORC_SUBCMD=eval: wrong orc args; log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 13: ORC_SUBCMD unset -> identical to today's `orc run` construction
+t13_subcmd_unset_is_run() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok WORKFLOW=plan \
+        run_entrypoint)
+    if grep -q "^orc run -w plan T-1 --auto --no-color" "$tmp/log"; then
+        pass "ORC_SUBCMD unset reproduces orc run construction"
+    else
+        fail "ORC_SUBCMD unset: not the run path; log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 14: ORC_SUBCMD=run -> same as unset (explicit run is still the run path)
+t14_subcmd_run_explicit() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET=T-1 GIT_TOKEN=tok WORKFLOW=plan \
+        ORC_SUBCMD=run run_entrypoint)
+    if grep -q "^orc run -w plan T-1 --auto --no-color" "$tmp/log"; then
+        pass "ORC_SUBCMD=run is the run path"
+    else
+        fail "ORC_SUBCMD=run: not the run path; log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 15: ORC_SUBCMD=eval with empty TICKET -> no exit 3, reaches orc eval
+# Gate test: non-run subcommands must NOT be blocked by the TICKET guard.
+t15_subcmd_eval_no_ticket_ok() {
+    local tmp
+    tmp=$(REPO_URL=example.com/r.git TICKET= GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case" \
+        run_entrypoint)
+    local rc=$?
+    if [ "$rc" -ne 3 ] && grep -q "^orc eval my-case" "$tmp/log"; then
+        pass "ORC_SUBCMD=eval with empty TICKET reaches orc eval (no guard trip)"
+    else
+        fail "ORC_SUBCMD=eval empty TICKET: rc=$rc log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 16: ORC_SUBCMD=eval with empty REPO_URL -> no exit 3, reaches orc eval
+# Gate test: non-run subcommands must NOT be blocked by the REPO_URL guard.
+t16_subcmd_eval_no_repo_url_ok() {
+    local tmp
+    tmp=$(REPO_URL= TICKET=T-1 GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case" \
+        run_entrypoint)
+    local rc=$?
+    if [ "$rc" -ne 3 ] && grep -q "^orc eval my-case" "$tmp/log"; then
+        pass "ORC_SUBCMD=eval with empty REPO_URL reaches orc eval (no guard trip)"
+    else
+        fail "ORC_SUBCMD=eval empty REPO_URL: rc=$rc log=$(cat "$tmp/log")"
+    fi
+}
+
+# -- Test 17: non-run subcommand with empty REPO_URL and no pre-seeded .git ->
+# clone path triggers the explicit guard and exits 3 with a clear message.
+# Contrast with t16 (seeded path): seeded→proceeds, unseeded→clear error.
+t17_clone_path_no_repo_url_exits3() {
+    # fast_path=0 so /workspace/.git is NOT pre-created: falls into clone else branch.
+    # ORC_SUBCMD=eval so the early run-only REPO_URL guard is skipped.
+    # REPO_URL is empty so the new clone-path guard must fire.
+    local tmp
+    tmp=$(REPO_URL= TICKET=T-1 GIT_TOKEN=tok \
+        ORC_SUBCMD=eval ORC_EXTRA_ARGS="my-case" \
+        run_entrypoint 0)
+    local rc=$?
+    local combined
+    combined="$(cat "$tmp/out" "$tmp/err" 2>/dev/null)"
+    if [ "$rc" -eq 3 ] && echo "$combined" | grep -q "REPO_URL not set (required to clone)"; then
+        pass "clone path with empty REPO_URL exits 3 with clear error (not opaque git failure)"
+    else
+        fail "clone path empty REPO_URL: rc=$rc out=$combined"
+    fi
+}
+
 t1_missing_repo_url
 t2_missing_ticket
 t3_missing_git_token
@@ -245,5 +334,11 @@ t8_no_bucket_no_aws
 t9_bucket_triggers_uploads
 t10_exit_code_propagated
 t11_sigterm_exit_code
+t12_subcmd_eval
+t13_subcmd_unset_is_run
+t14_subcmd_run_explicit
+t15_subcmd_eval_no_ticket_ok
+t16_subcmd_eval_no_repo_url_ok
+t17_clone_path_no_repo_url_exits3
 
 exit "$FAIL"

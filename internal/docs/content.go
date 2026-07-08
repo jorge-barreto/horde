@@ -1055,6 +1055,7 @@ Usage
     import * as ecr from "aws-cdk-lib/aws-ecr";
     import * as ecs from "aws-cdk-lib/aws-ecs";
     import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+    import * as ssm from "aws-cdk-lib/aws-ssm";
     import { HordeWorker } from "@horde.io/cdk";
 
     const app = new App();

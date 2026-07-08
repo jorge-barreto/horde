@@ -99,7 +99,8 @@ export class HordeWorker extends Construct {
   /**
    * Task execution role used by the ECS agent to pull the image, write logs,
    * and resolve secrets at container start. Bead 5fh.6 layers the inline
-   * `secretsmanager:GetSecretValue` policy on top.
+   * secret-read policy (Secrets Manager `GetSecretValue` or SSM `GetParameters`,
+   * per the backend each secret uses) on top.
    */
   public readonly executionRole: iam.Role;
 

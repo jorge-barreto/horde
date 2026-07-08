@@ -18,8 +18,8 @@ function synth() {
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {
-      CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-      GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+      CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+      GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
     },
   });
   return Template.fromStack(stack);
@@ -306,8 +306,8 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
       },
       ssmParameterPath: "/custom/horde/cfg",
     });
@@ -411,8 +411,8 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
           workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
           ecrRepository: repo,
           secrets: {
-            CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-            GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+            CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+            GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
           },
           logRetentionDays: 42,
         }),
@@ -528,10 +528,10 @@ describe("HordeWorker status-sync (5fh.12/13/14)", () => {
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
-        REVIEW_GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Review", "horde/review-git-token"),
-        STRIPE_API_KEY: secretsmanager.Secret.fromSecretNameV2(stack, "Stripe", "prepdesk/stripe-api-key"),
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
+        REVIEW_GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Review", "horde/review-git-token")),
+        STRIPE_API_KEY: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Stripe", "prepdesk/stripe-api-key")),
       },
     });
     const t = Template.fromStack(stack);
@@ -583,8 +583,8 @@ function synthWithProps(extra: Record<string, unknown>): Template {
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {
-      CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-      GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+      CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+      GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
     },
     ...extra,
   });
@@ -644,8 +644,8 @@ describe("HordeWorker networkMode", () => {
         ecrRepository: repo,
         vpc,
         secrets: {
-          CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-          GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+          CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+          GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
         },
       }),
     ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
@@ -671,8 +671,8 @@ describe("HordeWorker networkMode", () => {
         vpc,
         networkMode: "private",
         secrets: {
-          CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-          GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+          CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+          GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
         },
       }),
     ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
@@ -693,8 +693,8 @@ describe("HordeWorker data durability (#62)", () => {
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
       },
       // Cast needed: the function accepts RemovalPolicy (superset of DataRemovalPolicy)
       // so that the SNAPSHOT bypass test can slip through the type guard at runtime.

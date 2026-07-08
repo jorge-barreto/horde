@@ -1,9 +1,8 @@
 import type { Duration, RemovalPolicy } from "aws-cdk-lib";
 import type { IVpc } from "aws-cdk-lib/aws-ec2";
-import type { ContainerDefinitionOptions, ContainerImage } from "aws-cdk-lib/aws-ecs";
+import type { ContainerDefinitionOptions, ContainerImage, Secret } from "aws-cdk-lib/aws-ecs";
 import type { IRepository } from "aws-cdk-lib/aws-ecr";
 import type { IBucket } from "aws-cdk-lib/aws-s3";
-import type { ISecret } from "aws-cdk-lib/aws-secretsmanager";
 
 /** Network posture for worker tasks. See `HordeWorkerProps.networkMode`. */
 export type HordeNetworkMode = "public" | "private";
@@ -21,24 +20,32 @@ export type HordeNetworkMode = "public" | "private";
 export type DataRemovalPolicy = RemovalPolicy.RETAIN | RemovalPolicy.DESTROY;
 
 /**
- * Secrets injected into the worker container at runtime via ECS Secrets
- * Manager `valueFrom` (resolved by the task execution role at container start
- * — never via plain env vars).
+ * Secrets injected into the worker container at runtime via ECS `valueFrom`
+ * (resolved by the task execution role at container start — never via plain
+ * env vars).
+ *
+ * Each entry is an `ecs.Secret`, so you choose the backend per secret:
+ *
+ *  - `ecs.Secret.fromSecretsManager(secret)` — AWS Secrets Manager
+ *    (~$0.40/secret/month).
+ *  - `ecs.Secret.fromSsmParameter(param)` — SSM SecureString. Standard-tier
+ *    SecureString is free (uses the AWS-managed `aws/ssm` KMS key) and injects
+ *    via the same `valueFrom` mechanism, so it is a cheaper drop-in with no
+ *    posture change. Reference an existing SecureString parameter, e.g.
+ *    `ssm.StringParameter.fromSecureStringParameterAttributes(...)`.
  *
  * The two canonical entries (`CLAUDE_CODE_OAUTH_TOKEN`, `GIT_TOKEN`) are
- * required. Extra entries are added via the index signature — each becomes
- * an additional task-definition `secrets:` entry with an IAM grant on
- * both the task role and the execution role. Caller must reference an
- * existing Secrets Manager secret (typically via
- * `secretsmanager.Secret.fromSecretNameV2(...)`).
+ * required. Extra entries are added via the index signature — each becomes an
+ * additional task-definition `secrets:` entry, with the execution-role read
+ * grant wired automatically by CDK for whichever backend the entry references.
  */
 export interface HordeWorkerSecrets {
   /** Claude Code OAuth token. Becomes env `CLAUDE_CODE_OAUTH_TOKEN`. */
-  readonly CLAUDE_CODE_OAUTH_TOKEN: ISecret;
+  readonly CLAUDE_CODE_OAUTH_TOKEN: Secret;
   /** Git provider token (e.g. GitHub PAT). Becomes env `GIT_TOKEN`. */
-  readonly GIT_TOKEN: ISecret;
-  /** Additional caller-declared secrets — env-var name → ISecret. */
-  readonly [envVarName: string]: ISecret;
+  readonly GIT_TOKEN: Secret;
+  /** Additional caller-declared secrets — env-var name → ecs.Secret. */
+  readonly [envVarName: string]: Secret;
 }
 
 /**

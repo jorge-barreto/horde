@@ -342,21 +342,22 @@ export class HordeWorker extends Construct {
       }),
     );
 
-    // Wire every entry in props.secrets through ecs.Secret.fromSecretsManager
-    // so the canonical pair plus any caller-declared extras flow into the
-    // task definition's secrets array. Each ISecret must already exist or
-    // be created by the caller; the construct does not create the
-    // Secrets Manager entries itself.
+    // Every entry in props.secrets is an ecs.Secret the caller built via
+    // ecs.Secret.fromSecretsManager(...) or ecs.Secret.fromSsmParameter(...).
+    // Pass them straight into the task definition's secrets array — CDK grants
+    // the execution role the right read action per backend
+    // (secretsmanager:GetSecretValue or ssm:GetParameters, plus kms:Decrypt for
+    // a customer-managed key). The construct creates no secret/parameter itself.
     const taskDefSecrets: { [k: string]: ecs.Secret } = {};
     for (const envName of Object.keys(props.secrets)) {
-      const isecret = props.secrets[envName];
-      if (!isecret) {
+      const secret = props.secrets[envName];
+      if (!secret) {
         throw new Error(
-          `HordeWorker: secrets["${envName}"] is undefined. ` +
-            `Every entry must reference a SecretsManager ISecret.`,
+          `HordeWorker: secrets["${envName}"] is undefined. Every entry must ` +
+            `be an ecs.Secret (fromSecretsManager or fromSsmParameter).`,
         );
       }
-      taskDefSecrets[envName] = ecs.Secret.fromSecretsManager(isecret);
+      taskDefSecrets[envName] = secret;
     }
     this.container = this.taskDefinition.addContainer("worker", {
       containerName: WORKER_CONTAINER_NAME,

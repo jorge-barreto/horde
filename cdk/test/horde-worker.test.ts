@@ -756,8 +756,10 @@ describe("HordeWorker data durability (#62)", () => {
 });
 
 describe("HordeWorker SSM SecureString secrets", () => {
-  // Synth a mixed-backend stack: the Claude token from SSM SecureString, the
-  // git token from Secrets Manager. Proves per-entry backend selection.
+  // Synth a mixed-backend stack: the canonical Claude token from SSM
+  // SecureString, the canonical git token from Secrets Manager, plus an
+  // index-signature EXTRA also from SSM. Proves per-entry backend selection
+  // for both the canonical pair and a caller-declared extra.
   function synthMixed() {
     const app = new App();
     const stack = new Stack(app, "MixedStack", {
@@ -766,6 +768,8 @@ describe("HordeWorker SSM SecureString secrets", () => {
     const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
     const claudeParam = ssm.StringParameter.fromSecureStringParameterAttributes(
       stack, "ClaudeParam", { parameterName: "/horde/claude", version: 1 });
+    const extraParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+      stack, "ExtraParam", { parameterName: "/horde/review-git", version: 1 });
     new HordeWorker(stack, "Horde", {
       projectSlug: "test",
       repo: "github.com/example/test",
@@ -775,6 +779,7 @@ describe("HordeWorker SSM SecureString secrets", () => {
         CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSsmParameter(claudeParam),
         GIT_TOKEN: ecs.Secret.fromSecretsManager(
           secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
+        REVIEW_GIT_TOKEN: ecs.Secret.fromSsmParameter(extraParam),
       },
     });
     return Template.fromStack(stack);
@@ -840,6 +845,38 @@ describe("HordeWorker SSM SecureString secrets", () => {
         }
       }
     }
+  });
+
+  it("wires an SSM-sourced index-signature extra secret via valueFrom + grant", () => {
+    const t = synthMixed();
+    // The extra (REVIEW_GIT_TOKEN, an SSM SecureString) is injected via
+    // valueFrom like the canonical entries — the pass-through loop is
+    // key-agnostic, so an extra gets the same treatment as the canonical pair.
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "horde-worker",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "REVIEW_GIT_TOKEN", ValueFrom: Match.anyValue() }),
+          ]),
+        }),
+      ]),
+    });
+    // Its SSM parameter is granted to the execution role (the /horde/review-git
+    // parameter appears in an ssm:GetParameters resource scope, never "*").
+    let sawExtraSsmGrant = false;
+    for (const [, p] of Object.entries(t.findResources("AWS::IAM::Policy"))) {
+      for (const s of p.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        if (!actions.some((a: string) => a?.startsWith?.("ssm:"))) continue;
+        const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+        for (const r of resources) {
+          expect(r).not.toBe("*");
+          if (JSON.stringify(r).includes("review-git")) sawExtraSsmGrant = true;
+        }
+      }
+    }
+    expect(sawExtraSsmGrant).toBe(true);
   });
 
   it("does NOT grant the task role ssm or secretsmanager read on the SSM path", () => {

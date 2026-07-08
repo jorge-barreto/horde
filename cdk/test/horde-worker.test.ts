@@ -3,6 +3,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { HordeWorker } from "../src";
 
@@ -751,5 +752,110 @@ describe("HordeWorker data durability (#62)", () => {
     expect(() =>
       synthWith({ dataRemovalPolicy: RemovalPolicy.SNAPSHOT as RemovalPolicy }),
     ).toThrow(/SNAPSHOT is not supported/);
+  });
+});
+
+describe("HordeWorker SSM SecureString secrets", () => {
+  // Synth a mixed-backend stack: the Claude token from SSM SecureString, the
+  // git token from Secrets Manager. Proves per-entry backend selection.
+  function synthMixed() {
+    const app = new App();
+    const stack = new Stack(app, "MixedStack", {
+      env: { account: "111111111111", region: "us-east-1" },
+    });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    const claudeParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+      stack, "ClaudeParam", { parameterName: "/horde/claude", version: 1 });
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "test",
+      repo: "github.com/example/test",
+      workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSsmParameter(claudeParam),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(
+          secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
+      },
+    });
+    return Template.fromStack(stack);
+  }
+
+  function execRoleActions(t: Template): string[] {
+    const policies = t.findResources("AWS::IAM::Policy");
+    const execPolicies = Object.entries(policies).filter(([, p]) =>
+      (p.Properties.Roles ?? []).some(
+        (r: { Ref?: string }) => typeof r === "object" && r.Ref?.includes("ExecutionRole"),
+      ),
+    );
+    return execPolicies
+      .flatMap(([, p]) => p.Properties.PolicyDocument.Statement ?? [])
+      .flatMap((s: { Action: string | string[] }) =>
+        Array.isArray(s.Action) ? s.Action : [s.Action],
+      );
+  }
+
+  it("grants the execution role ssm:GetParameters for an SSM-sourced secret", () => {
+    const actions = execRoleActions(synthMixed());
+    expect(actions).toContain("ssm:GetParameters");
+    // The Secrets Manager entry is still granted alongside it.
+    expect(actions).toContain("secretsmanager:GetSecretValue");
+  });
+
+  it("scopes the ssm grant to the parameter ARN, never '*'", () => {
+    const t = synthMixed();
+    const policies = t.findResources("AWS::IAM::Policy");
+    for (const [, p] of Object.entries(policies)) {
+      for (const s of p.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        if (actions.some((a: string) => a?.startsWith?.("ssm:"))) {
+          const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+          for (const r of resources) {
+            expect(r).not.toBe("*");
+          }
+        }
+      }
+    }
+  });
+
+  it("injects the SSM-sourced secret via valueFrom, not a plain env var", () => {
+    const t = synthMixed();
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "horde-worker",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "CLAUDE_CODE_OAUTH_TOKEN", ValueFrom: Match.anyValue() }),
+          ]),
+        }),
+      ]),
+    });
+    const tds = t.findResources("AWS::ECS::TaskDefinition");
+    for (const td of Object.values(tds)) {
+      for (const c of td.Properties.ContainerDefinitions ?? []) {
+        for (const e of c.Environment ?? []) {
+          expect(e.Name).not.toBe("CLAUDE_CODE_OAUTH_TOKEN");
+        }
+      }
+    }
+  });
+
+  it("does NOT grant the task role ssm or secretsmanager read on the SSM path", () => {
+    const t = synthMixed();
+    const policies = t.findResources("AWS::IAM::Policy");
+    for (const [, policy] of Object.entries(policies)) {
+      const roles = policy.Properties.Roles ?? [];
+      const isTaskRolePolicy = roles.some((r: { Ref?: string }) =>
+        typeof r === "object" && r.Ref?.includes("TaskRole") && !r.Ref?.includes("ExecutionRole"),
+      );
+      if (!isTaskRolePolicy) continue;
+      for (const s of policy.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        for (const a of actions) {
+          const action = typeof a === "string" ? a : "";
+          expect(action).not.toMatch(/^secretsmanager:/);
+          expect(action).not.toMatch(/^ssm:GetParameter/);
+        }
+      }
+    }
   });
 });

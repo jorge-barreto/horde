@@ -32,10 +32,12 @@ new HordeWorker(stack, "Horde", {
   workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
   ecrRepository: repo,
   secrets: {
-    CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(
-      stack, "ClaudeToken", "horde/claude-code-oauth-token"),
-    GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(
-      stack, "GitToken", "horde/git-token"),
+    CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(
+      secretsmanager.Secret.fromSecretNameV2(
+        stack, "ClaudeToken", "horde/claude-code-oauth-token")),
+    GIT_TOKEN: ecs.Secret.fromSecretsManager(
+      secretsmanager.Secret.fromSecretNameV2(
+        stack, "GitToken", "horde/git-token")),
   },
 });
 ```
@@ -45,6 +47,34 @@ no trailing slash). The horde CLI reads it from SSM and uses it verbatim when
 writing or querying run records, so every CI runner and dev box launching
 against this stack writes to the same `by-repo` bucket — no drift from local
 git remote variations (with vs. without `.git`, https vs. ssh).
+
+## Sourcing secrets from SSM (cheaper)
+
+Each `secrets` entry is an `ecs.Secret`, so you pick the backend per secret.
+AWS Secrets Manager charges ~$0.40/secret/month; **standard-tier SSM
+SecureString is free** (it uses the AWS-managed `aws/ssm` KMS key) and ECS
+injects it through the same `valueFrom` mechanism — no plain env var, same
+security posture. Point an entry at an existing SecureString parameter to avoid
+the per-secret charge:
+
+```ts
+import * as ssm from "aws-cdk-lib/aws-ssm";
+
+const claudeParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+  stack, "ClaudeToken", { parameterName: "/horde/claude-code-oauth-token", version: 1 });
+
+new HordeWorker(stack, "Horde", {
+  // ...required props...
+  secrets: {
+    CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSsmParameter(claudeParam),  // SSM (free)
+    GIT_TOKEN: ecs.Secret.fromSecretsManager(gitSecret),                // or Secrets Manager
+  },
+});
+```
+
+The construct never creates the secret or parameter — you reference an existing
+one, and the execution role's read grant (`ssm:GetParameters`, plus `kms:Decrypt`
+for a customer-managed key) is wired automatically.
 
 ## Data durability & teardown
 

@@ -72,8 +72,8 @@ const worker = new HordeWorker(stack, "Worker", {
   ecrRepository: repo,
   workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
   secrets: {
-    CLAUDE_CODE_OAUTH_TOKEN: claudeSecret,
-    GIT_TOKEN: gitSecret,
+    CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(claudeSecret),
+    GIT_TOKEN: ecs.Secret.fromSecretsManager(gitSecret),
   },
   // The full TestECS_* suite runs ~17 tests in parallel, each launching a
   // Fargate task. The construct default (5) rate-limits the suite; bump

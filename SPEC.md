@@ -424,7 +424,7 @@ Validation checks that the keys are defined, not that the values are valid — b
 
 ### ECS Provider (v0.2)
 
-Secrets are injected via Secrets Manager `valueFrom` in the ECS task definition — never as plain environment variables. The CDK construct wires this up. Developers never handle secrets directly in horde config.
+Secrets are injected via `valueFrom` in the ECS task definition — never as plain environment variables. Each secret is sourced from either Secrets Manager or SSM SecureString (chosen per entry; standard-tier SSM SecureString is free, so it is a cheaper drop-in with the same `valueFrom` posture). The CDK construct wires this up. Developers never handle secrets directly in horde config.
 
 - **API key limits**: Anthropic API key with usage limits set at the key level.
 - **Scoped git token**: Fine-grained GitHub PAT — read + push to `horde/*` branches only. Cannot push to main, cannot delete branches.
@@ -701,9 +701,9 @@ The construct creates:
 - Fargate task definition with the worker image (plus any `sidecars` — extra
   containers sharing the task's network namespace, reachable on `localhost`;
   CDK-only, see `horde docs cdk`)
-- Secrets injected via `valueFrom` (Secrets Manager ARN injection)
-- IAM task role (scoped: S3 write to artifacts bucket, Secrets Manager read for secrets)
-- IAM execution role (ECR pull, CloudWatch Logs write)
+- Secrets injected via `valueFrom` (Secrets Manager ARN or SSM SecureString, per entry)
+- IAM task role (scoped: S3 write to artifacts bucket) — secret reads are granted to the execution role, not the task role
+- IAM execution role (ECR pull, CloudWatch Logs write, and read on each secret's backing store — Secrets Manager `GetSecretValue` or SSM `GetParameters`, per the backend each secret uses)
 - CloudWatch log group
 - S3 bucket for artifacts (if not provided)
 - DynamoDB table (`horde-runs`) with GSIs for repo, ticket, and status queries

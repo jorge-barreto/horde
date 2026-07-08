@@ -21,8 +21,8 @@ function synth(extra: Partial<HordeWorkerProps> = {}): Template {
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {
-      CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-      GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+      CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+      GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
     },
     ...extra,
   });

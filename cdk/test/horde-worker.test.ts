@@ -3,6 +3,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { HordeWorker } from "../src";
 
@@ -18,8 +19,8 @@ function synth() {
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {
-      CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-      GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+      CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+      GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
     },
   });
   return Template.fromStack(stack);
@@ -306,8 +307,8 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
       },
       ssmParameterPath: "/custom/horde/cfg",
     });
@@ -411,8 +412,8 @@ describe("HordeWorker (5fh.3 skeleton)", () => {
           workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
           ecrRepository: repo,
           secrets: {
-            CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-            GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+            CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+            GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
           },
           logRetentionDays: 42,
         }),
@@ -528,10 +529,10 @@ describe("HordeWorker status-sync (5fh.12/13/14)", () => {
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
-        REVIEW_GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Review", "horde/review-git-token"),
-        STRIPE_API_KEY: secretsmanager.Secret.fromSecretNameV2(stack, "Stripe", "prepdesk/stripe-api-key"),
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
+        REVIEW_GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Review", "horde/review-git-token")),
+        STRIPE_API_KEY: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Stripe", "prepdesk/stripe-api-key")),
       },
     });
     const t = Template.fromStack(stack);
@@ -583,8 +584,8 @@ function synthWithProps(extra: Record<string, unknown>): Template {
     workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
     ecrRepository: repo,
     secrets: {
-      CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-      GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+      CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+      GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
     },
     ...extra,
   });
@@ -644,8 +645,8 @@ describe("HordeWorker networkMode", () => {
         ecrRepository: repo,
         vpc,
         secrets: {
-          CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-          GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+          CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+          GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
         },
       }),
     ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
@@ -671,8 +672,8 @@ describe("HordeWorker networkMode", () => {
         vpc,
         networkMode: "private",
         secrets: {
-          CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "C", "c"),
-          GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "G", "g"),
+          CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "C", "c")),
+          GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "G", "g")),
         },
       }),
     ).toThrow(/networkMode '.*' requires ec2\.SubnetType\..* subnets in the VPC, but none were found/);
@@ -693,8 +694,8 @@ describe("HordeWorker data durability (#62)", () => {
       workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git"),
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Claude", "horde/claude")),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
       },
       // Cast needed: the function accepts RemovalPolicy (superset of DataRemovalPolicy)
       // so that the SNAPSHOT bypass test can slip through the type guard at runtime.
@@ -751,5 +752,153 @@ describe("HordeWorker data durability (#62)", () => {
     expect(() =>
       synthWith({ dataRemovalPolicy: RemovalPolicy.SNAPSHOT as RemovalPolicy }),
     ).toThrow(/SNAPSHOT is not supported/);
+  });
+});
+
+describe("HordeWorker SSM SecureString secrets", () => {
+  // Synth a mixed-backend stack: the canonical Claude token from SSM
+  // SecureString, the canonical git token from Secrets Manager, plus an
+  // index-signature EXTRA also from SSM. Proves per-entry backend selection
+  // for both the canonical pair and a caller-declared extra.
+  function synthMixed() {
+    const app = new App();
+    const stack = new Stack(app, "MixedStack", {
+      env: { account: "111111111111", region: "us-east-1" },
+    });
+    const repo = ecr.Repository.fromRepositoryName(stack, "Repo", "horde-test");
+    const claudeParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+      stack, "ClaudeParam", { parameterName: "/horde/claude", version: 1 });
+    const extraParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+      stack, "ExtraParam", { parameterName: "/horde/review-git", version: 1 });
+    new HordeWorker(stack, "Horde", {
+      projectSlug: "test",
+      repo: "github.com/example/test",
+      workerImage: ecs.ContainerImage.fromRegistry("public.ecr.aws/horde/test:latest"),
+      ecrRepository: repo,
+      secrets: {
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSsmParameter(claudeParam),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(
+          secretsmanager.Secret.fromSecretNameV2(stack, "Git", "horde/git")),
+        REVIEW_GIT_TOKEN: ecs.Secret.fromSsmParameter(extraParam),
+      },
+    });
+    return Template.fromStack(stack);
+  }
+
+  function execRoleActions(t: Template): string[] {
+    const policies = t.findResources("AWS::IAM::Policy");
+    const execPolicies = Object.entries(policies).filter(([, p]) =>
+      (p.Properties.Roles ?? []).some(
+        (r: { Ref?: string }) => typeof r === "object" && r.Ref?.includes("ExecutionRole"),
+      ),
+    );
+    return execPolicies
+      .flatMap(([, p]) => p.Properties.PolicyDocument.Statement ?? [])
+      .flatMap((s: { Action: string | string[] }) =>
+        Array.isArray(s.Action) ? s.Action : [s.Action],
+      );
+  }
+
+  it("grants the execution role ssm:GetParameters for an SSM-sourced secret", () => {
+    const actions = execRoleActions(synthMixed());
+    expect(actions).toContain("ssm:GetParameters");
+    // The Secrets Manager entry is still granted alongside it.
+    expect(actions).toContain("secretsmanager:GetSecretValue");
+  });
+
+  it("scopes the ssm grant to the parameter ARN, never '*'", () => {
+    const t = synthMixed();
+    const policies = t.findResources("AWS::IAM::Policy");
+    let sawSsm = false;
+    for (const [, p] of Object.entries(policies)) {
+      for (const s of p.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        if (actions.some((a: string) => a?.startsWith?.("ssm:"))) {
+          sawSsm = true;
+          const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+          for (const r of resources) {
+            expect(r).not.toBe("*");
+          }
+        }
+      }
+    }
+    expect(sawSsm).toBe(true);
+  });
+
+  it("injects the SSM-sourced secret via valueFrom, not a plain env var", () => {
+    const t = synthMixed();
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "horde-worker",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "CLAUDE_CODE_OAUTH_TOKEN", ValueFrom: Match.anyValue() }),
+          ]),
+        }),
+      ]),
+    });
+    const tds = t.findResources("AWS::ECS::TaskDefinition");
+    for (const td of Object.values(tds)) {
+      for (const c of td.Properties.ContainerDefinitions ?? []) {
+        for (const e of c.Environment ?? []) {
+          expect(e.Name).not.toBe("CLAUDE_CODE_OAUTH_TOKEN");
+        }
+      }
+    }
+  });
+
+  it("wires an SSM-sourced index-signature extra secret via valueFrom + grant", () => {
+    const t = synthMixed();
+    // The extra (REVIEW_GIT_TOKEN, an SSM SecureString) is injected via
+    // valueFrom like the canonical entries — the pass-through loop is
+    // key-agnostic, so an extra gets the same treatment as the canonical pair.
+    t.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: "horde-worker",
+          Secrets: Match.arrayWith([
+            Match.objectLike({ Name: "REVIEW_GIT_TOKEN", ValueFrom: Match.anyValue() }),
+          ]),
+        }),
+      ]),
+    });
+    // Its SSM parameter is granted to the execution role (the /horde/review-git
+    // parameter appears in an ssm:GetParameters resource scope, never "*").
+    let sawExtraSsmGrant = false;
+    for (const [, p] of Object.entries(t.findResources("AWS::IAM::Policy"))) {
+      for (const s of p.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        if (!actions.some((a: string) => a?.startsWith?.("ssm:"))) continue;
+        const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+        for (const r of resources) {
+          expect(r).not.toBe("*");
+          if (JSON.stringify(r).includes("review-git")) sawExtraSsmGrant = true;
+        }
+      }
+    }
+    expect(sawExtraSsmGrant).toBe(true);
+  });
+
+  it("does NOT grant the task role ssm or secretsmanager read on the SSM path", () => {
+    const t = synthMixed();
+    const policies = t.findResources("AWS::IAM::Policy");
+    let sawTaskRolePolicy = false;
+    for (const [, policy] of Object.entries(policies)) {
+      const roles = policy.Properties.Roles ?? [];
+      const isTaskRolePolicy = roles.some((r: { Ref?: string }) =>
+        typeof r === "object" && r.Ref?.includes("TaskRole") && !r.Ref?.includes("ExecutionRole"),
+      );
+      if (!isTaskRolePolicy) continue;
+      sawTaskRolePolicy = true;
+      for (const s of policy.Properties.PolicyDocument.Statement ?? []) {
+        const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+        for (const a of actions) {
+          const action = typeof a === "string" ? a : "";
+          expect(action).not.toMatch(/^secretsmanager:/);
+          expect(action).not.toMatch(/^ssm:GetParameter/);
+        }
+      }
+    }
+    expect(sawTaskRolePolicy).toBe(true);
   });
 });

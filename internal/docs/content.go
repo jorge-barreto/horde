@@ -1069,10 +1069,15 @@ Usage
       workerImage: ecs.ContainerImage.fromEcrRepository(repo, "latest"),
       ecrRepository: repo,
       secrets: {
-        CLAUDE_CODE_OAUTH_TOKEN: secretsmanager.Secret.fromSecretNameV2(
-          stack, "ClaudeToken", "horde/claude-code-oauth-token"),
-        GIT_TOKEN: secretsmanager.Secret.fromSecretNameV2(
-          stack, "GitToken", "horde/git-token"),
+        // SSM SecureString is free; Secrets Manager is ~$0.40/secret/mo.
+        // Either backend works per-entry; both inject via valueFrom.
+        CLAUDE_CODE_OAUTH_TOKEN: ecs.Secret.fromSsmParameter(
+          ssm.StringParameter.fromSecureStringParameterAttributes(
+            stack, "ClaudeToken",
+            { parameterName: "/horde/claude-code-oauth-token", version: 1 })),
+        GIT_TOKEN: ecs.Secret.fromSecretsManager(
+          secretsmanager.Secret.fromSecretNameV2(
+            stack, "GitToken", "horde/git-token")),
       },
     });
 

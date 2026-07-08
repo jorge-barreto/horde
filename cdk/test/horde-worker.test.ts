@@ -804,10 +804,12 @@ describe("HordeWorker SSM SecureString secrets", () => {
   it("scopes the ssm grant to the parameter ARN, never '*'", () => {
     const t = synthMixed();
     const policies = t.findResources("AWS::IAM::Policy");
+    let sawSsm = false;
     for (const [, p] of Object.entries(policies)) {
       for (const s of p.Properties.PolicyDocument.Statement ?? []) {
         const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
         if (actions.some((a: string) => a?.startsWith?.("ssm:"))) {
+          sawSsm = true;
           const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
           for (const r of resources) {
             expect(r).not.toBe("*");
@@ -815,6 +817,7 @@ describe("HordeWorker SSM SecureString secrets", () => {
         }
       }
     }
+    expect(sawSsm).toBe(true);
   });
 
   it("injects the SSM-sourced secret via valueFrom, not a plain env var", () => {
@@ -842,12 +845,14 @@ describe("HordeWorker SSM SecureString secrets", () => {
   it("does NOT grant the task role ssm or secretsmanager read on the SSM path", () => {
     const t = synthMixed();
     const policies = t.findResources("AWS::IAM::Policy");
+    let sawTaskRolePolicy = false;
     for (const [, policy] of Object.entries(policies)) {
       const roles = policy.Properties.Roles ?? [];
       const isTaskRolePolicy = roles.some((r: { Ref?: string }) =>
         typeof r === "object" && r.Ref?.includes("TaskRole") && !r.Ref?.includes("ExecutionRole"),
       );
       if (!isTaskRolePolicy) continue;
+      sawTaskRolePolicy = true;
       for (const s of policy.Properties.PolicyDocument.Statement ?? []) {
         const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
         for (const a of actions) {
@@ -857,5 +862,6 @@ describe("HordeWorker SSM SecureString secrets", () => {
         }
       }
     }
+    expect(sawTaskRolePolicy).toBe(true);
   });
 });
